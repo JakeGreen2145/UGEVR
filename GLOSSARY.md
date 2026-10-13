@@ -83,3 +83,7 @@ _Avoid_: A collider type or an arbitrary Transform write
 **Head contact**:
 A verified overlap or contact between the tracked head's configured shape and blocking game geometry, evaluated separately from player-body collision.
 _Avoid_: A successful body sweep alone
+
+**Injector menu**:
+UGEVR's configuration controls, available on desktop and in the headset through shared settings state, with placement independent of game UI.
+_Avoid_: A captured game menu

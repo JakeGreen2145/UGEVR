@@ -1115,7 +1115,7 @@
     {
       "id": "I40",
       "capability": "Game UI placement, follow-view and alpha controls",
-      "target": "Per-game HUD placement and transparency configuration.",
+      "target": "Captured screen-space UI defaults to a flat head-following panel; compatible world-space UI keeps its placement. Profiles configure locking, geometry and transparency.",
       "evidence": "S. Alpha inversion is compatibility handling, not a blanket fix.",
       "baseline": "Absent",
       "acceptance": "Head motion and test alpha patterns reproduce each setting without hiding game content.",
@@ -1185,7 +1185,7 @@
     {
       "id": "I45",
       "capability": "Controller ray mouse for injector menu",
-      "target": "A controller pointer for UGEVR settings and, separately, tested Unity game-UI adapters.",
+      "target": "Deliver a controller pointer for UGEVR settings first, then separately tested Unity game-UI adapters; preserve working game navigation initially.",
       "evidence": "S. Evidence is for framework/ImGui mouse emulation; do not claim universal game-widget laser interaction.",
       "baseline": "Absent",
       "acceptance": "Aim at a menu control, click/drag/context-click/scroll, and verify gameplay aim resumes afterwards.",
@@ -1199,7 +1199,7 @@
     {
       "id": "I46",
       "capability": "Injector menu geometry and following",
-      "target": "Independent injector panel transform and scale.",
+      "target": "Independent injector panel transform and scale, fixed relative to tracking space on open by default, with optional head-following and wrist modes.",
       "evidence": "S. User-menu geometry should not alter game HUD settings.",
       "baseline": "Absent",
       "acceptance": "Change injector distance without changing game HUD placement.",
