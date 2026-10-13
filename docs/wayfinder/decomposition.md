@@ -43,6 +43,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [How should game discovery, launch or attach, and conflict recovery work for users?](https://github.com/JakeGreen2145/UGEVR/issues/15) is resolved. The frontend and CLI share UGEVR's session controller. Frame Testbench remains a separate test-time dependency that calls its external interface. Per-launch deployment is reversible, and conflict remedies require explicit selection. The ticket holds process identity, streamed launch, recovery and restoration requirements.
 
+[Which compatibility controls and diagnostics should expose actionable failures and performance?](https://github.com/JakeGreen2145/UGEVR/issues/16) is resolved. Verified controls are explicit and reversible; bounded local logs are the default, with detailed artifacts enabled explicitly. Application, compositor and stream metrics remain separate, as do functional and performance results. The ticket holds command, timeline, bundle and fault-attribution contracts.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.
@@ -61,10 +63,10 @@ A feature can begin earlier when it unblocks a stage. For example, a UI capture 
 
 ## What parity means here
 
-UEVR-native features become equivalent Unity outcomes. Unreal's native stereo hook does not imply an identical Unity hook. UObjectHook becomes live Unity object inspection and tracked attachment. Unreal CVars become discoverable Unity/pipeline controls with explicit availability. Blueprint extension support becomes a way for adaptation authors to extend behavior in Unity; the public language and API still need a decision.
+UEVR-native features become equivalent Unity outcomes. Unreal's native stereo hook does not imply an identical Unity hook. UObjectHook becomes live Unity object inspection and tracked attachment. Unreal CVars become discoverable Unity/pipeline controls with explicit availability. Blueprint extension support becomes native/C# adaptation authoring followed by Lua through the accepted versioned extension contract.
 
 The three UEVR rendering modes also encode different timing and temporal-history behavior. The existing pair of `Camera.Render()` calls is evidence for one sequential path. It is not evidence for native pipeline stereo, correct temporal effects, SRP support, or safe alternating rendering.
 
 ## Remaining work on this map
 
-Resolve the stage/validation gates first, then choose the subsystem contracts and compatibility boundaries through the linked decision tickets. Where public Unity API facts do not establish a shipped-game mechanism, open a research or prototype ticket. Only after those decisions are settled should `to-spec` turn the feature IDs and proof requirements into implementation work.
+All original decision tickets are resolved. The remaining work before specification publication is the final human check of test boundaries and synthesis through `to-spec`. Game/version-specific mechanisms, stripping and pipeline failures, stream automation and measured performance remedies remain explicit staged implementation probes. They do not become supported capabilities until their acceptance evidence passes. A probe that exposes a new architectural choice must reopen that choice with evidence.

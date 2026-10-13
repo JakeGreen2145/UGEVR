@@ -119,3 +119,11 @@ _Avoid_: A running process or connected stream alone
 **Test run**:
 An evidence-producing exercise that correlates a game session with separately owned test inputs, captures and acceptance checks.
 _Avoid_: A production dependency on the test harness
+
+**Compatibility control**:
+A discovered engine, pipeline or adaptation setting whose availability, application phase, effects and restoration are declared for the current game build.
+_Avoid_: An assumed Unreal console variable or an automatic fix
+
+**Support bundle**:
+A reviewed export of selected configuration and diagnostic evidence for reproducing or investigating a game session.
+_Avoid_: Automatic telemetry upload
