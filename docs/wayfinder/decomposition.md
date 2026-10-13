@@ -37,6 +37,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [How should UGEVR capture and interact with game UI and its own VR menu?](https://github.com/JakeGreen2145/UGEVR/issues/12) is resolved. The injector menu is fixed on open; captured screen UI follows the head. uGUI capture precedes Toolkit and IMGUI/custom paths, and injector pointing precedes game pointing. The ticket holds event/restoration contracts and explicit whole-game screen fallback requirements.
 
+[How should object inspection and persistent tracked attachments work across Unity builds?](https://github.com/JakeGreen2145/UGEVR/issues/13) is resolved. Saved selectors require unique targets, visual attachments are the default, and inspector mutations are explicit author actions. The ticket holds lifetime, transform ownership, persistence and gameplay-evidence requirements.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.

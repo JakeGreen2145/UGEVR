@@ -91,3 +91,15 @@ _Avoid_: A captured game menu
 **Game UI capture**:
 An independently obtained image of an identified game UI source for VR composition, with its original coordinate domain and ownership retained.
 _Avoid_: An opaque image of the whole game
+
+**Target selector**:
+A saved description used to resolve one intended game object or component through scene, hierarchy, type or declared role criteria.
+_Avoid_: A saved runtime address or instance ID
+
+**Visual attachment**:
+A tracked pose override applied for rendering, with game-owned state restored before subsequent gameplay.
+_Avoid_: A verified gameplay interaction
+
+**Game-state attachment**:
+An explicitly enabled tracked pose override applied through a declared game update, animation or physics owner, with gameplay effects evaluated separately.
+_Avoid_: A visual attachment or automatic firing/collision support
