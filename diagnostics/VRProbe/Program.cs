@@ -22,6 +22,7 @@ try {
     uint width=0, height=0; vr.GetRecommendedRenderTargetSize(ref width, ref height);
     var eyeL = vr.GetEyeToHeadTransform(EVREye.Eye_Left);
     var eyeR = vr.GetEyeToHeadTransform(EVREye.Eye_Right);
+    float[] Matrix(HmdMatrix34_t value) => new[]{value.m0,value.m1,value.m2,value.m3,value.m4,value.m5,value.m6,value.m7,value.m8,value.m9,value.m10,value.m11};
     var compositor = OpenVR.Compositor;
     var timing = new Compositor_FrameTiming(); timing.m_nSize = (uint)Marshal.SizeOf(typeof(Compositor_FrameTiming));
     bool timingValid = compositor != null && compositor.GetFrameTiming(ref timing, 0);
@@ -31,6 +32,7 @@ try {
         model = Property(ETrackedDeviceProperty.Prop_ModelNumber_String), valid=p.bPoseIsValid,
         connected=p.bDeviceIsConnected, trackingResult=p.eTrackingResult.ToString(),
         width, height, eyeOffsetX=new[]{eyeL.m3,eyeR.m3},
+        eyeToHead = new[]{Matrix(eyeL),Matrix(eyeR)},
         focusProcess=compositor?.GetCurrentSceneFocusProcess(), lastRenderer=compositor?.GetLastFrameRenderer(),
         canRender=compositor?.CanRenderScene(), fullscreen=compositor?.IsFullscreen(),
         gridAlpha=compositor?.GetCurrentGridAlpha(), fade=fade.HasValue ? new[]{fade.Value.r,fade.Value.g,fade.Value.b,fade.Value.a} : null,

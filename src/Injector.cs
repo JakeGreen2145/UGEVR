@@ -264,6 +264,9 @@ public class Injector : BaseUnityPlugin
                 camera.useOcclusionCulling=false;
                 camera.rect=new Rect(0,0,1,1);
                 camera.targetTexture=eyes[i];
+                // Evidence must describe the applied engine transform, including
+                // Unity float precision, rather than only the requested math result.
+                actualEyes[i]=new RigidPose(Position(camera.transform.position),Rotation(camera.transform.rotation));
                 camera.Render();
             }
         }
@@ -331,7 +334,11 @@ public class Injector : BaseUnityPlugin
     void WriteCapture(RigidPose head,RigidPose anchor,RigidPose[] eye,bool restored)
     {
         File.WriteAllText(Path.Combine(evidenceDir,"capture-"+rendered+".json"),
-            "{\"frame\":"+rendered+",\"headPosition\":"+VectorJson(head.Position)+",\"headRotation\":"+QuaternionJson(head.Rotation)+
+            "{\"evidenceVersion\":2,\"frame\":"+rendered+",\"vrFrameId\":"+frameId+",\"generation\":"+generation+
+            ",\"gameFrame\":"+Time.frameCount+",\"unitsPerMeter\":"+Number(unitsPerMeter)+
+            ",\"retainGameTilt\":"+retainGameTilt.ToString().ToLowerInvariant()+
+            ",\"originPosition\":"+VectorJson(origin.Center)+",\"originRotation\":"+QuaternionJson(origin.Yaw)+
+            ",\"headPosition\":"+VectorJson(head.Position)+",\"headRotation\":"+QuaternionJson(head.Rotation)+
             ",\"basePosition\":"+VectorJson(anchor.Position)+",\"baseRotation\":"+QuaternionJson(anchor.Rotation)+
             ",\"eye0Position\":"+VectorJson(eye[0].Position)+",\"eye1Position\":"+VectorJson(eye[1].Position)+
             ",\"eye0Rotation\":"+QuaternionJson(eye[0].Rotation)+",\"eye1Rotation\":"+QuaternionJson(eye[1].Rotation)+

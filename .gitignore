@@ -21,3 +21,5 @@
 *.obj
 *.exp
 .vs/
+__pycache__/
+*.py[cod]
