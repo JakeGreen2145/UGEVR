@@ -27,6 +27,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [Which Unity stereo strategies preserve simulation and temporal state across render pipelines?](https://github.com/JakeGreen2145/UGEVR/issues/7) is resolved. Synchronized sequential stereo comes first, with explicit fidelity fallbacks and opt-in alternating-eye stereo. Native stereo paths follow. The ticket holds the rendering contract and mechanism checks across pipelines.
 
+[What frame and GPU contract should support OpenVR and OpenXR across D3D11 and D3D12?](https://github.com/JakeGreen2145/UGEVR/issues/8) is resolved. OpenVR/D3D11 precedes OpenXR/D3D11, then D3D12 for both runtimes. OpenXR initially receives copies from Unity-owned eye targets. The ticket holds frame ownership, bounded recovery and correlated host/headset evidence requirements.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.

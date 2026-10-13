@@ -47,3 +47,7 @@ _Avoid_: A synchronized eye pair
 **Fidelity fallback**:
 An explicit change to the game's visual effects or rendering behavior that makes a declared VR capability work, with the resulting quality change recorded.
 _Avoid_: A silent rendering defect
+
+**VR frame**:
+An identifiable rendering and submission operation that associates its eye images with the views actually rendered and the intended display time or runtime prediction identity.
+_Avoid_: A Unity gameplay frame or a texture pointer alone
