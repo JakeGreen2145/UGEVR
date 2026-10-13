@@ -134,7 +134,7 @@ Scope boundaries remain explicit. Runtime controller pose/action support does no
 ## Source references
 
 [input]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/VR.cpp#L774-L876
-[bindingsdoc]: https://github.com/praydog/uevr-docs/blob/fc19e66b7173f259f00d1feb5cf687b3f0a5131a/src/usage/vr_controller_bindings.md#L1-L37
+[bindingsdoc]: https://github.com/praydog/uevr-docs/blob/fc19e66b7173f259f00d1feb5cf687b3f0a5131a/src/usage/vr_controller_bindings.md#L1-L35
 [connection]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/VR.cpp#L689-L779
 [xhook]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/hooks/XInputHook.cpp#L211-L239
 [methods]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/VR.hpp#L853-L869
@@ -196,7 +196,7 @@ Scope boundaries remain explicit. Runtime controller pose/action support does no
 [attach]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/UObjectHook.cpp#L897-L1066
 [adjustui]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/UObjectHook.cpp#L2833-L2873
 [adjust]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/UObjectHook.cpp#L1028-L1055
-[attachdoc]: https://github.com/praydog/uevr-docs/blob/fc19e66b7173f259f00d1feb5cf687b3f0a5131a/src/usage/adding_6dof.md#L1-L89
+[attachdoc]: https://github.com/praydog/uevr-docs/blob/fc19e66b7173f259f00d1feb5cf687b3f0a5131a/src/usage/adding_6dof.md#L1-L75
 [actorcamera]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/UObjectHook.cpp#L3318-L3358
 [visibility]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/UObjectHook.cpp#L3002-L3094
 [attachsave]: https://github.com/praydog/UEVR/blob/4ee5c6b6162dee2291fc75f9dfc57667f6d45a2d/src/mods/UObjectHook.cpp#L2876-L2929
