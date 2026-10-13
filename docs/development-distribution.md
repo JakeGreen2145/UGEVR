@@ -1,6 +1,6 @@
 # Development distribution
 
-[The development packaging ticket](https://github.com/JakeGreen2145/UGEVR/issues/31) creates one experimental S1 distribution. Its physical gameplay status is unvalidated. Packaging success does not establish that a game works on a headset.
+[S1: package the integrated development distribution with provenance](https://github.com/JakeGreen2145/UGEVR/issues/31) creates one experimental S1 distribution. Its physical gameplay status is unvalidated. Packaging success does not establish that a game works on a headset.
 
 ## Build once and package
 

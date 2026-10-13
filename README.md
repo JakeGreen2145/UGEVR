@@ -34,6 +34,12 @@ The published [UGEVR: full Unity VR injector capability target with staged deliv
 
 The [decomposition](docs/wayfinder/decomposition.md) groups the target into subsystems and delivery stages. The completed [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1) indexes the decisions behind the specification. [Source provenance](docs/wayfinder/source-provenance.md) records the pinned UEVR revisions and SDK evidence limits. Publication completes the plan; physical gameplay and the later capability target remain implementation work.
 
+## Implementation progress
+
+The first S1 wave adds a [standalone session controller](docs/session-controller.md), [reversible deployment](docs/session-deployment.md), a [checked native frame contract](docs/native-frame-contract.md) and [managed tracking/session state](docs/injector-session-protocol.md). These changes have controlled tests and clean builds against Firewatch and Outer Wilds assemblies. The updated code has not yet passed same-binary physical gameplay in those games.
+
+[Development distribution packaging](docs/development-distribution.md) builds one injector and native bridge with the controller, deployment scripts and YAML provenance. Frame Testbench remains separate; its [Add separate UGEVR session client and bounded streamed-test orchestration](https://github.com/JakeGreen2145/frame-testbench/pull/1) draft contains the external test client. Stream start and physical peer/image/input evidence remain incomplete.
+
 ## Build
 
 Requirements are a .NET SDK, Visual Studio C++ x64 build tools, a Windows 10 SDK, and the managed assemblies from a compatible Unity Mono game. The independent pose reader targets .NET 10.
@@ -64,7 +70,7 @@ The installer adds BepInEx, Doorstop and the injector files to the test copy. Ke
 
 BepInEx loads the managed plugin. For each frame, the plugin selects the game camera, samples the headset pose, combines it with the game camera's transform, and renders both eyes. A native bridge uses Unity render-thread callbacks for OpenVR's GPU-touching frame wait and texture submission.
 
-Native texture queries synchronize Unity's render thread before reading poses and after rendering. Acquiring current native textures after rendering fixed black compositor output during development. Vertical texture bounds correct Unity's D3D11 texture orientation. The bridge leaves frame handoff to the next `WaitGetPoses` call rather than handing off before Unity's desktop `Present`.
+The current producer waits for explicit native callback acknowledgments before consuming a pose or reusing frame state. It retains eye targets on disable because a CPU reference-drain acknowledgment does not prove GPU completion. The initial conservative flow spans engine frames and needs runtime latency/performance measurement. The earlier baseline used native texture queries for synchronization; acquiring current textures after rendering fixed black output during that development. Vertical texture bounds correct the intended D3D11 orientation, which still needs validation in the updated physical path. The bridge leaves frame handoff to the next `WaitGetPoses` call rather than handing off before Unity's desktop `Present`.
 
 ## Repeat the simulated tracking test
 
@@ -77,6 +83,8 @@ dotnet build .\diagnostics\VRProbe\VRProbe.csproj -c Release
 .\scripts\Use-SimulatedHeadset.ps1
 .\scripts\Use-TrackingTestHeadset.ps1
 ```
+
+Set `Diagnostics.CaptureImages=true` explicitly in the plugin configuration before launching. If using the session controller, pass its session directory to the tracking script. Capture records now include the applied eye transforms, scale, origin and frame identity; the independent runtime probe records full eye transforms. Image statistics alone do not establish valid stereo.
 
 Start SteamVR and the prepared game. Once its scene is visible:
 

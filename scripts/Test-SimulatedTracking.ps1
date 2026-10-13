@@ -1,7 +1,8 @@
-param([Parameter(Mandatory=$true)][string]$GameRoot,[string]$OutputName='firewatch-6dof')
+param([Parameter(Mandatory=$true)][string]$GameRoot,[string]$OutputName='firewatch-6dof',[string]$SessionDirectory)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
-$gameEvidence = Join-Path $GameRoot 'UnityVR-evidence'
+$gameEvidence = Join-Path $(if ($SessionDirectory) { $SessionDirectory } else { $GameRoot }) 'UnityVR-evidence'
+if (-not (Test-Path -LiteralPath $gameEvidence -PathType Container)) { throw 'Enable Diagnostics.CaptureImages in the plugin and pass -SessionDirectory when using the controller.' }
 $posePath = Join-Path $repo 'diagnostics\test-hmd-driver\pose.txt'
 $probePath = Join-Path $repo 'diagnostics\VRProbe\bin\Release\net10.0\VRProbe.exe'
 $cases = [ordered]@{x='0.25 1.7 0 0 0 0';y='0 1.9 0 0 0 0';z='0 1.7 0.25 0 0 0';yaw='0 1.7 0 30 0 0';pitch='0 1.7 0 0 20 0';roll='0 1.7 0 0 0 15';reset='0 1.7 0 0 0 0'}
