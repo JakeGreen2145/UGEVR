@@ -31,3 +31,7 @@ _Avoid_: Native-refresh performance
 **Runtime validation**:
 An observed capability result in a named game/build and VR setup, evaluated against a stated acceptance criterion.
 _Avoid_: Static source confirmation
+
+**Engine adapter**:
+The part of UGEVR that provides engine access for a particular Unity player family through the common engine-access contract.
+_Avoid_: A game-specific gameplay adaptation
