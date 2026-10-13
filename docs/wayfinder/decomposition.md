@@ -1,0 +1,48 @@
+# UGEVR decomposition
+
+The user selected the full UEVR capability target with staged delivery. The [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1) holds the decisions needed to reach an implementation specification. This document proposes subsystem boundaries and release stages; it does not settle those decisions or claim that the target has been implemented.
+
+The [feature target](feature-target.md) records individual capabilities, evidence, UGEVR gaps, and acceptance criteria. [Source provenance](source-provenance.md) fixes the audit revisions and evidence limits.
+
+## Subsystems and decision outputs
+
+| Subsystem | Responsibility | Decision output required before a specification | First proof required |
+| --- | --- | --- | --- |
+| Bootstrap and engine access | Enter a running or launching game; detect version, Mono/IL2CPP, pipeline, graphics API, and available facilities | Loader strategy, supported cells, engine API boundary, thread rules, ownership and teardown | Same distribution enters unrelated games in each selected runtime cell without rebuilding against their game code |
+| Stereo and scene rendering | Produce two correct views without advancing gameplay twice; manage temporal history, effects, multiple cameras and view models | Rendering backend contract, pipeline-specific strategies, compatibility fallbacks, camera ownership | Moving scene, particles, effects and simulation timing agree between eyes; desktop and game state are restored |
+| VR runtime and GPU transport | OpenVR/OpenXR session, view prediction, textures/swapchains, frame scheduling, depth and device recovery | Runtime abstraction, frame/pose association, graphics interop ownership and synchronization | Physical headset receives correctly oriented frames at its selected cadence, including resize and runtime state transitions |
+| Camera and tracking composition | Compose game camera, HMD, eye offsets, scale, origin, cutscenes and comfort transforms | Coordinate spaces, pose order, recenter semantics, camera selection/presets and transition rules | Six-axis tracking and recentering behave correctly through gameplay, camera changes and a cutscene |
+| Input and feedback | Read controller actions, map them to game input, handle gamepad coexistence, bindings and haptics | Input abstraction for legacy and newer systems; precedence, emulation, rebinding and feedback contracts | Menus and gameplay can be controlled without duplicate or stuck inputs; feedback reaches the intended controller |
+| Locomotion and aim | Aim/movement orientation, turning, player displacement and collision-aware roomscale | Generic discovery limits, adapter requirements, movement ownership, collision and aim semantics | Turning and head/controller aim agree with game actions; roomscale movement stops at a wall rather than moving only the view through it |
+| Game UI and injector menu | Capture/project game UI; compose flat/curved panels and interactive injector controls | Capture strategies for UI families, panel spaces, pointer mapping, focus and input capture | Main menu, HUD and pause menu remain readable; injector controls work in headset and on desktop |
+| Object discovery and authoring | Inspect live objects, select stable targets, attach objects/cameras to tracked devices, change/hide properties | Mono/IL2CPP reflection boundary, stable selectors, lifetime handling, visual versus gameplay transforms, persistence | Attachment survives reload and object recreation; destroyed targets fail safely; declared gameplay effects are independently verified |
+| Profiles and settings | Per-game/global state, overrides, presets, import/export and migration | Identity, schema, precedence, validation, versioning, packaging and reset rules | Export/import reproduces the setup; stale selectors and unavailable features produce useful diagnostics |
+| Extensions and scripting | Native/managed plugin equivalents, scripts, hooks, inspection and author tools | Public ABI/API boundary, thread and lifetime rules, capabilities, error handling and script language choices | A game-specific adaptation can consume poses/input and change behavior through a stable API without patching core code |
+| Frontend and lifecycle | Process discovery, runtime selection, launch/attach, configuration and conflict recovery | Attachment/install policy, process identity, preflight, permissions handling, coexistence and removal | A user can select a game, start VR, diagnose a failure and restore normal launch behavior |
+| Diagnostics and compatibility controls | Expose evidence, timing, frame state, errors, rendering overrides and reproducible support reports | Capability reporting, telemetry schema, performance budget and fix policies | A failed session yields actionable data that distinguishes injection, tracking, rendering and compositor faults |
+
+These boundaries deliberately separate engine access from VR runtime access, visual attachments from gameplay behavior, and UI composition from input routing. Their interfaces and placement remain open decisions.
+
+## Proposed delivery stages
+
+Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.
+
+| Stage | Outcome | Candidate exit evidence |
+| --- | --- | --- |
+| S1: physical gameplay baseline | Turn the existing Mono/D3D11/OpenVR path into a reliable physical-headset gameplay session with usable menus and ordinary game controls | Recorded physical-headset runs in unrelated games, including gameplay, menus, camera changes and cutscenes; correct stereo/tracking and no accumulated state corruption |
+| S2: broader engine and runtime foundation | Establish explicit compatibility cells for Mono/IL2CPP, Built-in/URP/HDRP, OpenVR/OpenXR and D3D11/D3D12 | Independent representative games and controlled scenes for each claimed cell; evidence identifies unsupported cells rather than implying universal support |
+| S3: controller and UI experience | Add controller mapping, aim/turning, feedback, interactive VR menus, game UI placement and adapter-based roomscale where required | User can navigate and play; focus/input transitions are stable; collision, haptics and aiming are checked separately from visual tracking |
+| S4: authoring and extension parity | Provide object inspection/attachments, first-person adaptations, persistent profiles, plugins and scripting equivalents | An adaptation author creates and shares a reproducible setup, including stable selectors and an extension using the public API |
+| S5: advanced compatibility and release parity | Complete advanced projection/effect controls, optimized rendering paths, depth, spectator output, developer diagnostics and distribution polish | Every feature target row has its own result and scope; visual quality and performance are measured under defined scenes and hardware |
+
+A feature can begin earlier when it unblocks a stage. For example, a UI capture path may be necessary in S1, and frame timing must be measured from S1. Later parity milestones add breadth and controls rather than delaying foundational correctness.
+
+## What parity means here
+
+UEVR-native features become equivalent Unity outcomes. Unreal's native stereo hook does not imply an identical Unity hook. UObjectHook becomes live Unity object inspection and tracked attachment. Unreal CVars become discoverable Unity/pipeline controls with explicit availability. Blueprint extension support becomes a way for adaptation authors to extend behavior in Unity; the public language and API still need a decision.
+
+The three UEVR rendering modes also encode different timing and temporal-history behavior. The existing pair of `Camera.Render()` calls is evidence for one sequential path. It is not evidence for native pipeline stereo, correct temporal effects, SRP support, or safe alternating rendering.
+
+## Remaining work on this map
+
+Resolve the stage/validation gates first, then choose the subsystem contracts and compatibility boundaries through the linked decision tickets. Where public Unity API facts do not establish a shipped-game mechanism, open a research or prototype ticket. Only after those decisions are settled should `to-spec` turn the feature IDs and proof requirements into implementation work.

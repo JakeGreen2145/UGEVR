@@ -26,6 +26,12 @@ Both final runs exceeded 16,000 successful paired eye submissions. Fourteen trac
 
 IL2CPP, OpenXR, D3D12, Vulkan, URP/HDRP, motion controllers and multi-camera composition are not implemented or validated. Screen-space UI is not converted to a VR panel. Reusing the original camera runs its effects repeatedly; temporal effects and game callbacks may need adaptation. Rendering the desktop view and both eyes adds cost.
 
+## Wayfinder
+
+The next target is UEVR-equivalent capabilities for Unity, delivered in stages. The [feature target](docs/wayfinder/feature-target.md) indexes 149 source-audited entries with Unity outcomes, existing gaps, acceptance criteria and decision links. Entries include overlapping facets and documented claims; they are not 149 independently runtime-validated features.
+
+The [proposed decomposition](docs/wayfinder/decomposition.md) groups the target into subsystems and delivery stages. The [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1) tracks the open decisions required before an implementation specification. [Source provenance](docs/wayfinder/source-provenance.md) records the pinned UEVR revisions and SDK evidence limits.
+
 ## Build
 
 Requirements are a .NET SDK, Visual Studio C++ x64 build tools, a Windows 10 SDK, and the managed assemblies from a compatible Unity Mono game. The independent pose reader targets .NET 10.
