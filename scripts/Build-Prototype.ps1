@@ -1,4 +1,4 @@
-param([string]$GameManaged = $env:UGEVR_GAME_MANAGED,[string]$CompilerRoot,[string]$SdkRoot,[string]$SdkVersion)
+param([string]$GameManaged = $env:UGEVR_GAME_MANAGED,[string]$CompilerRoot,[string]$SdkRoot,[string]$SdkVersion,[switch]$DistributionBuild)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 if (-not $GameManaged -or -not (Test-Path -LiteralPath (Join-Path $GameManaged 'UnityEngine.CoreModule.dll'))) {
@@ -11,6 +11,10 @@ Push-Location $repo
 try {
     $buildArgs = @('build','src\UnityVRInjector.csproj','-c','Release')
     if ($GameManaged) { $buildArgs += "-p:GameManaged=$GameManaged" }
+    if ($DistributionBuild) {
+        # Do not embed the developer's PDB/source path in a shipped DLL.
+        $buildArgs += '-p:DebugType=None','-p:DebugSymbols=false',"-p:PathMap=$repo=/_/ugevr"
+    }
     & dotnet @buildArgs
     if ($LASTEXITCODE -ne 0) { throw 'Managed build failed' }
     $env:INCLUDE = $buildTools.Include
