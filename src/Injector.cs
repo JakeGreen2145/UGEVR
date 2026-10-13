@@ -42,7 +42,7 @@ public class Injector : BaseUnityPlugin
     int phase, updateCount, rendered;
     bool active=true, runtimeReady, draining, renderingActive, quitting;
     bool ownsBackground, oldBackground;
-    bool capturesEnabled, retainGameTilt;
+    bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
     double unitsPerMeter;
     string evidenceDir, pendingRecenter;
     float phaseStarted, nextReport, lastSubmittedAt;
@@ -56,11 +56,15 @@ public class Injector : BaseUnityPlugin
         {
             session=new InjectorSession(Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),
                 Environment.GetEnvironmentVariable("UGEVR_SESSION_DIRECTORY"),Process.GetCurrentProcess().Id);
+            if (IntPtr.Size!=8 || SystemInfo.graphicsDeviceType.ToString()!="Direct3D11")
+                throw new InvalidOperationException("This adapter requires Windows x64 D3D11. No native texture pointers were passed to the bridge. Select -force-d3d11 or use a supported adapter.");
             unitsPerMeter=Config.Bind("Tracking","UnitsPerMeter",1f,"Game world units per physical meter.").Value;
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
+            disableOcclusionCulling=Config.Bind("Rendering","DisableOcclusionCulling",false,"Explicit fidelity remedy: disable the selected camera's occlusion culling only during eye rendering.").Value;
             if (Double.IsNaN(unitsPerMeter) || Double.IsInfinity(unitsPerMeter) || unitsPerMeter<=0)
                 throw new ArgumentException("UnitsPerMeter must be finite and greater than zero.");
+            if (disableOcclusionCulling) Logger.LogWarning("EXPLICIT_FIDELITY_REMEDY DisableOcclusionCulling=true; game culling is restored after the eye pair.");
             string directory=Environment.GetEnvironmentVariable("UGEVR_SESSION_DIRECTORY");
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
@@ -260,8 +264,8 @@ public class Injector : BaseUnityPlugin
                 camera.transform.position=Vector(actualEyes[i].Position);
                 camera.transform.rotation=QuaternionValue(actualEyes[i].Rotation);
                 camera.ResetWorldToCameraMatrix();
-                camera.projectionMatrix=Projection((EVREye)i,Math.Max(.02f,camera.nearClipPlane),camera.farClipPlane);
-                camera.useOcclusionCulling=false;
+                camera.projectionMatrix=Projection((EVREye)i,camera.nearClipPlane,camera.farClipPlane);
+                if (disableOcclusionCulling) camera.useOcclusionCulling=false;
                 camera.rect=new Rect(0,0,1,1);
                 camera.targetTexture=eyes[i];
                 // Evidence must describe the applied engine transform, including
@@ -305,7 +309,8 @@ public class Injector : BaseUnityPlugin
     }
     Matrix4x4 Projection(EVREye eye,float near,float far)
     {
-        if (far<=near) throw new InvalidOperationException("Camera far clip must exceed the effective near clip.");
+        if (Single.IsNaN(near) || Single.IsInfinity(near) || near<=0 || Single.IsNaN(far) || Single.IsInfinity(far) || far<=near)
+            throw new InvalidOperationException("Camera clip distances must be finite, with 0 < near < far. Use an explicit profile remedy for invalid clipping.");
         float left=0,right=0,top=0,bottom=0;
         system.GetProjectionRaw(eye,ref left,ref right,ref top,ref bottom);
         return Matrix4x4.Frustum(left*near,right*near,-bottom*near,-top*near,near,far);
