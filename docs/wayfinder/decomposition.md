@@ -41,6 +41,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [What profile schema and extension contracts should support shared Unity game adaptations?](https://github.com/JakeGreen2145/UGEVR/issues/14) is resolved. Formats and compatible syntax follow UEVR counterparts, with YAML for new package metadata. Layered personal overrides remain separate from shared profiles. Native/C# authoring precedes Lua, and imported code activation is explicit. The ticket holds schema, compatibility, ABI and lifecycle requirements.
 
+[How should game discovery, launch or attach, and conflict recovery work for users?](https://github.com/JakeGreen2145/UGEVR/issues/15) is resolved. The frontend and CLI share UGEVR's session controller. Frame Testbench remains a separate test-time dependency that calls its external interface. Per-launch deployment is reversible, and conflict remedies require explicit selection. The ticket holds process identity, streamed launch, recovery and restoration requirements.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.

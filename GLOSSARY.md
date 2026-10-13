@@ -111,3 +111,11 @@ _Avoid_: A complete copy of a user's local configuration
 **Personal game override**:
 A user's saved changes applied above a shared game profile and below temporary session overrides.
 _Avoid_: An edit to the shared profile package
+
+**Game session**:
+An identified launch or attachment whose selected game process, injector, VR runtime and optional stream have independently reported states and ownership.
+_Avoid_: A running process or connected stream alone
+
+**Test run**:
+An evidence-producing exercise that correlates a game session with separately owned test inputs, captures and acceptance checks.
+_Avoid_: A production dependency on the test harness
