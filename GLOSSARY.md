@@ -63,3 +63,7 @@ _Avoid_: A game camera or player-body position
 **Virtual-screen presentation**:
 The game's image presented on a screen in VR, with headset tracking controlling the view of that screen.
 _Avoid_: Full world VR or a remedy for invalid tracking
+
+**Active controller source**:
+The selected source, VR controllers or a physical gamepad, whose actions UGEVR currently delivers to the game's controller input.
+_Avoid_: A local-player identity or an input delivery mechanism

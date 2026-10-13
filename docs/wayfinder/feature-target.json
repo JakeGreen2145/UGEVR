@@ -611,10 +611,10 @@
     {
       "id": "I04",
       "capability": "Trigger actions",
-      "target": "Equivalent digital trigger emulation; proportional input is an explicit extension if adopted.",
+      "target": "Preserve proportional trigger values and deliver them where the game adapter supports analog input; provide configurable digital thresholds elsewhere. Analog delivery is an accepted UGEVR extension beyond the audited UEVR mapping.",
       "evidence": "S. This inspected route is digital 0/255, not demonstrated proportional analog trigger transfer.",
       "baseline": "Absent",
-      "acceptance": "Trigger press/release produces the selected threshold behavior without a stuck trigger.",
+      "acceptance": "An analog ramp reaches an analog-capable game consumer proportionally; digital press/release follows configured thresholds without a stuck trigger.",
       "proposed_stage": "S3",
       "decision_key": "input",
       "decision_title": "How should controller input, bindings, gamepad coexistence, and haptics reach Unity games?",
