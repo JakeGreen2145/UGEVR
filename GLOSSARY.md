@@ -103,3 +103,11 @@ _Avoid_: A verified gameplay interaction
 **Game-state attachment**:
 An explicitly enabled tracked pose override applied through a declared game update, animation or physics owner, with gameplay effects evaluated separately.
 _Avoid_: A visual attachment or automatic firing/collision support
+
+**Profile package**:
+A versioned portable bundle of shared game settings, target rules and explicitly identified supporting extensions, separate from personal overrides and activation state.
+_Avoid_: A complete copy of a user's local configuration
+
+**Personal game override**:
+A user's saved changes applied above a shared game profile and below temporary session overrides.
+_Avoid_: An edit to the shared profile package

@@ -39,6 +39,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [How should object inspection and persistent tracked attachments work across Unity builds?](https://github.com/JakeGreen2145/UGEVR/issues/13) is resolved. Saved selectors require unique targets, visual attachments are the default, and inspector mutations are explicit author actions. The ticket holds lifetime, transform ownership, persistence and gameplay-evidence requirements.
 
+[What profile schema and extension contracts should support shared Unity game adaptations?](https://github.com/JakeGreen2145/UGEVR/issues/14) is resolved. Formats and compatible syntax follow UEVR counterparts, with YAML for new package metadata. Layered personal overrides remain separate from shared profiles. Native/C# authoring precedes Lua, and imported code activation is explicit. The ticket holds schema, compatibility, ABI and lifecycle requirements.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.
