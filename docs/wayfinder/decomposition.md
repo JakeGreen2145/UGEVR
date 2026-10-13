@@ -31,6 +31,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [How should HMD tracking compose with game cameras, scale, presets, and cutscenes?](https://github.com/JakeGreen2145/UGEVR/issues/9) is resolved. The default uses the game camera plus live head tracking, removes game-driven pitch/roll, and keeps compatible cutscenes in VR with explicit screen fallbacks. The ticket holds anchor, metric scale, calibration and transition contracts.
 
+[How should controller input, bindings, gamepad coexistence, and haptics reach Unity games?](https://github.com/JakeGreen2145/UGEVR/issues/10) is resolved. XInput delivery for observed consumers precedes Unity input adapters. The action model preserves analog triggers, and automatic source takeover waits for neutral controls. The ticket holds bindings, update ownership, cancellation and feedback contracts.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.

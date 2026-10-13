@@ -67,3 +67,7 @@ _Avoid_: Full world VR or a remedy for invalid tracking
 **Active controller source**:
 The selected source, VR controllers or a physical gamepad, whose actions UGEVR currently delivers to the game's controller input.
 _Avoid_: A local-player identity or an input delivery mechanism
+
+**Game input adapter**:
+The part of UGEVR that delivers its logical actions to a particular game's input consumer and routes supported feedback from that consumer.
+_Avoid_: A runtime controller binding or a visual controller attachment
