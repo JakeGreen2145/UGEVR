@@ -933,7 +933,7 @@
     {
       "id": "I27",
       "capability": "Snap turn",
-      "target": "Configurable discrete yaw turn for gamepad and VR sticks.",
+      "target": "Optional configurable discrete yaw turn for gamepad and VR sticks; smooth turning is the default.",
       "evidence": "S. A neutral crossing re-arms the turn.",
       "baseline": "Absent",
       "acceptance": "Held stick causes one configured-angle turn until it returns to neutral.",
