@@ -29,6 +29,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [What frame and GPU contract should support OpenVR and OpenXR across D3D11 and D3D12?](https://github.com/JakeGreen2145/UGEVR/issues/8) is resolved. OpenVR/D3D11 precedes OpenXR/D3D11, then D3D12 for both runtimes. OpenXR initially receives copies from Unity-owned eye targets. The ticket holds frame ownership, bounded recovery and correlated host/headset evidence requirements.
 
+[How should HMD tracking compose with game cameras, scale, presets, and cutscenes?](https://github.com/JakeGreen2145/UGEVR/issues/9) is resolved. The default uses the game camera plus live head tracking, removes game-driven pitch/roll, and keeps compatible cutscenes in VR with explicit screen fallbacks. The ticket holds anchor, metric scale, calibration and transition contracts.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.

@@ -51,3 +51,15 @@ _Avoid_: A silent rendering defect
 **VR frame**:
 An identifiable rendering and submission operation that associates its eye images with the views actually rendered and the intended display time or runtime prediction identity.
 _Avoid_: A Unity gameplay frame or a texture pointer alone
+
+**Tracking anchor**:
+The game-space position and orientation relative to which UGEVR composes recentered head and eye motion.
+_Avoid_: A player-body position or a headset tracking origin
+
+**Tracking origin**:
+The reference used to express calibrated head and controller motion before UGEVR maps it into the game world.
+_Avoid_: A game camera or player-body position
+
+**Virtual-screen presentation**:
+The game's image presented on a screen in VR, with headset tracking controlling the view of that screen.
+_Avoid_: Full world VR or a remedy for invalid tracking
