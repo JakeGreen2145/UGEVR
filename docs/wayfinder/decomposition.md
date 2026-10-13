@@ -35,6 +35,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [Which aiming and collision-aware roomscale behaviors can generalize across Unity player controllers?](https://github.com/JakeGreen2145/UGEVR/issues/11) is resolved. Game aim and smooth turning are defaults, with optional tracked aim, snap turning and horizontal roomscale. CharacterController integration precedes custom/kinematic motors and dynamic bodies. The ticket holds movement authority, accepted-displacement reconciliation and head-contact fade requirements.
 
+[How should UGEVR capture and interact with game UI and its own VR menu?](https://github.com/JakeGreen2145/UGEVR/issues/12) is resolved. The injector menu is fixed on open; captured screen UI follows the head. uGUI capture precedes Toolkit and IMGUI/custom paths, and injector pointing precedes game pointing. The ticket holds event/restoration contracts and explicit whole-game screen fallback requirements.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.

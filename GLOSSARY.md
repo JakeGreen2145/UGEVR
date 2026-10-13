@@ -87,3 +87,7 @@ _Avoid_: A successful body sweep alone
 **Injector menu**:
 UGEVR's configuration controls, available on desktop and in the headset through shared settings state, with placement independent of game UI.
 _Avoid_: A captured game menu
+
+**Game UI capture**:
+An independently obtained image of an identified game UI source for VR composition, with its original coordinate domain and ownership retained.
+_Avoid_: An opaque image of the whole game
