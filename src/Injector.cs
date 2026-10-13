@@ -211,7 +211,10 @@ public class Injector : BaseUnityPlugin
         }
         if (GetCompletedPoseGeneration()!=generation || GetCompletedPoseFrame()!=frameId) { CheckPhaseTimeout(); return; }
         int waitError=GetPoseWaitError();
-        if (waitError!=0) throw new InvalidOperationException("OpenVR WaitGetPoses failed: "+waitError);
+        int poseBridgeStatus=GetBridgeStatus();
+        if (waitError!=0 || poseBridgeStatus!=0)
+            throw new InvalidOperationException("Native pose callback failed: bridgeStatus="+poseBridgeStatus+", poseWaitError="+waitError+
+                ". A rejected callback may not have called OpenVR WaitGetPoses.");
         var poseResult=compositor.GetLastPoses(poses,gamePoses);
         if (poseResult!=EVRCompositorError.None) throw new InvalidOperationException("OpenVR GetLastPoses failed: "+poseResult);
         var hmd=poses[OpenVR.k_unTrackedDeviceIndex_Hmd];

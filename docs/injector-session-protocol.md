@@ -4,6 +4,8 @@ The production session controller starts a game with `UGEVR_SESSION_ID` set to a
 
 The plugin atomically replaces `injector-status.yaml` at least once per second while Unity's `Update` callback runs, including when VR rendering is disabled. Paused or blocked engine callbacks can make the status stale. The controller treats a file older than ten seconds as stale. A heartbeat does not prove GPU progress or a physical headset connection.
 
+Transient Windows replacement contention receives up to three retries after 5, 10 and 20 milliseconds. Only atomic replacement is retried. Exhaustion preserves the previous complete status file, cleans the temporary file and reports an error for the next heartbeat; it does not crash the engine callback or overwrite the destination in place. A subsequent successful publication clears its transient status-write error. Readers should allow read, write and delete sharing.
+
 ```yaml
 schema_version: 1
 run_id: '00000000-0000-0000-0000-000000000001'
@@ -38,6 +40,8 @@ Each eye pair borrows one selected camera after the normal game frame. Both eyes
 Matrix restoration preserves automatic Unity projection/view updates when the original values match the engine's `ResetProjectionMatrix` / `ResetWorldToCameraMatrix` results. Distinct custom matrices are restored explicitly. Unity's public API does not expose its internal override flags, so a custom matrix exactly equal to an automatic matrix cannot be distinguished. This probe occurs without rendering. It avoids freezing an ordinary camera's future view or FOV by restoring every matrix as a setter override. Exact custom/default behavior, including temporal-jitter callbacks, remains a runtime validation case.
 
 Native event 0 waits for poses, event 1 submits, event 2 optionally captures a compositor image, and event 3 clears the bridge's references. The managed producer associates waits/submissions with a monotonically increasing generation and frame ID. It waits for explicit completed identities before consuming poses or reusing the state for another pair. Callback posting is not completion. The initial conservative producer spans engine frames rather than blocking the engine thread on an undocumented texture-query synchronization assumption; prediction and timing need measured runtime validation.
+
+Pose errors report both native bridge status and the OpenVR wait result. Bridge rejection for a removed device or invalid texture can happen before `WaitGetPoses`; its not-ready wait value must not be described as an OpenVR wait failure.
 
 Disable stops new pairs and restores owned game/background state. Eye targets remain alive until process teardown because the reference-drain API does not establish GPU idle. The plugin does not call `OpenVR.Shutdown` or unload its DLL while queued callbacks can use runtime/resources. If drain takes longer than five seconds, status reports the unresolved operation and recommends a game restart. This initial lifetime policy supports disable/reenable, not safe DLL unloading or complete runtime-restart recovery.
 

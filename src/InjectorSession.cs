@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace Ugevr
 {
@@ -99,6 +100,7 @@ namespace Ugevr
         {
             if (!Available || (!force && now < nextStatus)) return;
             nextStatus=now.AddSeconds(1);
+            if (LastError.StartsWith("status: ")) LastError="";
             string body = "schema_version: 1\nrun_id: " + Scalar(runId) + "\nprocess_id: " + processId.ToString(CultureInfo.InvariantCulture) +
                 "\nunity_version: " + Scalar(unityVersion) + "\nengine_ready: " + engineReady.ToString().ToLowerInvariant() +
                 "\nruntime: 'openvr'\nruntime_ready: " + runtimeReady.ToString().ToLowerInvariant() +
@@ -110,10 +112,26 @@ namespace Ugevr
             try
             {
                 File.WriteAllText(temporary,body,new UTF8Encoding(false));
-                if (File.Exists(destination)) File.Replace(temporary,destination,null); else File.Move(temporary,destination);
+                ReplaceStatus(temporary,destination);
             }
             catch (Exception ex) { LastError="status: " + ex.Message; }
             finally { try { if (File.Exists(temporary)) File.Delete(temporary); } catch { } }
+        }
+        static void ReplaceStatus(string temporary,string destination)
+        {
+            // Windows readers/AV can briefly deny delete sharing. Retry only atomic
+            // replacement; exhaustion leaves the previous complete heartbeat intact.
+            for (int attempt=0;;++attempt)
+            {
+                try
+                {
+                    if (File.Exists(destination)) File.Replace(temporary,destination,null); else File.Move(temporary,destination);
+                    return;
+                }
+                catch (IOException) { if (attempt>=3) throw; }
+                catch (UnauthorizedAccessException) { if (attempt>=3) throw; }
+                Thread.Sleep(5 << attempt);
+            }
         }
     }
 }

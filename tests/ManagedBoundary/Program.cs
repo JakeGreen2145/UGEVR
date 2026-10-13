@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using Ugevr;
 using UnityEngine;
 
@@ -16,6 +17,7 @@ class Program
     static void Main(string[] args)
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
+        if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
         MathChecks(); RestoreChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
@@ -128,6 +130,7 @@ class Program
             consumer.Publish(now.AddSeconds(2),"2017.4.40f1",true,true,false,10,false);
             Assert(File.ReadAllText(Path.Combine(directory,"injector-status.yaml")).Contains("submitted_pairs: 10\n"),"Disabled heartbeat refreshes");
             Assert(Directory.GetFiles(directory,"*.tmp").Length==0,"Atomic status leaves no temporary files");
+            ContentionChecks(consumer,directory,now);
             ExternalProducer(directory,new string('x',4097));
             Assert(consumer.Poll(now.AddSeconds(7))==null && consumer.LastError.Contains("4096"),"Oversized commands rejected");
         }
@@ -146,5 +149,61 @@ class Program
         string target=Path.Combine(directory,"command.txt"),temporary=target+".producer.tmp";
         File.WriteAllBytes(temporary,Convert.FromBase64String(base64));
         File.Move(temporary,target,true);
+    }
+    static Process ExternalStatusLock(string directory,string mode)
+    {
+        var start=new ProcessStartInfo("dotnet");
+        start.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+        start.ArgumentList.Add("lock-status"); start.ArgumentList.Add(directory); start.ArgumentList.Add(mode);
+        start.UseShellExecute=false; start.CreateNoWindow=true; start.RedirectStandardOutput=true; start.RedirectStandardInput=true;
+        var process=Process.Start(start);
+        Assert(process.StandardOutput.ReadLine()=="locked","Separate process owns a status replacement lock");
+        return process;
+    }
+    static void ContentionChecks(InjectorSession consumer,string directory,DateTime now)
+    {
+        if (Environment.OSVersion.Platform!=PlatformID.Win32NT) return;
+        string path=Path.Combine(directory,"injector-status.yaml"),previous=File.ReadAllText(path);
+        using (var blocker=ExternalStatusLock(directory,"hold"))
+        {
+            try
+            {
+                var timer=Stopwatch.StartNew();
+                consumer.Publish(now.AddSeconds(3),"2017.4.40f1",true,true,false,11,true);
+                timer.Stop();
+                Assert(timer.ElapsedMilliseconds<500,"Replacement retries are bounded while another process retains its lock");
+                Assert(consumer.LastError.StartsWith("status: "),"Exhausted rename retries report contention without throwing");
+                Assert(File.ReadAllText(path)==previous,"Failed atomic replacement preserves prior complete heartbeat");
+                Assert(Directory.GetFiles(directory,"*.tmp").Length==0,"Failed replacement removes temporary file");
+            }
+            finally { blocker.StandardInput.WriteLine("release"); blocker.WaitForExit(); }
+        }
+        consumer.Publish(now.AddSeconds(4),"2017.4.40f1",true,true,false,12,true);
+        Assert(File.ReadAllText(path).Contains("submitted_pairs: 12\n") && consumer.LastError=="","Next heartbeat recovers after transient contention");
+        using (var blocker=ExternalStatusLock(directory,"release-on-temp"))
+        {
+            consumer.Publish(now.AddSeconds(5),"2017.4.40f1",true,true,false,13,true);
+            blocker.WaitForExit();
+            Assert(blocker.ExitCode==0,"External reader releases lock after observing replacement temporary file");
+            Assert(File.ReadAllText(path).Contains("submitted_pairs: 13\n") && consumer.LastError=="","Atomic retry succeeds when reader releases during retry window");
+        }
+    }
+    static void LockStatus(string directory,string mode)
+    {
+        using (var input=new FileStream(Path.Combine(directory,"injector-status.yaml"),FileMode.Open,FileAccess.Read,FileShare.Read))
+        {
+            Console.WriteLine("locked"); Console.Out.Flush();
+            if (mode=="hold") Console.ReadLine();
+            else
+            {
+                var timer=Stopwatch.StartNew();
+                while (Directory.GetFiles(directory,"injector-status.yaml.*.tmp").Length==0)
+                {
+                    if (timer.ElapsedMilliseconds>2000) throw new TimeoutException("No replacement attempt observed.");
+                    Thread.Sleep(1);
+                }
+                Thread.Sleep(10);
+            }
+        }
     }
 }
