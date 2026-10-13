@@ -71,3 +71,15 @@ _Avoid_: A local-player identity or an input delivery mechanism
 **Game input adapter**:
 The part of UGEVR that delivers its logical actions to a particular game's input consumer and routes supported feedback from that consumer.
 _Avoid_: A runtime controller binding or a visual controller attachment
+
+**Roomscale body movement**:
+Physical tracked movement applied to the identified player body through the game's movement and collision authority.
+_Avoid_: A render-only camera offset
+
+**Movement adapter**:
+The part of UGEVR that supplies movement requests to an identified game movement owner and reports the movement that owner accepts.
+_Avoid_: A collider type or an arbitrary Transform write
+
+**Head contact**:
+A verified overlap or contact between the tracked head's configured shape and blocking game geometry, evaluated separately from player-body collision.
+_Avoid_: A successful body sweep alone

@@ -33,6 +33,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [How should controller input, bindings, gamepad coexistence, and haptics reach Unity games?](https://github.com/JakeGreen2145/UGEVR/issues/10) is resolved. XInput delivery for observed consumers precedes Unity input adapters. The action model preserves analog triggers, and automatic source takeover waits for neutral controls. The ticket holds bindings, update ownership, cancellation and feedback contracts.
 
+[Which aiming and collision-aware roomscale behaviors can generalize across Unity player controllers?](https://github.com/JakeGreen2145/UGEVR/issues/11) is resolved. Game aim and smooth turning are defaults, with optional tracked aim, snap turning and horizontal roomscale. CharacterController integration precedes custom/kinematic motors and dynamic bodies. The ticket holds movement authority, accepted-displacement reconciliation and head-contact fade requirements.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.
