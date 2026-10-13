@@ -1,0 +1,146 @@
+{
+  "passed": true,
+  "cases": 14,
+  "results": [
+    {
+      "game": "firewatch-final-tracking",
+      "case": "x",
+      "frame": 9713,
+      "camera_restored": true,
+      "eye_separation_m": 0.0640014166635399,
+      "eye_position_error_m": 2.6312274314932438e-06,
+      "left_right_image_mean_absolute_difference": 2.2821648120880127,
+      "image_luma_mean": 110.7596206665039
+    },
+    {
+      "game": "firewatch-final-tracking",
+      "case": "y",
+      "frame": 9865,
+      "camera_restored": true,
+      "eye_separation_m": 0.06399976703559267,
+      "eye_position_error_m": 4.2992569362354516e-06,
+      "left_right_image_mean_absolute_difference": 2.4265897274017334,
+      "image_luma_mean": 111.17476654052734
+    },
+    {
+      "game": "firewatch-final-tracking",
+      "case": "z",
+      "frame": 10009,
+      "camera_restored": true,
+      "eye_separation_m": 0.06399974866427159,
+      "eye_position_error_m": 1.7800986000793273e-06,
+      "left_right_image_mean_absolute_difference": 2.075732469558716,
+      "image_luma_mean": 112.47260284423828
+    },
+    {
+      "game": "firewatch-final-tracking",
+      "case": "yaw",
+      "frame": 10155,
+      "camera_restored": true,
+      "eye_separation_m": 0.06400055619078805,
+      "eye_position_error_m": 1.2876769908132246e-06,
+      "left_right_image_mean_absolute_difference": 1.2521063089370728,
+      "image_luma_mean": 95.7580795288086
+    },
+    {
+      "game": "firewatch-final-tracking",
+      "case": "pitch",
+      "frame": 10314,
+      "camera_restored": true,
+      "eye_separation_m": 0.06400229553805199,
+      "eye_position_error_m": 2.477067532424826e-06,
+      "left_right_image_mean_absolute_difference": 2.1243581771850586,
+      "image_luma_mean": 122.55941009521484
+    },
+    {
+      "game": "firewatch-final-tracking",
+      "case": "roll",
+      "frame": 10468,
+      "camera_restored": true,
+      "eye_separation_m": 0.06400119091368671,
+      "eye_position_error_m": 1.313040748129879e-06,
+      "left_right_image_mean_absolute_difference": 2.296720266342163,
+      "image_luma_mean": 110.85791015625
+    },
+    {
+      "game": "firewatch-final-tracking",
+      "case": "reset",
+      "frame": 10632,
+      "camera_restored": true,
+      "eye_separation_m": 0.06400229553805199,
+      "eye_position_error_m": 2.477067532424826e-06,
+      "left_right_image_mean_absolute_difference": 2.1382181644439697,
+      "image_luma_mean": 109.21219635009766
+    },
+    {
+      "game": "outerwilds-final",
+      "case": "x",
+      "frame": 4857,
+      "camera_restored": true,
+      "eye_separation_m": 0.06399897840629376,
+      "eye_position_error_m": 4.464924863611941e-06,
+      "left_right_image_mean_absolute_difference": 0.9943014979362488,
+      "image_luma_mean": 4.130802631378174
+    },
+    {
+      "game": "outerwilds-final",
+      "case": "y",
+      "frame": 5004,
+      "camera_restored": true,
+      "eye_separation_m": 0.06399346151880751,
+      "eye_position_error_m": 8.086443855859216e-06,
+      "left_right_image_mean_absolute_difference": 0.9754626154899597,
+      "image_luma_mean": 4.123776912689209
+    },
+    {
+      "game": "outerwilds-final",
+      "case": "z",
+      "frame": 5148,
+      "camera_restored": true,
+      "eye_separation_m": 0.06400397333948232,
+      "eye_position_error_m": 4.943908884058601e-06,
+      "left_right_image_mean_absolute_difference": 0.9927002787590027,
+      "image_luma_mean": 4.138314247131348
+    },
+    {
+      "game": "outerwilds-final",
+      "case": "yaw",
+      "frame": 5297,
+      "camera_restored": true,
+      "eye_separation_m": 0.06400756276885892,
+      "eye_position_error_m": 6.3021927303452685e-06,
+      "left_right_image_mean_absolute_difference": 0.7733707427978516,
+      "image_luma_mean": 3.720323324203491
+    },
+    {
+      "game": "outerwilds-final",
+      "case": "pitch",
+      "frame": 5445,
+      "camera_restored": true,
+      "eye_separation_m": 0.06399778863656468,
+      "eye_position_error_m": 3.9533584867967875e-06,
+      "left_right_image_mean_absolute_difference": 1.0344047546386719,
+      "image_luma_mean": 4.40516996383667
+    },
+    {
+      "game": "outerwilds-final",
+      "case": "roll",
+      "frame": 5591,
+      "camera_restored": true,
+      "eye_separation_m": 0.06400685062468424,
+      "eye_position_error_m": 6.508741414279484e-06,
+      "left_right_image_mean_absolute_difference": 0.9821567535400391,
+      "image_luma_mean": 4.234405994415283
+    },
+    {
+      "game": "outerwilds-final",
+      "case": "reset",
+      "frame": 5739,
+      "camera_restored": true,
+      "eye_separation_m": 0.06399321917204023,
+      "eye_position_error_m": 4.5042236394010615e-06,
+      "left_right_image_mean_absolute_difference": 1.0021501779556274,
+      "image_luma_mean": 4.27187442779541
+    }
+  ]
+}

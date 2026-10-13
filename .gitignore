@@ -1,0 +1,23 @@
+# Local game copies, captures, runtime settings and reverse-engineering records
+/evidence/
+/research/
+/downloads/
+/dist/
+/build/
+/.local-tools/
+/README.txt
+
+# Downloaded BepInEx package; Fetch-Dependencies.ps1 restores the pinned release
+/vendor/BepInEx/
+
+# Build outputs and generated absolute-path header
+**/bin/
+**/obj/
+/diagnostics/test-hmd-driver/source/pose_path.h
+/diagnostics/test-hmd-driver/vendor/*.reference*
+/diagnostics/test-hmd-driver/vendor/SteamVR_*.reference.cs
+/diagnostics/test-hmd-driver/sync-review.txt
+*.pdb
+*.obj
+*.exp
+.vs/

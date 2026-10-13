@@ -1,0 +1,62 @@
+DIAGNOSTIC SIMULATED HMD ONLY
+
+This driver supplies simulated tracking through SteamVR's server-driver API.
+It cannot establish physical-headset comfort, controller input, or hardware latency.
+It creates only one HMD device and supplies IVRDisplayComponent_003.
+
+Build
+  Run build.ps1 from PowerShell. It uses installed MSVC 14.29.30133 and Windows
+  SDK 10.0.16299.0, and records the absolute local pose.txt path in pose_path.h.
+  The package driver/bin/win64/driver_unityvrtest.dll is Windows x64.
+  Rebuild if the diagnostic directory is moved to another location.
+
+Integration, for the parent agent to perform
+  1. Shut down the current SteamVR runtime.
+  2. Record settings and current driver registration before changing them.
+  3. Register the package directory with SteamVR's vrpathreg.exe adddriver.
+     The directory to register ends in diagnostics/test-hmd-driver/driver.
+     Do not register the DLL path or the diagnostics root.
+  4. Enable driver_unityvrtest and disable force-loading driver_null for this run.
+     If forceDriver is used, set it to unityvrtest. Preserve previous values.
+  5. Start SteamVR. Its vrserver log should contain:
+       unityvrtest: DIAGNOSTIC SIMULATED HMD activated. Pose file: ...
+     Confirm runtime HMD model DIAGNOSTIC SIMULATED HMD and serial
+     unityvr-diagnostic-simulated-hmd-001 before treating poses as evidence.
+  6. Run an independent OpenVR pose-reader and the game injector.
+  7. Change pose.txt and verify runtime poses, injected eye poses, and images
+     respond. Compare translation and each rotation axis separately.
+  8. After the diagnostic run, exit SteamVR, remove the registration with
+     vrpathreg.exe removedriver and restore previous settings.
+
+pose.txt format
+  x y z yaw pitch roll
+  Positions are meters in OpenVR coordinates, right-handed with +Y up and -Z
+  forward. Angles are degrees. Quaternion order is yaw about +Y, then pitch
+  about +X, then roll about +Z. The initial pose is 0 1.7 0 0 0 0.
+  Example translation: 0.25 1.7 0 0 0 0
+  Example yaw:         0 1.7 0 30 0 0
+  Example pitch:       0 1.7 0 0 20 0
+  Example roll:        0 1.7 0 0 0 15
+  Prefix with motion to add periodic movement on all six axes:
+    motion 0 1.7 0 0 0 0
+  Rewrite the file without the prefix to return to a static pose.
+  The driver retains the last valid input on an incomplete or malformed write.
+  File reads happen in RunFrame. Each RunFrame calls TrackedDevicePoseUpdated.
+  Velocities and accelerations remain zero; this test validates transform
+  propagation, not prediction under physical hardware motion.
+
+Display
+  Window dimensions are 2048x1024 with 1024x1024 per eye, at origin 0,0.
+  Recommended render target is 1024x1024 per eye, 90 Hz, 64 mm IPD.
+  Projection bounds are +/-1, and distortion/inverse distortion are identity.
+  The driver uses Valve's sample DisplayDebugMode behavior with a virtual
+  desktop display. It does not implement direct mode or IVRVirtualDisplay.
+  Runtime display-window behavior still requires local runtime verification.
+
+Source provenance
+  OpenVR SDK commit 0924064316de3effbcd1acf1e309182a2deb1c05
+  https://github.com/ValveSoftware/openvr/tree/0924064316de3effbcd1acf1e309182a2deb1c05/samples/drivers/drivers/simplehmd
+  https://github.com/ValveSoftware/openvr/blob/0924064316de3effbcd1acf1e309182a2deb1c05/headers/openvr_driver.h
+  Vendor header, reference files and license are under vendor.
+  The implementation follows sample interface/property patterns but uses
+  RunFrame to publish the file-based poses instead of a sample pose thread.
