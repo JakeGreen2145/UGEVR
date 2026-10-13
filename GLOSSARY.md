@@ -35,3 +35,15 @@ _Avoid_: Static source confirmation
 **Engine adapter**:
 The part of UGEVR that provides engine access for a particular Unity player family through the common engine-access contract.
 _Avoid_: A game-specific gameplay adaptation
+
+**Synchronized sequential stereo**:
+Two eye views rendered in sequence for one VR frame from the same gameplay state, with a consistent pose association.
+_Avoid_: Alternating-eye stereo
+
+**Alternating-eye stereo**:
+A compatibility mode that updates the eyes on alternating render frames, with separately tracked image and pose times.
+_Avoid_: A synchronized eye pair
+
+**Fidelity fallback**:
+An explicit change to the game's visual effects or rendering behavior that makes a declared VR capability work, with the resulting quality change recorded.
+_Avoid_: A silent rendering defect

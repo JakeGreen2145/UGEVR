@@ -25,6 +25,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [How should UGEVR bootstrap and expose engine access across Mono and IL2CPP?](https://github.com/JakeGreen2145/UGEVR/issues/6) is resolved. Startup loading precedes late attachment. Managed engine adapters provide access where possible, with native access for missing capabilities. The ticket holds the common contract and required mechanism checks.
 
+[Which Unity stereo strategies preserve simulation and temporal state across render pipelines?](https://github.com/JakeGreen2145/UGEVR/issues/7) is resolved. Synchronized sequential stereo comes first, with explicit fidelity fallbacks and opt-in alternating-eye stereo. Native stereo paths follow. The ticket holds the rendering contract and mechanism checks across pipelines.
+
 ## Proposed delivery stages
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.
