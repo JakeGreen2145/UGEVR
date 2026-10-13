@@ -32,6 +32,11 @@ var controller = Path.GetFullPath(args.FirstOrDefault() ?? throw new ArgumentExc
 var root = Path.Combine(Path.GetTempPath(), "UGEVR-controller-checks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 var owned = new List<string>(); int checks = 0;
+var previousSteamAppId = Environment.GetEnvironmentVariable("SteamAppId");
+var previousSteamGameId = Environment.GetEnvironmentVariable("SteamGameId");
+// Simulate inherited machine/session values in this test process only. Never write user or machine environment.
+Environment.SetEnvironmentVariable("SteamAppId", "65535");
+Environment.SetEnvironmentVariable("SteamGameId", "65536");
 async Task<(int Code, string Output)> Cli(params string[] arguments)
 {
     var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
@@ -58,6 +63,7 @@ try
     Require(good.Code == 0 && Field(good.Output, "engine_ready", "true") && Field(good.Output, "runtime_ready", "true"), "launch requires correct live handshake");
     Require(Field(good.Output, "stream_ready", "false"), "runtime readiness does not imply stream readiness");
     Require(File.ReadAllText(Path.Combine(good.Directory, "child-environment.txt")) == "753640\n753640", "Steam application identity is scoped to the child environment");
+    Require(Environment.GetEnvironmentVariable("SteamAppId") == "65535" && Environment.GetEnvironmentVariable("SteamGameId") == "65536", "child Steam override preserves inherited caller environment");
     var borrowed = Path.Combine(root, "borrowed"); Directory.CreateDirectory(borrowed);
     File.WriteAllText(Path.Combine(borrowed, "session.yaml"), File.ReadAllText(Path.Combine(good.Directory, "session.yaml")).Replace("owned_process: \"true\"", "owned_process: \"false\""));
     var rejectedStop = await Cli("stop", "--session-dir", borrowed, "--force", "true");
@@ -77,6 +83,7 @@ try
     var afterExit = await Cli("status", "--session-dir", good.Directory);
     Require(Field(afterExit.Output, "injector_status", "stale") && Field(afterExit.Output, "runtime_ready", "false"), "exited process invalidates producer readiness");
     var brokenMonitor = await Launch("good");
+    Require(File.ReadAllText(Path.Combine(brokenMonitor.Directory, "child-environment.txt")) == "65535\n65536", "launch without override preserves explicitly inherited Steam values");
     File.WriteAllText(Path.Combine(brokenMonitor.Directory, "stop-request.yaml"), "invalid-stop-request\n");
     var monitorDeadline = DateTime.UtcNow.AddSeconds(3);
     (int Code, string Output) monitor = default;
@@ -109,6 +116,12 @@ try
         var payload = Path.Combine(root, "payload"); Directory.CreateDirectory(payload);
         File.WriteAllText(Path.Combine(payload, "injected-a.txt"), "new-a"); File.WriteAllText(Path.Combine(payload, "injected-b.txt"), "new-b");
         File.WriteAllText(Path.Combine(gameRoot, "injected-a.txt"), "original-a"); File.WriteAllText(Path.Combine(gameRoot, "injected-b.txt"), "original-b");
+        var mismatchedSession = Path.Combine(root, "mismatched-game-session");
+        var originalFiles = Directory.GetFiles(gameRoot, "*", SearchOption.AllDirectories).ToDictionary(path => path, path => System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)));
+        var mismatched = await Cli("launch", "--exe", Environment.ProcessPath!, "--game-root", gameRoot, "--distribution-root", payload, "--deployment-script", deployment,
+            "--session-dir", mismatchedSession, "--replace-path", "injected-a.txt");
+        Require(mismatched.Code == 2 && mismatched.Output.Contains("inside the selected game root") && !Directory.Exists(mismatchedSession), "mismatched launch root is rejected before session creation");
+        Require(Directory.GetFiles(gameRoot, "*", SearchOption.AllDirectories).Length == originalFiles.Count && originalFiles.All(file => file.Value.SequenceEqual(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(file.Key)))), "mismatched launch root cannot mutate any game target file");
         async Task<(string Directory, int Code, string Output)> Deployed(string script, string mode)
         {
             var dir = Path.Combine(root, "deployed-" + Guid.NewGuid().ToString("N")); owned.Add(dir);
@@ -142,6 +155,8 @@ try
 }
 finally
 {
+    Environment.SetEnvironmentVariable("SteamAppId", previousSteamAppId);
+    Environment.SetEnvironmentVariable("SteamGameId", previousSteamGameId);
     foreach (var directory in owned)
     {
         if (!File.Exists(Path.Combine(directory, "session.yaml"))) continue;

@@ -51,7 +51,9 @@ internal static class Program
             foreach (var key in new[] { "game-root", "distribution-root", "deployment-script" }) _ = o.Required(key);
             if (!File.Exists(Path.GetFullPath(o.Required("deployment-script")))) throw new ArgumentException("Deployment script does not exist.");
             var root = Path.GetFullPath(o.Required("game-root")).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!Directory.Exists(root)) throw new ArgumentException("Game root must exist.");
             if (!executable.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Executable must be inside the selected game root.");
+            RejectReparsePoints(executable);
         }
         if (Directory.Exists(directory) && Directory.EnumerateFileSystemEntries(directory).Any()) throw new ArgumentException("Use an empty, unique session directory. Existing sessions are never overwritten.");
         Directory.CreateDirectory(directory);
@@ -97,6 +99,13 @@ internal static class Program
         var start = new ProcessStartInfo(executable) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden };
         if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase)) start.ArgumentList.Add(typeof(Program).Assembly.Location);
         return start;
+    }
+
+    private static void RejectReparsePoints(string path)
+    {
+        for (string? part = path; part is not null; part = Path.GetDirectoryName(part))
+            if ((File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0)
+                throw new ArgumentException("Selected executable cannot cross a reparse point: " + part);
     }
 
     private static async Task<int> Supervise(Options o)
