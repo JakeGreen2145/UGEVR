@@ -20,6 +20,14 @@ _Avoid_: A guarantee that every feature works in that game
 Game-specific configuration or extension behavior that supplies capabilities the generic injector cannot infer reliably.
 _Avoid_: Treating visual attachment as gameplay interaction
 
+**Generic VR core**:
+The VR capabilities that operate across unrelated Unity games without game-specific gameplay code, including stereo rendering and 6DoF head tracking.
+_Avoid_: A collection of independent game-specific VR mods
+
+**Functional compatibility**:
+A specified set of VR capabilities works in a tested compatibility cell. It is recorded separately from the performance achieved in that cell.
+_Avoid_: Native-refresh performance
+
 **Runtime validation**:
 An observed capability result in a named game/build and VR setup, evaluated against a stated acceptance criterion.
 _Avoid_: Static source confirmation

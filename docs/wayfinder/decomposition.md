@@ -27,6 +27,8 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.
 
+The [validation-gates decision](https://github.com/JakeGreen2145/UGEVR/issues/5) is resolved. The initial gate uses Firewatch and Outer Wilds, three fresh-launch checks, and 3–5 minutes of gameplay per game, with Steam Frame testbench automation and streamed-game launch support. It passes functional correctness first and reports timing separately. The later native-performance tier uses p95 application CPU/GPU timing within the selected display interval and fewer than 1% missed deadlines during steady gameplay. Broader coverage uses 24 available core combinations and two unrelated non-VR games per claimed backend/pipeline family. The ticket holds the complete policy and evidence requirements.
+
 | Stage | Outcome | Candidate exit evidence |
 | --- | --- | --- |
 | S1: physical gameplay baseline | Turn the existing Mono/D3D11/OpenVR path into a reliable physical-headset gameplay session with usable menus and ordinary game controls | Recorded physical-headset runs in unrelated games, including gameplay, menus, camera changes and cutscenes; correct stereo/tracking and no accumulated state corruption |
