@@ -1,6 +1,6 @@
 # UGEVR decomposition
 
-The user selected the full UEVR capability target with staged delivery. The [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1) holds the decisions needed to reach an implementation specification. This document proposes subsystem boundaries and release stages; it does not settle those decisions or claim that the target has been implemented.
+The user selected the full UEVR capability target with staged delivery. The completed [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1) indexes the accepted decisions. [UGEVR: full Unity VR injector capability target with staged delivery](https://github.com/JakeGreen2145/UGEVR/issues/24) is the published implementation specification. This document summarizes the decomposition and links its contracts; it does not claim that the target has been implemented.
 
 The [feature target](feature-target.md) records individual capabilities, evidence, UGEVR gaps, and acceptance criteria. [Source provenance](source-provenance.md) fixes the audit revisions and evidence limits.
 
@@ -21,7 +21,7 @@ The [feature target](feature-target.md) records individual capabilities, evidenc
 | Frontend and lifecycle | Process discovery, runtime selection, launch/attach, configuration and conflict recovery | Attachment/install policy, process identity, preflight, permissions handling, coexistence and removal | A user can select a game, start VR, diagnose a failure and restore normal launch behavior |
 | Diagnostics and compatibility controls | Expose evidence, timing, frame state, errors, rendering overrides and reproducible support reports | Capability reporting, telemetry schema, performance budget and fix policies | A failed session yields actionable data that distinguishes injection, tracking, rendering and compositor faults |
 
-These boundaries deliberately separate engine access from VR runtime access, visual attachments from gameplay behavior, and UI composition from input routing. Their interfaces and placement remain open decisions.
+These boundaries separate engine access from VR runtime access, visual attachments from gameplay behavior, and UI composition from input routing. Their accepted contracts are in the specification and linked decision resolutions.
 
 [How should UGEVR bootstrap and expose engine access across Mono and IL2CPP?](https://github.com/JakeGreen2145/UGEVR/issues/6) is resolved. Startup loading precedes late attachment. Managed engine adapters provide access where possible, with native access for missing capabilities. The ticket holds the common contract and required mechanism checks.
 
@@ -45,9 +45,9 @@ These boundaries deliberately separate engine access from VR runtime access, vis
 
 [Which compatibility controls and diagnostics should expose actionable failures and performance?](https://github.com/JakeGreen2145/UGEVR/issues/16) is resolved. Verified controls are explicit and reversible; bounded local logs are the default, with detailed artifacts enabled explicitly. Application, compositor and stream metrics remain separate, as do functional and performance results. The ticket holds command, timeline, bundle and fault-attribution contracts.
 
-## Proposed delivery stages
+## Delivery stages
 
-Stages are a recommended order, not release commitments. The first decision ticket sets measurable gates and chooses representative games/headsets. Foundational profiles, diagnostics, and recovery start in the first stage and mature throughout.
+Stages define the accepted delivery order and measurable gates, not release dates. Foundational profiles, diagnostics and recovery start in the first stage and mature throughout. The specification governs stage dependencies and required evidence.
 
 The [validation-gates decision](https://github.com/JakeGreen2145/UGEVR/issues/5) is resolved. The initial gate uses Firewatch and Outer Wilds, three fresh-launch checks, and 3–5 minutes of gameplay per game, with Steam Frame testbench automation and streamed-game launch support. It passes functional correctness first and reports timing separately. The later native-performance tier uses p95 application CPU/GPU timing within the selected display interval and fewer than 1% missed deadlines during steady gameplay. Broader coverage uses 24 available core combinations and two unrelated non-VR games per claimed backend/pipeline family. The ticket holds the complete policy and evidence requirements.
 
@@ -69,4 +69,4 @@ The three UEVR rendering modes also encode different timing and temporal-history
 
 ## Remaining work on this map
 
-All original decision tickets are resolved. The remaining work before specification publication is the final human check of test boundaries and synthesis through `to-spec`. Game/version-specific mechanisms, stripping and pipeline failures, stream automation and measured performance remedies remain explicit staged implementation probes. They do not become supported capabilities until their acceptance evidence passes. A probe that exposes a new architectural choice must reopen that choice with evidence.
+All decision tickets are resolved, the user confirmed the testing boundaries and `to-spec` published the specification. Game/version-specific mechanisms, stripping and pipeline failures, stream automation and measured performance remedies remain explicit staged implementation probes. They do not become supported capabilities until their acceptance evidence passes. A probe that exposes a new architectural choice must reopen that choice with evidence. The next implementation gate is physical gameplay in Firewatch and Outer Wilds.

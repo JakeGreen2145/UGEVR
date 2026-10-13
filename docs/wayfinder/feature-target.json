@@ -1,6 +1,7 @@
 {
   "audit_date": "2026-10-13",
-  "status": "Target and proposed decomposition; not implemented or runtime-validated",
+  "status": "Accepted staged target; specification published; not implemented or runtime-validated",
+  "spec_url": "https://github.com/JakeGreen2145/UGEVR/issues/24",
   "map_url": "https://github.com/JakeGreen2145/UGEVR/issues/1",
   "reports": {
     "rendering": {

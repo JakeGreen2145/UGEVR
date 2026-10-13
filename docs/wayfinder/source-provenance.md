@@ -23,4 +23,4 @@ A public [RenderDoc SDK mirror](https://github.com/elliotttate/UESDK-RenderDoc) 
 - Documented means official documentation describes the behavior. It is weaker evidence when no corresponding implementation path was inspected.
 - Runtime-validated requires an observed run with recorded game, build, headset/runtime, scene, and acceptance check. No UEVR runtime validation was performed in this audit.
 - UGEVR's existing runs establish simulated HMD tracking and eye submission in two title scenes. They establish neither physical comfort nor full gameplay compatibility.
-- Unity-equivalent targets and subsystem boundaries are proposals. They need Unity-specific research and prototypes before implementation decisions are settled.
+- Unity-equivalent targets and subsystem contracts are accepted in [UGEVR: full Unity VR injector capability target with staged delivery](https://github.com/JakeGreen2145/UGEVR/issues/24). Mechanism probes and runtime acceptance remain implementation work; accepted architecture does not establish compatibility.

@@ -30,7 +30,9 @@ IL2CPP, OpenXR, D3D12, Vulkan, URP/HDRP, motion controllers and multi-camera com
 
 The next target is UEVR-equivalent capabilities for Unity, delivered in stages. The [feature target](docs/wayfinder/feature-target.md) indexes 149 source-audited entries with Unity outcomes, existing gaps, acceptance criteria and decision links. Entries include overlapping facets and documented claims; they are not 149 independently runtime-validated features.
 
-The [proposed decomposition](docs/wayfinder/decomposition.md) groups the target into subsystems and delivery stages. The [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1) tracks the open decisions required before an implementation specification. [Source provenance](docs/wayfinder/source-provenance.md) records the pinned UEVR revisions and SDK evidence limits.
+The published [UGEVR: full Unity VR injector capability target with staged delivery](https://github.com/JakeGreen2145/UGEVR/issues/24) is ready for implementation. It contains the accepted subsystem contracts, 98 user stories, staged gates and confirmed testing boundaries. The [coverage appendix](docs/wayfinder/spec-coverage.md) accounts for every audited target.
+
+The [decomposition](docs/wayfinder/decomposition.md) groups the target into subsystems and delivery stages. The completed [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1) indexes the decisions behind the specification. [Source provenance](docs/wayfinder/source-provenance.md) records the pinned UEVR revisions and SDK evidence limits. Publication completes the plan; physical gameplay and the later capability target remain implementation work.
 
 ## Build
 

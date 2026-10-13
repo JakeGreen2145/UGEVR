@@ -2,6 +2,8 @@
 
 This appendix accounts for every audited target in the implementation specification. It freezes the outcomes and acceptance criteria from the [feature registry](https://github.com/JakeGreen2145/UGEVR/blob/ddb52c4/docs/wayfinder/feature-target.json). The accepted specification and decision resolutions govern defaults, ownership and scope qualifications. This is a target index, not a runtime result.
 
+Canonical specification: [UGEVR: full Unity VR injector capability target with staged delivery](https://github.com/JakeGreen2145/UGEVR/issues/24).
+
 All 149 IDs occur exactly once. Overlapping facets can share implementation and tests but retain evidence results. A proposed start stage is not an exit guarantee; work starts earlier when needed to pass a gate. Analog trigger delivery is an accepted addition, smooth turning remains the default, and disable is distinct from verified safe module unload.
 
 | ID | Audited facet | Unity outcome | Observable acceptance | Proposed start | Contract |

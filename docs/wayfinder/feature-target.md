@@ -6,7 +6,7 @@ Each feature link opens its immutable audit row, with the inspected UEVR mechani
 
 All Unity outcomes below are targets. Baseline status refers to the existing proof of concept, whose successful runs used simulated headset tracking in two title scenes. Physical-headset gameplay remains unverified.
 
-The stage column proposes when capability work begins. Foundational subsets often start earlier than advanced parity, so a subsystem can span several stages. Stage gates and architecture remain human decisions on the [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1). See [decomposition](decomposition.md) for S1-S5 definitions and [source provenance](source-provenance.md) for snapshots and the SDK distinction.
+The stage column proposes when capability work begins. Foundational subsets often start earlier than advanced parity, so a subsystem can span several stages. The completed [Wayfinder map](https://github.com/JakeGreen2145/UGEVR/issues/1) indexes accepted decisions. [UGEVR: full Unity VR injector capability target with staged delivery](https://github.com/JakeGreen2145/UGEVR/issues/24) governs stage gates, architecture and accepted defaults. See [decomposition](decomposition.md) for S1-S5 definitions and [source provenance](source-provenance.md) for snapshots and the SDK distinction.
 
 External denotes a companion integration, not a capability implemented by UEVR core. Documented hardware bindings are a target for supported input profiles, not proof that every listed device works.
 
