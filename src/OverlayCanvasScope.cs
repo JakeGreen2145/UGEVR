@@ -14,6 +14,7 @@ namespace Ugevr
         readonly List<CanvasState> canvases=new List<CanvasState>();
         readonly List<RectState> rects=new List<RectState>();
         readonly List<string> errors=new List<string>();
+        readonly List<string> rectMismatches=new List<string>();
         readonly string[] appliedEyes=new string[2];
         readonly Camera camera;
         readonly bool includeLayers;
@@ -42,6 +43,8 @@ namespace Ugevr
         sealed class RectState
         {
             public RectTransform Rect;
+            public string Name;
+            public int Id;
             public Vector2 AnchorMin,AnchorMax,Pivot,Size;
             public Vector3 AnchoredPosition,LocalPosition,LocalScale;
             public Quaternion LocalRotation;
@@ -72,7 +75,7 @@ namespace Ugevr
                 {
                     if (rect==null || !seen.Add(rect.GetInstanceID())) continue;
                     if (rects.Count==RectLimit) throw new InvalidOperationException("Overlay UI exceeds 8192 RectTransforms; an explicit profile selection is required.");
-                    rects.Add(new RectState {Rect=rect,AnchorMin=rect.anchorMin,AnchorMax=rect.anchorMax,Pivot=rect.pivot,Size=rect.sizeDelta,
+                    rects.Add(new RectState {Rect=rect,Name=rect.name,Id=rect.GetInstanceID(),AnchorMin=rect.anchorMin,AnchorMax=rect.anchorMax,Pivot=rect.pivot,Size=rect.sizeDelta,
                         AnchoredPosition=rect.anchoredPosition3D,LocalPosition=rect.localPosition,LocalScale=rect.localScale,LocalRotation=rect.localRotation});
                 }
             }
@@ -141,11 +144,15 @@ namespace Ugevr
                 Attempt(delegate {rect.localScale=state.LocalScale;},"rect scale");
                 Attempt(delegate {rect.localPosition=state.LocalPosition;},"rect local position");
                 Attempt(delegate {
-                    if (!rect.anchorMin.Equals(state.AnchorMin) || !rect.anchorMax.Equals(state.AnchorMax) || !rect.pivot.Equals(state.Pivot) ||
-                        !rect.sizeDelta.Equals(state.Size) || !rect.anchoredPosition3D.Equals(state.AnchoredPosition) ||
-                        !rect.localPosition.Equals(state.LocalPosition) || !rect.localScale.Equals(state.LocalScale) || !rect.localRotation.Equals(state.LocalRotation))
-                        Conflict("RectTransform did not retain its restored values.");
-                },"verify rect restoration");
+                    Verify(state,"anchorMin",Values(state.AnchorMin),Values(rect.anchorMin));
+                    Verify(state,"anchorMax",Values(state.AnchorMax),Values(rect.anchorMax));
+                    Verify(state,"pivot",Values(state.Pivot),Values(rect.pivot));
+                    Verify(state,"sizeDelta",Values(state.Size),Values(rect.sizeDelta));
+                    Verify(state,"anchoredPosition3D",Values(state.AnchoredPosition),Values(rect.anchoredPosition3D));
+                    Verify(state,"localPosition",Values(state.LocalPosition),Values(rect.localPosition));
+                    Verify(state,"localScale",Values(state.LocalScale),Values(rect.localScale));
+                    Verify(state,"localRotation",Values(state.LocalRotation),Values(rect.localRotation));
+                },"verify rect restoration "+state.Name);
             }
             foreach (CanvasState state in canvases)
             {
@@ -175,6 +182,32 @@ namespace Ugevr
             return text.Append('"').ToString();
         }
         static string Number(float value) { return Single.IsNaN(value) || Single.IsInfinity(value)?"null":value.ToString("R",CultureInfo.InvariantCulture); }
+        static float[] Values(Vector2 value) { return new[]{value.x,value.y}; }
+        static float[] Values(Vector3 value) { return new[]{value.x,value.y,value.z}; }
+        static float[] Values(Quaternion value) { return new[]{value.x,value.y,value.z,value.w}; }
+        static string Numbers(float[] values)
+        {
+            var text=new StringBuilder("[");
+            for (int i=0;i<values.Length;++i) {if (i>0) text.Append(',');text.Append(Number(values[i]));}
+            return text.Append(']').ToString();
+        }
+        void Verify(RectState state,string field,float[] expected,float[] observed)
+        {
+            bool mismatch=false,finite=true;double maximum=0;
+            for (int i=0;i<expected.Length;++i)
+            {
+                mismatch|=expected[i]!=observed[i];
+                finite&=!Single.IsNaN(expected[i]) && !Single.IsInfinity(expected[i]) && !Single.IsNaN(observed[i]) && !Single.IsInfinity(observed[i]);
+                maximum=Math.Max(maximum,Math.Abs((double)expected[i]-observed[i]));
+            }
+            if (!mismatch) return;
+            string delta=finite?maximum.ToString("R",CultureInfo.InvariantCulture):"null";
+            string name=state.Name==null?"":state.Name.Substring(0,Math.Min(64,state.Name.Length));
+            Conflict("Rect "+name+" id="+state.Id+" "+field+" expected="+Numbers(expected)+" observed="+Numbers(observed)+" maxDelta="+delta);
+            if (rectMismatches.Count<64) rectMismatches.Add("{\"name\":"+Quote(name)+",\"instanceId\":"+state.Id+",\"field\":"+Quote(field)+
+                ",\"expected\":"+Numbers(expected)+",\"observed\":"+Numbers(observed)+",\"finite\":"+(finite?"true":"false")+
+                ",\"maxAbsoluteDelta\":"+delta+",\"acceptedTolerance\":0}");
+        }
         static string Vector(Vector3 v) { return "["+Number(v.x)+","+Number(v.y)+","+Number(v.z)+"]"; }
         string AppliedCanvasJson()
         {
@@ -205,7 +238,7 @@ namespace Ugevr
                 .Append(",\"rectCount\":").Append(rects.Count).Append(",\"destroyedObjects\":").Append(DestroyedObjects)
                 .Append(",\"restorationConflicts\":").Append(RestorationConflicts).Append(",\"errors\":[");
             for (int i=0;i<errors.Count;++i) { if (i>0) text.Append(','); text.Append(Quote(errors[i])); }
-            text.Append("],\"selectedRoots\":[");
+            text.Append("],\"rectMismatches\":[").Append(String.Join(",",rectMismatches.ToArray())).Append("],\"selectedRoots\":[");
             for (int i=0;i<canvases.Count;++i)
             {
                 if (i>0) text.Append(','); var state=canvases[i];

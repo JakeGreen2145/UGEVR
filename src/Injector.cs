@@ -41,6 +41,7 @@ public class Injector : BaseUnityPlugin
     ulong generation=1, frameId;
     // 0 idle, 1 waiting for render-thread pose, 2 waiting for submit callback.
     int phase, updateCount, rendered;
+    int uiFailureCaptures;
     bool active=true, runtimeReady, draining, renderingActive, quitting;
     bool ownsBackground, oldBackground;
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
@@ -310,6 +311,7 @@ public class Injector : BaseUnityPlugin
             {
                 Logger.LogError("UI_RESTORATION_CONFLICT "+overlays.RestorationError);
                 if (session!=null) session.LastError="UI restoration conflict: "+overlays.RestorationError;
+                WriteUiFailureDiagnostic(overlays);
             }
         }
         if (overlays!=null && overlays.RestorationConflicts>0) throw new InvalidOperationException("UI state could not be fully restored: "+overlays.RestorationError);
@@ -348,6 +350,19 @@ public class Injector : BaseUnityPlugin
         }
         if (session!=null) session.LastError=trackingDiagnostic;
         Publish(firstReport || disposition==PoseCallbackDisposition.PauseTracking);
+    }
+    void WriteUiFailureDiagnostic(OverlayCanvasScope overlays)
+    {
+        if (!capturesEnabled || uiFailureCaptures>=8) return;
+        ++uiFailureCaptures;
+        try
+        {
+            File.WriteAllText(Path.Combine(evidenceDir,"ui-restoration-failure-"+generation+"-"+frameId+".json"),
+                "{\"diagnosticVersion\":1,\"outcome\":\"restoration-failed\",\"pairSubmitted\":false,\"gameFrame\":"+Time.frameCount+
+                ",\"generation\":"+generation+",\"vrFrameId\":"+frameId+",\"previousRenderedPairs\":"+rendered+
+                ",\"failureCaptureLimit\":8,\"overlayCapture\":"+overlays.DiagnosticJson()+"}");
+        }
+        catch (Exception error) { Logger.LogWarning("UI failure diagnostics unavailable: "+error.Message); }
     }
     void ClearTrackingDiagnostic()
     {
