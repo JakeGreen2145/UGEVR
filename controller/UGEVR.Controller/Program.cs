@@ -333,19 +333,39 @@ internal static class Program
         o.Allow("session-dir", "timeout-seconds", "force", "cancel-after-seconds");
         var directory = DirectoryPath(o); var session = ReadSession(directory); var timeout = Timeout(o); bool force = o.Boolean("force", false);
         if (session.GetValueOrDefault("owned_process") != "true") throw new InvalidOperationException("This session does not own the process.");
+        string disableResult = "not_requested";
+        string? disableError = null;
+        Dictionary<string, string> StopView()
+        {
+            var view = View(directory);
+            view["disable_result"] = disableResult;
+            if (disableError is not null) view["disable_error"] = disableError;
+            return view;
+        }
         if (IsAlive(session))
         {
-            try { await Command(new Options(new[] { "--session-dir", directory, "--timeout-seconds", "1" }), false, null, emit: false); }
-            catch (InvalidOperationException) when (!IsAlive(ReadSession(directory))) { }
+            try
+            {
+                var result = await Command(new Options(new[] { "--session-dir", directory, "--timeout-seconds", "1" }), false, null, emit: false);
+                disableResult = result == 0 ? "acknowledged" : "pending";
+            }
+            catch (InvalidOperationException) when (!IsAlive(ReadSession(directory))) { disableResult = "process_exited"; }
+            catch (IOException error)
+            {
+                // Another configuration command may retain its lease while
+                // tracking is unavailable. It cannot veto an explicit stop.
+                // The supervisor still owns and verifies the actual process.
+                disableResult = "unavailable"; disableError = error.Message;
+            }
         }
         FlatYaml.Write(Path.Combine(directory, "stop-request.yaml"), new() { ["run_id"] = session["run_id"], ["force"] = force ? "true" : "false" });
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
         {
             var current = ReadSession(directory);
-            if (!IsAlive(current) && current.GetValueOrDefault("cleanup_complete") == "true" && current["state"] is "stopped" or "failed") { FlatYaml.Print(View(directory)); return current["state"] == "failed" ? 3 : 0; }
+            if (!IsAlive(current) && current.GetValueOrDefault("cleanup_complete") == "true" && current["state"] is "stopped" or "failed") { FlatYaml.Print(StopView()); return current["state"] == "failed" ? 3 : 0; }
             await Task.Delay(100, Cancellation.Token);
         }
-        var pending = View(directory); pending["operation_result"] = "stop_pending"; FlatYaml.Print(pending); return 4;
+        var pending = StopView(); pending["operation_result"] = "stop_pending"; FlatYaml.Print(pending); return 4;
     }
 }

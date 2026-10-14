@@ -88,6 +88,17 @@ try
     Require(force.Code == 0 && Field(force.Output, "process_alive", "false"), "explicit force terminates the owned child");
     var afterExit = await Cli("status", "--session-dir", good.Directory);
     Require(Field(afterExit.Output, "injector_status", "stale") && Field(afterExit.Output, "runtime_ready", "false"), "exited process invalidates producer readiness");
+    var leasedCommand = await Launch("good");
+    using (var commandOwner = new FileStream(Path.Combine(leasedCommand.Directory, "command.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+    {
+        var leasedGraceful = await Cli("stop", "--session-dir", leasedCommand.Directory, "--timeout-seconds", "1");
+        if (leasedGraceful.Code != 4) Console.WriteLine("STOP_LEASE_FAILURE exit=" + leasedGraceful.Code + " " + leasedGraceful.Output.Trim());
+        Require(leasedGraceful.Code == 4 && Field(leasedGraceful.Output, "process_alive", "true") && Field(leasedGraceful.Output, "disable_result", "unavailable"), "graceful stop survives a held command lease without terminating the owned child");
+        Require(File.Exists(Path.Combine(leasedCommand.Directory, "stop-request.yaml")) && File.ReadAllText(Path.Combine(leasedCommand.Directory, "stop-request.yaml")).Contains("force: \"false\""), "held command lease does not prevent posting the graceful stop request");
+        var leasedForce = await Cli("stop", "--session-dir", leasedCommand.Directory, "--force", "true", "--timeout-seconds", "3");
+        Require(leasedForce.Code == 0 && Field(leasedForce.Output, "process_alive", "false") && Field(leasedForce.Output, "cleanup_complete", "true") && Field(leasedForce.Output, "disable_result", "unavailable"), "explicit owned termination and cleanup remain available while another command holds its lease");
+        Require(leasedForce.Output.Contains("disable_error:") && leasedForce.Output.Contains("command lock deadline"), "stop discloses the separate unavailable disable request");
+    }
     var initializationTimer = Stopwatch.StartNew();
     var initializationFailure = await Launch("initialization-failure");
     Require(initializationFailure.Code == 3 && Field(initializationFailure.Output, "operation_result", "initialization_failed") && Field(initializationFailure.Output, "state", "failed") && initializationTimer.Elapsed < TimeSpan.FromSeconds(2), "typed initialization failure reports before launch deadline");
