@@ -59,6 +59,13 @@ static class OwnedGamepadChecks
         p.Tick(false,true,1,input,3.3);
         check(p.ReleaseAttempts==1 && !p.Complete,"Session disable queues neutral state without claiming completion");Hub.NormalUpdate();p.Tick(false,true,1,input,3.4);
         check(p.Complete && p.ReleaseObserved && p.RemoveAttempts==1 && Hub.Devices.Count==1,"Subsequent normal neutral state permits owned cleanup");
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();p.Tick(true,true,1,input,0);input.South=true;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();
+        external=new Pad {added=true,enabled=true,layout="physical-new"};Hub.Devices.Add(external);external.MakeCurrent();p.Tick(true,false,1,input,0.2);Hub.NormalUpdate();
+        check(p.Complete && Object.ReferenceEquals(Pad.current,external) && external.added,"Focus-loss release preserves an already observed external current and cannot let its neutral event reclaim current");
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();input.Packet=10;p.Tick(true,true,1,input,0);input.South=true;input.Packet=9;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();p.Tick(true,true,1,input,0.2);
+        check(p.Complete && p.Reason=="controller_packet_regressed" && p.Queues==0,"Observed packet regression releases context without replaying the source state");
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();input.Packet=UInt32.MaxValue;p.Tick(true,true,1,input,0);input.South=true;input.Packet=0;p.Tick(true,true,1,input,0.1);
+        check(!p.Complete && p.Queues==1,"Documented unsigned packet wrap does not become a false controller reset");p.Cancel("test_end",0.2);
         foreach(string reason in new[]{"focus","generation","identity","disconnect","deadline","clock"})
         {
             Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();p.Tick(true,true,1,input,0);input.South=true;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();

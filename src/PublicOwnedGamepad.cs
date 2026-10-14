@@ -188,6 +188,7 @@ namespace Ugevr
             if(!HasOwnedDevice || !Added(owned) || layoutConflict || LayoutDefinition()!=definition) throw new InvalidOperationException("Owned device or layout changed.");
             if(Double.IsNaN(x) || Double.IsInfinity(x) || Double.IsNaN(y) || Double.IsInfinity(y) || Math.Abs(x)>1 || Math.Abs(y)>1) throw new ArgumentException("Invalid stick state.");
             bool neutral=!down && x==0 && y==0;
+            if(!Object.ReferenceEquals(Current(),owned)) currentConflict=true;
             if(!neutral && (!(bool)enabled.GetValue(owned,null) || !Object.ReferenceEquals(Current(),owned))) {currentConflict=true;throw new InvalidOperationException("Current gamepad ownership changed.");}
             object state=Activator.CreateInstance(stateType),v=Activator.CreateInstance(vectorType);buttons.SetValue(state,down?southMask:0u);vx.SetValue(v,(float)x);vy.SetValue(v,(float)y);leftStick.SetValue(state,v);
             queue.Invoke(null,new[]{owned,state,(object)(-1.0)});

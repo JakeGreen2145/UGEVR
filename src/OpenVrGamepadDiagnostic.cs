@@ -118,6 +118,9 @@ namespace Ugevr
             if(!ending) {ending=true;Reason=reason;Status="releasing";releaseDeadline=now+2;}
             if(pad==null || !pad.NeedsCleanup) {Finish();return;}
             if(!pad.HasOwnedDevice) {Remove();return;}
+            // A neutral queued event can itself make its pad current. Preserve an observed
+            // takeover by removing this device before that queued event can be processed.
+            try {if(!pad.Read().Current) immediate=true;} catch {immediate=true;}
             if(ReleaseAttempts<2)
             {
                 ++ReleaseAttempts;
@@ -132,6 +135,7 @@ namespace Ugevr
             {
                 var state=pad.Read();
                 if(!state.Added) {Remove();return;}
+                if(!state.Current) {Remove();return;}
                 // At least one subsequent Unity Update is required; the queue itself is no acknowledgement.
                 if(state.Neutral) {ReleaseObserved=true;Remove();return;}
             }
