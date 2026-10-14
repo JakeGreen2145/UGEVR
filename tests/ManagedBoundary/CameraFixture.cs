@@ -24,7 +24,17 @@ namespace UnityEngine
         public Scene scene=new Scene {Valid=true,isLoaded=true};
         public bool activeInHierarchy=true;
     }
-    public class Component : Object { public GameObject gameObject=new GameObject();public T[] GetComponents<T>() {return new T[0];} }
+    public class Component : Object
+    {
+        public GameObject gameObject=new GameObject();
+        public Component[] AttachedComponents=new Component[0];
+        public T[] GetComponents<T>()
+        {
+            var found=new System.Collections.Generic.List<T>();
+            foreach(Component component in AttachedComponents) if(component is T) found.Add((T)(object)component);
+            return found.ToArray();
+        }
+    }
     public class Renderer : Component {public bool enabled=true;}
     public static class Resources
     {

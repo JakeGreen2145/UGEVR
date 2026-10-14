@@ -48,6 +48,7 @@ public class Injector : BaseUnityPlugin
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
     bool captureOverlayCanvases,includeOverlayLayers;
     bool overlayAfterImageEffects;
+    bool captureLayoutInputs;
     Camera overlayCamera;
     double overlayPlaneMeters;
     double overlayWidthMeters;
@@ -69,6 +70,7 @@ public class Injector : BaseUnityPlugin
             unitsPerMeter=Config.Bind("Tracking","UnitsPerMeter",1f,"Game world units per physical meter.").Value;
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
+            captureLayoutInputs=Config.Bind("Diagnostics","CaptureLayoutInputs",false,"Opt-in bounded cached text/layout input snapshots for UI restoration mismatches. Requires CaptureImages; no preferred-size, generator or game getters are queried.").Value && capturesEnabled;
             disableOcclusionCulling=Config.Bind("Rendering","DisableOcclusionCulling",false,"Explicit fidelity remedy: disable the selected camera's occlusion culling only during eye rendering.").Value;
             captureOverlayCanvases=Config.Bind("UI","CaptureOverlayCanvases",false,"Experimental: borrow active screen overlay canvases during eye rendering and restore desktop state.").Value;
             includeOverlayLayers=Config.Bind("UI","IncludeOverlayLayers",false,"Explicitly include selected overlay canvas renderer layers in the borrowed camera mask; may also reveal other geometry on those layers.").Value;
@@ -289,7 +291,7 @@ public class Injector : BaseUnityPlugin
         RigidPose anchor=new RigidPose(Position(basePosition),Rotation(baseRotation));
         var actualEyes=new RigidPose[2];
         var beforeRenderProjection=new Matrix4x4[2];
-        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters):null;
+        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs):null;
         if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
         if (overlays!=null && overlays.SelectedCount>0 && overlayAfterImageEffects)
         {

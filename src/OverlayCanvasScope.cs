@@ -17,6 +17,9 @@ namespace Ugevr
         readonly List<RectState> rects=new List<RectState>();
         readonly List<string> errors=new List<string>();
         readonly List<string> rectMismatches=new List<string>();
+        readonly UiLayoutDiagnostics layoutInputs;
+        readonly List<int> layoutContextIds=new List<int>();
+        string layoutDiagnosticError;
         readonly string[] appliedEyes=new string[2];
         readonly string[] afterRenderEyes=new string[2];
         readonly List<string> geometryChanges=new List<string>();
@@ -72,8 +75,9 @@ namespace Ugevr
             public Quaternion LocalRotation;
         }
 
-        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8)
+        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false)
         {
+            if(captureLayoutInputs) layoutInputs=new UiLayoutDiagnostics();
             this.camera=camera; this.includeLayers=includeLayers;
             this.unitsPerMeter=unitsPerMeter;this.panelWidthMeters=panelWidthMeters;
             OriginalMask=camera.cullingMask; AppliedMask=OriginalMask;
@@ -139,8 +143,10 @@ namespace Ugevr
                     if (rects.Count==RectLimit) throw new InvalidOperationException("Overlay UI exceeds 8192 RectTransforms; an explicit profile selection is required.");
                     rects.Add(new RectState {Rect=rect,Name=rect.name,Id=rect.GetInstanceID(),AnchorMin=rect.anchorMin,AnchorMax=rect.anchorMax,Pivot=rect.pivot,Size=rect.sizeDelta,
                         AnchoredPosition=rect.anchoredPosition3D,LocalPosition=rect.localPosition,LocalScale=rect.localScale,LocalRotation=rect.localRotation});
+                    if(layoutInputs!=null) layoutInputs.Add(rect,canvas);
                 }
             }
+            CaptureLayoutPhase(0);
         }
 
         public void ApplyEye(int eye=0)
@@ -149,6 +155,7 @@ namespace Ugevr
             if (canvases.Count==0) return;
             if (!commonHeadSet) throw new InvalidOperationException("Common UI head pose must be set before rendering either eye.");
             if (!applied) PrepareCommonPanel();
+            if(eye>=0 && eye<2) CaptureLayoutPhase(eye==0?1:3);
             if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
         }
         public void SetCommonHead(RigidPose head) {if (applied) throw new InvalidOperationException("Common panel pose cannot change between eyes.");commonHead=head;commonHeadSet=true;}
@@ -178,6 +185,7 @@ namespace Ugevr
         public void RecordAfterRender(int eye)
         {
             if (eye<0 || eye>1 || !applied) return;
+            CaptureLayoutPhase(eye==0?2:4);
             afterRenderEyes[eye]=AppliedCanvasJson();
             if (afterRenderEyes[eye]!=appliedEyes[eye])
             {
@@ -291,6 +299,17 @@ namespace Ugevr
                 },state.Name+" verify restoration");
             }
             if (camera!=null) Attempt(delegate {camera.cullingMask=OriginalMask;},"restore camera UI layers");
+            CaptureLayoutPhase(5);
+        }
+        void CaptureLayoutPhase(int phase)
+        {
+            if(layoutInputs==null) return;
+            try {layoutInputs.Capture(phase);}
+            catch(Exception diagnosticError) {layoutDiagnosticError=BoundedName(diagnosticError.Message);}
+        }
+        void NoteLayoutContext(int rectId)
+        {
+            if(layoutInputs!=null && layoutContextIds.Count<64 && !layoutContextIds.Contains(rectId)) layoutContextIds.Add(rectId);
         }
         static CanvasState SnapshotInactiveCanvas(Canvas canvas)
         {
@@ -336,7 +355,9 @@ namespace Ugevr
                     break;
                 }
             }
+            CaptureLayoutPhase(6);
             Attempt(delegate {Canvas.ForceUpdateCanvases();},"final desktop canvas rebuild");
+            CaptureLayoutPhase(7);
             foreach(RectState state in rects)
             {
                 if(state.Rect==null) continue;
@@ -424,6 +445,7 @@ namespace Ugevr
                 accepted&=componentDelta<=componentTolerance;
             }
             if (!mismatch) return;
+            NoteLayoutContext(state.Id);
             string delta=finite?maximum.ToString("R",CultureInfo.InvariantCulture):"null";
             string name=state.Name==null?"":state.Name.Substring(0,Math.Min(64,state.Name.Length));
             accepted&=finite;
@@ -445,6 +467,7 @@ namespace Ugevr
             }
             bool unit=finite && Math.Abs(expectedNorm-1)<=unitTolerance && Math.Abs(observedNorm-1)<=unitTolerance;
             if (!changed && unit) return;
+            NoteLayoutContext(state.Id);
             bool signAligned=dot<0,accepted=unit;double maximum=0,tolerance=0;
             for (int i=0;i<4;++i)
             {
@@ -519,7 +542,15 @@ namespace Ugevr
                     .Append(",\"sortingOrder\":").Append(state.SortingOrder).Append(",\"originalEngineUiContext\":").Append(state.OriginalUiContext)
                     .Append(",\"restoredEngineUiContext\":").Append(state.Canvas==null?"null":UiContext(state.Canvas)).Append('}');
             }
-            text.Append("],\"protectedInactiveCanvases\":[");
+            text.Append("],\"layoutInputDiagnostic\":");
+            if(layoutInputs==null) text.Append("null");
+            else
+            {
+                text.Append("{\"summary\":").Append(layoutInputs.Summary()).Append(",\"error\":").Append(Quote(layoutDiagnosticError)).Append(",\"mismatchContexts\":[");
+                for(int i=0;i<layoutContextIds.Count;++i) {if(i>0) text.Append(',');text.Append(layoutInputs.Context(layoutContextIds[i]));}
+                text.Append("]}");
+            }
+            text.Append(",\"protectedInactiveCanvases\":[");
             for(int i=0;i<inactiveCanvases.Count;++i)
             {
                 if(i>0) text.Append(',');var state=inactiveCanvases[i];var canvas=state.Canvas;

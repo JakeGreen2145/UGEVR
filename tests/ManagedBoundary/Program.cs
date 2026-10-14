@@ -19,6 +19,7 @@ class Program
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
         MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); InactiveCanvasChecks(); SessionChecks(); KeyboardProbeChecks();
+        UiLayoutDiagnosticChecks.Run(Assert);
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void ProjectionChecks()
