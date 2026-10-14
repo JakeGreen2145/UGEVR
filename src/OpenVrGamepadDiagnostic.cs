@@ -75,7 +75,8 @@ namespace Ugevr
             if(!started)
             {
                 if(!Valid(input)) {Reason=input.UnavailableReason ?? "right_controller_unavailable";return;}
-                if(!input.Neutral) {Reason="right_controller_not_neutral";return;}
+                // Activation must be zero under the same radial mapping used below.
+                if(input.South || Math.Sqrt(input.X*input.X+input.Y*input.Y)>deadzone) {Reason="right_controller_not_neutral";return;}
                 started=true;start=now;source=input;generation=runtimeGeneration;
                 try
                 {

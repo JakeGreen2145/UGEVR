@@ -52,6 +52,17 @@ static class OwnedGamepadChecks
         Hub.Reset();int factories=0;var p=new OpenVrGamepadDiagnostic(delegate {++factories;return Backend();},5,0.2,"refuse");var input=Neutral();
         p.Tick(false,true,1,input,0);p.Tick(true,false,1,input,1);input.South=true;p.Tick(true,true,1,input,2);
         check(factories==0 && Hub.Adds==0,"Default-off, focus and neutral-controller activation gates precede all device creation");
+        Hub.Reset();var diagonal=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");var diagonalInput=Neutral();diagonalInput.X=diagonalInput.Y=0.19;
+        diagonal.Tick(true,true,1,diagonalInput,0);
+        check(Hub.Adds==0 && Hub.Registers==0 && diagonal.Reason=="right_controller_not_neutral","A diagonal outside the configured radial deadzone cannot arm even when each component is below 0.2");
+        diagonalInput.X=diagonalInput.Y=0.14;diagonal.Tick(true,true,1,diagonalInput,0.1);diagonal.Tick(true,true,1,diagonalInput,0.2);
+        check(Hub.Adds==1 && Hub.Queues==0,"An accepted diagonal inside the same radial mapping stays output-neutral after activation");diagonal.Cancel("test_end",0.3);
+        Hub.Reset();var narrow=new OpenVrGamepadDiagnostic(Backend,5,0.1,"refuse");var narrowInput=Neutral();narrowInput.X=0.15;
+        narrow.Tick(true,true,1,narrowInput,0);
+        check(Hub.Adds==0 && Hub.Registers==0,"A nondefault narrower deadzone rejects an activation sample that would produce movement");
+        narrowInput.X=0.1;narrow.Tick(true,true,1,narrowInput,0.1);narrow.Tick(true,true,1,narrowInput,0.2);
+        check(Hub.Adds==1 && Hub.Queues==0,"The configured radial boundary is accepted only when the output mapping also produces zero");narrow.Cancel("test_end",0.3);
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(delegate {++factories;return Backend();},5,0.2,"refuse");
         input=Neutral();p.Tick(true,true,1,input,3);input.South=true;input.X=1;p.Tick(true,true,1,input,3.1);
         check(Hub.Pending.Count==1 && p.Queues==1,"Explicit test profile maps one received A edge and axis sample to one owned state queue");
         Hub.NormalUpdate();p.Tick(true,true,1,input,3.2);
