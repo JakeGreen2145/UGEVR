@@ -41,6 +41,7 @@ public class Injector : BaseUnityPlugin
     GamepadDiagnosticBinding gamepadBinding;
     string gamepadDiagnosticProfile;
     RewiredInputDiagnostic rewiredDiagnostic;
+    string rewiredDiagnosticProfile;
     double nextRewiredReport;
     RewiredSourceObservation rewiredSourceObservation;
     double nextRewiredSourceReport;
@@ -105,7 +106,7 @@ public class Injector : BaseUnityPlugin
             captureRewiredSourceDetails=Config.Bind("Input","CaptureRewiredSourceDetails",false,"Private passive OpenVR observation only, independent of Rewired input admission. A fresh run-id/request-id file in controller-owned UnityVR-evidence requests 15 seconds, at most 300 samples at 20Hz and three windows per launch. Raw identities stay private; no input is authorized.").Value;
             int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Single-hand profiles require 1..10 consecutive valid neutral reads; the dual-hand profile requires exactly 3 stable neutral pair reads before creating the first owned device.").Value;
             bool allowRewired=Config.Bind("Input","AllowRewiredInputDiagnostic",false,"Explicit code activation for one bounded owned public Rewired custom-controller window. Requires CaptureImages, a controller session and exact Firewatch profile; no private game callback is invoked.").Value;
-            string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 explicitly; right axis0 stick and uniquely identified Trigger axis feed normal game actions31/32/36.").Value;
+            string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 for a uniquely declared trigger, or firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1 for the inspected Oculus application view and observed finger-trigger axis1. Both explicitly feed normal game actions31/32/36.").Value;
             string rewiredConflict=Config.Bind("Input","RewiredConflictPolicy","refuse","Only refuse is supported. Existing custom definitions/devices or physical Rewired joysticks reject this prototype; game additions to owned content are preserved.").Value;
             float rewiredSeconds=Config.Bind("Input","RewiredDurationSeconds",15f,"Explicit bounded 5..300 seconds after fresh neutral admission. Source expires after 500ms without a refreshed valid sample.").Value;
             float rewiredDeadzone=Config.Bind("Input","RewiredStickDeadzone",0.2f,"Explicit radial stick deadzone .1...8. The trigger remains an analog axis for the game's ordinary threshold logic.").Value;
@@ -113,8 +114,9 @@ public class Injector : BaseUnityPlugin
             {
                 try
                 {
-                    if(!capturesEnabled || !session.Available || allowGamepad || allowEngineInputExperiment || rewiredProfile!=PublicOwnedRewiredInput.Profile)
+                    if(!capturesEnabled || !session.Available || allowGamepad || allowEngineInputExperiment || !PublicOwnedRewiredInput.SupportsProfile(rewiredProfile))
                         throw new InvalidOperationException("Rewired diagnostic requires images/session/profile and no simultaneous gamepad or E experiment.");
+                    rewiredDiagnosticProfile=rewiredProfile;
                     rewiredDiagnostic=new RewiredInputDiagnostic(PublicOwnedRewiredInput.Create,rewiredSeconds,rewiredDeadzone,rewiredConflict);
                     Logger.LogWarning("EXPLICIT_REWIRED_DIAGNOSTIC profile="+rewiredProfile+" duration="+rewiredSeconds+" conflict="+rewiredConflict+"; normal game action consumption remains unobserved.");
                 }
@@ -278,7 +280,7 @@ public class Injector : BaseUnityPlugin
     {
         if(rewiredDiagnostic==null) return;
         double now=InputClock();bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
-        var source=new RewiredRightSample();if(enabled && Application.isFocused && !rewiredDiagnostic.Complete) try {source=OpenVrRewiredRightReader.Read(system);} catch { }
+        var source=new RewiredRightSample();if(enabled && Application.isFocused && !rewiredDiagnostic.Complete) try {source=OpenVrRewiredRightReader.Read(system,rewiredDiagnosticProfile);} catch { }
         rewiredDiagnostic.Tick(enabled,Application.isFocused,generation,source,now);
         if(now>=nextRewiredReport)
         {
