@@ -21,6 +21,7 @@
     <Compile Include="../../src/RewiredInputDiagnostic.cs" Link="RewiredInputDiagnostic.cs" />
     <Compile Include="../../src/PublicOwnedRewiredInput.cs" Link="PublicOwnedRewiredInput.cs" />
     <Compile Include="../../src/OpenVrRewiredRightReader.cs" Link="OpenVrRewiredRightReader.cs" />
+    <Compile Include="../../src/RewiredSourceObservation.cs" Link="RewiredSourceObservation.cs" />
     <Compile Include="../../vendor/openvr_api.cs" Link="OpenVR.cs" />
     <Compile Include="../../src/CameraState.cs" Link="CameraState.cs" />
     <Compile Include="../../src/CameraCurrentScope.cs" Link="CameraCurrentScope.cs" />

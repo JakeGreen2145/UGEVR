@@ -110,20 +110,21 @@ namespace Ugevr
     public sealed class ControllerIdentitySnapshot
     {
         public string Stage="selected_index",Verdict="not_validated",ExceptionType;
+        public string QueryIndexException,QueryClassException,QueryRoleException;
         public uint? Index,PostIndex;
         public ETrackedDeviceClass? DeviceClass,PostClass;
         public ETrackedControllerRole? Role,PostRole;
         public StringPropertyObservation InitialSerial,InitialModel,PostSerial,PostModel;
         public bool IdentityRejected;
         public RejectedControllerObservation RejectedState;
-        static string Scalar(string value)
+        internal static string Scalar(string value)
         {
             var b=new StringBuilder("\"");value=value??"";
             // Values are private. Escape control characters so they cannot become log/YAML structure.
             foreach(char c in value)
             {
                 if(c=='\\' || c=='\"') {b.Append('\\');b.Append(c);}
-                else if(c<32 || c==127) b.Append("\\u"+((int)c).ToString("x4",CultureInfo.InvariantCulture));
+                else if(c<32 || c==127 || c==0x85 || c==0x2028 || c==0x2029) b.Append("\\u"+((int)c).ToString("x4",CultureInfo.InvariantCulture));
                 else b.Append(c);
             }
             return b.Append('"').ToString();
@@ -156,6 +157,7 @@ namespace Ugevr
         {
             var b=new StringBuilder("schema_version: 1\nprivate_device_identity: true\n");
             b.Append("stage: "+Scalar(Stage)+"\nverdict: "+Scalar(Verdict)+"\nexception_type: "+Scalar(ExceptionType)+
+                "\nquery_index_exception: "+Scalar(QueryIndexException)+"\nquery_class_exception: "+Scalar(QueryClassException)+"\nquery_role_exception: "+Scalar(QueryRoleException)+
                 "\nselected_index: "+Number(Index)+"\nselected_class_name: "+Scalar(DeviceClass.HasValue?DeviceClass.Value.ToString():null)+
                 "\nselected_class_code: "+Number(DeviceClass)+"\nselected_role_name: "+Scalar(Role.HasValue?Role.Value.ToString():null)+
                 "\nselected_role_code: "+Number(Role)+"\npost_index: "+Number(PostIndex)+

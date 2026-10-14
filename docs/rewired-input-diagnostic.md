@@ -18,6 +18,27 @@ RewiredDurationSeconds = 15
 RewiredStickDeadzone = 0.2
 ```
 
+## Passive channel observation
+
+`Input.CaptureRewiredSourceDetails = true` opts into a separate private SDK observer. It requires a controller-owned session and runs independently of `AllowRewiredInputDiagnostic`, its profile and `CaptureImages`. It creates no Rewired or InputSystem device, supplies no input and does not resolve ambiguous Trigger metadata. Keep input activation off when collecting channels without testing a binding.
+
+After the injector has started, atomically place a new UTF-8 file named `rewired-source-request` in that session's `UnityVR-evidence` directory:
+
+```ini
+run_id=<this controller session's GUID>
+request_id=<a new GUID for this window>
+```
+
+Only those two fields are accepted, within 256 bytes. A file already present when the observer starts is stale. A new request nonce after startup is required. Claimed requests remain as `rewired-source-request.claimed-1` through `-3`; they prevent nonce replay and preserve the three-window budget across component recreation. Invalid claimed requests also consume a slot. No existing claim or result is overwritten. Requests are accepted only in focused, enabled, rendering VR on the Unity owner thread. An unconsumed request can wait for those conditions.
+
+Each accepted window lasts 15 elapsed seconds, samples at most once per 50ms and contains at most 300 records. It never catches up with several reads in one Update. Disabled or unfocused ticks perform no SDK read and add no record; the deadline continues. Component disable, teardown, opt-out, a regressing clock or a bounded record failure ends the active window. A stalled Unity thread cannot execute its deadline or publish evidence until it runs again. Cancelled or incomplete windows are reported with their reason and actual record count.
+
+`rewired-source-window-N.yaml` is a private YAML stream with a header, one document per sample, and an ending summary. Records include monotonic ticks, UTC time, runtime generation, queried and post-poll right index/class/role, public joint state/pose result, connected/valid/finite flags, all twelve matrix entries, packet number, full unsigned pressed/touched masks, all five raw axis XY pairs, and each axis property's raw return/type/error/exception. The reused reader also records one pre-state axis0 metadata query. Bounded serial/model API observations include their raw values, result/errors, required byte counts and builder lengths/capacities. Normal logs contain status, count and reason only. Treat the file as private device evidence and sanitize identities before publishing it.
+
+An SDK false return sets `raw_outputs_valid: false`; returned raw fields remain visible and are not treated as a valid neutral sample. Exceptions leave unavailable output fields null and retain their API category. Failed property queries retain raw returns separately from accepted type values. Nonfinite matrix/axis values are quoted explicitly. These observations establish neither input admission nor game consumption.
+
+The observer holds records in bounded memory, with a 16384-byte record limit and 5MiB window limit. It serializes each complete record before adding it, then publishes the complete stream through a fresh temporary file and non-overwriting rename. Failed serialization never inserts a partial sample. An output collision preserves the prior file and reports `output_unconfirmed`. Existing path ancestors and request/output directories are checked for reparse points. These checks require the controller-owned directory to remain stable; they do not claim atomic protection against a concurrent process replacing filesystem paths.
+
 The profile requires the inspected Assembly-CSharp MVID `4e377d15-4996-4da3-9447-797d50034429`, SHA256 `145b56aebe921c0fdc660a4e64008272e09a283332146958ce2f356c7490522a`, and Rewired_Core MVID `159fb15d-62c3-4977-b0f0-ed64736f91be`, SHA256 `15508ee97bbf97731f20be14e40b36d208507ad475b97c896866d39c13aef87b`. It checks already loaded assembly identities and their file hashes, then exact public mutator shapes/tokens. It loads no target assembly. An unready, missing or ambiguous active input manager refuses creation. Other game versions require another evidenced profile.
 
 Admission requires focused active VR, valid connected right-controller state and pose, bounded serial identity, unchanged right role, declared joystick axis0, and exactly one declared Trigger axis among axes1..4. All five axis properties must succeed. Missing, ambiguous or unknown metadata refuses input before a Rewired device is created. Raw axis values alone do not establish their meaning; a Frame transport fallback requires separate observed channel evidence and explicit selection. A fresh stick whose radial magnitude is within the configured deadzone and an exactly zero trigger start the one allowed window. The same radial condition produces zero stick output, including diagonal and nondefault deadzone cases. Duration is bounded to 5..300 seconds; radial stick deadzone is .1...8. Trigger values remain analog in 0..1 for ordinary game threshold logic.

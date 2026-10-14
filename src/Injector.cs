@@ -42,6 +42,9 @@ public class Injector : BaseUnityPlugin
     string gamepadDiagnosticProfile;
     RewiredInputDiagnostic rewiredDiagnostic;
     double nextRewiredReport;
+    RewiredSourceObservation rewiredSourceObservation;
+    double nextRewiredSourceReport;
+    bool captureRewiredSourceDetails;
     bool captureInputIdentityDetails;
     ControllerIdentityCapture inputIdentityCapture;
     double nextInputReport;
@@ -99,6 +102,7 @@ public class Injector : BaseUnityPlugin
             float inputSeconds=Config.Bind("Input","DiagnosticDurationSeconds",15f,"Bounded 5..300 second diagnostic window, starting only with a neutral valid right controller and focused active VR.").Value;
             float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
             captureInputIdentityDetails=Config.Bind("Input","CaptureIdentityDetails",false,"Explicit private diagnostic: capture bounded raw controller serial/model SDK results in this controller-owned session evidence directory. Never include raw IDs in public reports.").Value;
+            captureRewiredSourceDetails=Config.Bind("Input","CaptureRewiredSourceDetails",false,"Private passive OpenVR observation only, independent of Rewired input admission. A fresh run-id/request-id file in controller-owned UnityVR-evidence requests 15 seconds, at most 300 samples at 20Hz and three windows per launch. Raw identities stay private; no input is authorized.").Value;
             int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Require 1..10 consecutive valid neutral reads with stable controller, runtime generation and metadata before creating the first owned device. Default 3.").Value;
             bool allowRewired=Config.Bind("Input","AllowRewiredInputDiagnostic",false,"Explicit code activation for one bounded owned public Rewired custom-controller window. Requires CaptureImages, a controller session and exact Firewatch profile; no private game callback is invoked.").Value;
             string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 explicitly; right axis0 stick and uniquely identified Trigger axis feed normal game actions31/32/36.").Value;
@@ -152,6 +156,11 @@ public class Injector : BaseUnityPlugin
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
             if(captureInputIdentityDetails && gamepadDiagnostic!=null && session.Available) inputIdentityCapture=new ControllerIdentityCapture(evidenceDir);
+            if(captureRewiredSourceDetails && session.Available)
+            {
+                try {rewiredSourceObservation=new RewiredSourceObservation(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,delegate {return RewiredSourceReader.Read(system);});}
+                catch(Exception error) {Logger.LogWarning("REWIRED_SOURCE_OBSERVATION unavailable: "+error.GetType().FullName);}
+            }
             if (capturesEnabled && session.Available)
                 inputProbe=new KeyboardEProbe(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicKeyboardEReader.Create);
             if(compareHierarchyInventory && session.Available)
@@ -225,6 +234,7 @@ public class Injector : BaseUnityPlugin
         if (KeyPressed("f9")) pendingRecenter="true";
         TickGamepadDiagnostic();
         TickRewiredDiagnostic();
+        TickRewiredSourceObservation();
         Publish(false);
     }
 
@@ -274,6 +284,15 @@ public class Injector : BaseUnityPlugin
     }
     void CancelRewiredDiagnostic(string reason)
     {if(rewiredDiagnostic!=null) {rewiredDiagnostic.Cancel(reason,InputClock());nextRewiredReport=0;TickRewiredDiagnostic();}}
+
+    void TickRewiredSourceObservation()
+    {
+        if(rewiredSourceObservation==null) return;
+        bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
+        rewiredSourceObservation.Tick(captureRewiredSourceDetails,enabled,Application.isFocused,generation,DateTime.UtcNow,Stopwatch.GetTimestamp());
+        double now=InputClock();if(now<nextRewiredSourceReport) return;nextRewiredSourceReport=now+1;
+        Logger.LogInfo("REWIRED_SOURCE_OBSERVATION status="+rewiredSourceObservation.Status+" reason="+rewiredSourceObservation.Reason+" windows="+rewiredSourceObservation.Windows+" samples="+rewiredSourceObservation.Samples+" error="+rewiredSourceObservation.LastError+" authorizesInput=false");
+    }
 
     void ApplyCommand()
     {
@@ -670,11 +689,12 @@ public class Injector : BaseUnityPlugin
     }
     void OnApplicationQuit() { quitting=true; StopOwnedWork(); }
     void OnDestroy() { quitting=true; StopOwnedWork(); }
-    void OnDisable() {CancelGamepadDiagnostic("component_disabled");CancelRewiredDiagnostic("component_disabled");}
+    void OnDisable() {CancelGamepadDiagnostic("component_disabled");CancelRewiredDiagnostic("component_disabled");if(rewiredSourceObservation!=null) rewiredSourceObservation.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());}
     void StopOwnedWork()
     {
         CancelGamepadDiagnostic("game_lifecycle_end");
         CancelRewiredDiagnostic("game_lifecycle_end");
+        if(rewiredSourceObservation!=null) {rewiredSourceObservation.Cancel("game_lifecycle_end",DateTime.UtcNow,Stopwatch.GetTimestamp());rewiredSourceObservation=null;}
         if (inputProbe!=null) { inputProbe.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp()); inputProbe=null; }
         if(hierarchyProbe!=null)
         {
