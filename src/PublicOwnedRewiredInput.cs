@@ -15,6 +15,8 @@ namespace Ugevr
     public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput
     {
         public const string Profile="firewatch-2017-rewired-right-stick-trigger-v1";
+        public const string ObservedTriggerProfile="firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1";
+        public static bool SupportsProfile(string profile) {return profile==Profile || profile==ObservedTriggerProfile;}
         const string CoreHash="15508ee97bbf97731f20be14e40b36d208507ad475b97c896866d39c13aef87b";
         const string GameHash="145b56aebe921c0fdc660a4e64008272e09a283332146958ce2f356c7490522a";
         readonly Func<double> clock;

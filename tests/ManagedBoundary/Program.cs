@@ -30,6 +30,7 @@ class Program
         GamepadBindingChecks.Run(Assert);
         LegacyControllerChecks.Run(Assert);
         RewiredInputChecks.Run(Assert);
+        ObservedRewiredChecks.Run(Assert);
         RewiredSourceObservationChecks.Run(Assert);
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
