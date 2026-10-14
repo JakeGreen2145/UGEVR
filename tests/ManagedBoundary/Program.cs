@@ -31,6 +31,7 @@ class Program
         LegacyControllerChecks.Run(Assert);
         RewiredInputChecks.Run(Assert);
         RewiredFailureChecks.Run(Assert);
+        RewiredMapFactoryChecks.Run(Assert);
         ObservedRewiredChecks.Run(Assert);
         RewiredSourceObservationChecks.Run(Assert);
         Console.WriteLine("Managed boundary checks passed: "+checks);

@@ -160,7 +160,8 @@ namespace Rewired.Data
         public List<CustomController_Editor> Definitions=new List<CustomController_Editor>();
         public List<Mapping.ControllerMap_Editor> Maps=new List<Mapping.ControllerMap_Editor>();
         public int Deletes;
-        public bool BadAction,ThrowAxisBefore,AddEntryDuringMapCreate,ThrowDefinitionAfter,MissingCategory,MissingLayout;
+        public bool BadAction,ThrowAxisBefore,AddEntryDuringMapCreate,ThrowDefinitionAfter,MissingCategory,MissingLayout,MapNoAddition,MapExtraAddition,MapWrongLayout,MapThrowAfter,MapChangeDefinition,MapNullEntries;
+        public int MapCreates;
         public void AddCustomController() {Definitions.Add(new CustomController_Editor {id=2,ThrowAddAxisBefore=ThrowAxisBefore});if(ThrowDefinitionAfter)throw new Exception("Unknown definition creation outcome");}
         public int[] GetCustomControllerIds() {return Definitions.ConvertAll(d=>d.id).ToArray();}
         public CustomController_Editor GetCustomControllerById(int id) {return Definitions.Find(d=>d.id==id);}
@@ -170,7 +171,18 @@ namespace Rewired.Data
         public int[] GetMapCategoryIds() {return MissingCategory?new int[0]:new[]{0};}
         public int[] GetCustomControllerLayoutIds() {return MissingLayout?new int[0]:new[]{0};}
         public bool CreateCustomControllerMap(int categoryId,int controllerUid,int layoutId)
-        {if(categoryId!=0 || layoutId!=0 || GetCustomControllerById(controllerUid)==null)throw new Exception("Incorrect map identity arguments");var map=new Mapping.ControllerMap_Editor {id=8,categoryId=categoryId,layoutId=layoutId,customControllerUid=controllerUid};Maps.Add(map);if(AddEntryDuringMapCreate)map.actionElementMaps.Add(new Rewired.ActionElementMap(99,Rewired.ControllerElementType.Axis,9,Rewired.Pole.Positive,Rewired.AxisRange.Full,false));return true;}
+        {
+            ++MapCreates;if(categoryId!=0 || layoutId!=0 || GetCustomControllerById(controllerUid)==null)throw new Exception("Incorrect map identity arguments");
+            if(MapNoAddition)return false;
+            var map=new Mapping.ControllerMap_Editor {id=8,categoryId=categoryId,layoutId=MapWrongLayout?1:layoutId,customControllerUid=controllerUid};Maps.Add(map);
+            if(AddEntryDuringMapCreate)map.actionElementMaps.Add(new Rewired.ActionElementMap(99,Rewired.ControllerElementType.Axis,9,Rewired.Pole.Positive,Rewired.AxisRange.Full,false));
+            if(MapExtraAddition)Maps.Add(new Mapping.ControllerMap_Editor {id=9,categoryId=categoryId,layoutId=layoutId,customControllerUid=controllerUid});
+            if(MapChangeDefinition)GetCustomControllerById(controllerUid).name="changed during map creation";
+            if(MapNullEntries)map.actionElementMaps=null;
+            if(MapThrowAfter)throw new Exception("Unknown map factory outcome after addition");
+            // The pinned shipped factory mutates its list and unconditionally returns false.
+            return false;
+        }
         public Mapping.ControllerMap_Editor GetCustomControllerMap(int category,int uid,int layout) {return Maps.Find(m=>m.categoryId==category && m.customControllerUid==uid && m.layoutId==layout);}
         public int GetCustomControllerMapCount(int id) {return Maps.FindAll(m=>m.customControllerUid==id).Count;}
     }

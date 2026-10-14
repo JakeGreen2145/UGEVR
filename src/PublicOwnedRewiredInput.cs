@@ -68,7 +68,8 @@ namespace Ugevr
             M(dataType,"GetCustomControllerById",0x06001555,definitionType,typeof(int));M(dataType,"GetCustomControllerIndex",0x0600154f,typeof(int),typeof(int));
             M(dataType,"DeleteCustomController",0x0600154b,typeof(void),typeof(int));M(definitionType,"AddAxis",0x06000d06,typeof(void));
             M(definitionType,"GetAxisElementIdentifierIds",0x06000d00,typeof(int[]));
-            M(dataType,"CreateCustomControllerMap",0x0600153c,typeof(bool),typeof(int),typeof(int),typeof(int));
+            if(M(dataType,"CreateCustomControllerMap",0x0600153c,typeof(bool),typeof(int),typeof(int),typeof(int)).IsVirtual)
+                throw new RewiredOperationException("resolve_public_method_CreateCustomControllerMap","virtual_map_factory_unsupported");
             M(dataType,"GetCustomControllerMap",0x06001535,editorMapType,typeof(int),typeof(int),typeof(int));
             M(dataType,"GetCustomControllerMapCount",0x0600154e,typeof(int),typeof(int));
             M(global.GetType(),"CreateCustomController",0x06002840,controllerType,typeof(int),typeof(string));
@@ -209,10 +210,17 @@ namespace Ugevr
             if(axes.Length!=3 || axes[0]==axes[1] || axes[0]==axes[2] || axes[1]==axes[2]) throw new InvalidOperationException("Owned axis shape changed.");
             channelExpected=DefinitionSnapshot(false);
             addStage="create_definition_map";
-            try {if(!(bool)Call(data,"CreateCustomControllerMap",0x0600153c,typeof(bool),new[]{typeof(int),typeof(int),typeof(int)},0,definitionId,0)) throw new InvalidOperationException("Definition map refused.");}
+            if(MapCount()!=0) throw new RewiredOperationException(addStage,"existing_definition_map_preserved");
+            // Pinned 0600153c creates a fresh empty map, adds it, and returns false
+            // unconditionally. Its return is not a success flag. Only a normal return
+            // plus the following object/content proof permits adoption.
+            try {Call(data,"CreateCustomControllerMap",0x0600153c,typeof(bool),new[]{typeof(int),typeof(int),typeof(int)},0,definitionId,0);}
             finally {if(MapCount()==1) editorMap=EditorMap();else if(MapCount()!=0) ambiguous=true;}
-            if(editorMap==null || ambiguous) throw new InvalidOperationException("Definition map creation unknown.");
-            IList list=PublicValue(editorMap,"actionElementMaps") as IList;if(list==null || list.Count!=0) throw new InvalidOperationException("Unexpected new definition map content preserved.");
+            if(editorMap==null || ambiguous) throw new RewiredOperationException(addStage,"map_post_state_unavailable_or_ambiguous");
+            if(!RewiredOwnershipSnapshot.Same(channelExpected,DefinitionSnapshot(false))) throw new RewiredOperationException(addStage,"definition_changed_during_map_creation");
+            if(editorMap.GetType()!=editorMapType || Convert.ToInt32(PublicValue(editorMap,"categoryId"))!=0 || Convert.ToInt32(PublicValue(editorMap,"layoutId"))!=0 || Convert.ToInt32(PublicValue(editorMap,"customControllerUid"))!=definitionId)
+                throw new RewiredOperationException(addStage,"map_identity_unexpected_preserved");
+            IList list=PublicValue(editorMap,"actionElementMaps") as IList;if(list==null || list.Count!=0) throw new RewiredOperationException(addStage,"map_initial_content_unexpected_preserved");
             definitionExpected=DefinitionSnapshot();editorEntries=new object[3];
             addStage="create_map_entries";
             ConstructorInfo constructor=entryType.GetConstructor(new[]{typeof(int),elementEnum,typeof(int),poleEnum,rangeEnum,typeof(bool)});
