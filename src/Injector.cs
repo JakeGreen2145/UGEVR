@@ -285,7 +285,7 @@ public class Injector : BaseUnityPlugin
         if(now>=nextRewiredReport)
         {
             nextRewiredReport=now+1;
-            Logger.LogInfo("REWIRED_DIAGNOSTIC status="+rewiredDiagnostic.Status+" reason="+rewiredDiagnostic.Reason+" addAttempts="+rewiredDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredDiagnostic.AppliedUpdates+" removeAttempts="+rewiredDiagnostic.RemoveAttempts+" cleanup="+rewiredDiagnostic.CleanupStatus+" gameConsumption=unknown");
+            Logger.LogInfo("REWIRED_DIAGNOSTIC status="+rewiredDiagnostic.Status+" reason="+rewiredDiagnostic.Reason+" addAttempts="+rewiredDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredDiagnostic.AppliedUpdates+" removeAttempts="+rewiredDiagnostic.RemoveAttempts+" cleanup="+rewiredDiagnostic.CleanupStatus+" "+(rewiredDiagnostic.Failure==null?"failureStage=none":rewiredDiagnostic.Failure.ToLog())+" gameConsumption=unknown");
         }
     }
     void CancelRewiredDiagnostic(string reason)

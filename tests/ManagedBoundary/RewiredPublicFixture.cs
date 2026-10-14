@@ -160,15 +160,15 @@ namespace Rewired.Data
         public List<CustomController_Editor> Definitions=new List<CustomController_Editor>();
         public List<Mapping.ControllerMap_Editor> Maps=new List<Mapping.ControllerMap_Editor>();
         public int Deletes;
-        public bool BadAction,ThrowAxisBefore,AddEntryDuringMapCreate,ThrowDefinitionAfter;
+        public bool BadAction,ThrowAxisBefore,AddEntryDuringMapCreate,ThrowDefinitionAfter,MissingCategory,MissingLayout;
         public void AddCustomController() {Definitions.Add(new CustomController_Editor {id=2,ThrowAddAxisBefore=ThrowAxisBefore});if(ThrowDefinitionAfter)throw new Exception("Unknown definition creation outcome");}
         public int[] GetCustomControllerIds() {return Definitions.ConvertAll(d=>d.id).ToArray();}
         public CustomController_Editor GetCustomControllerById(int id) {return Definitions.Find(d=>d.id==id);}
         public int GetCustomControllerIndex(int id) {return Definitions.FindIndex(d=>d.id==id);}
         public void DeleteCustomController(int index) {++Deletes;int id=Definitions[index].id;Maps.RemoveAll(m=>m.customControllerUid==id);Definitions.RemoveAt(index);}
         public string GetActionNameById(int id) {return BadAction?"changed":id==31?"LookXAxis_Stick":id==32?"LookYAxis_Stick":id==36?"DialogDownButton":"other";}
-        public int[] GetMapCategoryIds() {return new[]{0};}
-        public int[] GetCustomControllerLayoutIds() {return new[]{0};}
+        public int[] GetMapCategoryIds() {return MissingCategory?new int[0]:new[]{0};}
+        public int[] GetCustomControllerLayoutIds() {return MissingLayout?new int[0]:new[]{0};}
         public bool CreateCustomControllerMap(int categoryId,int controllerUid,int layoutId)
         {if(categoryId!=0 || layoutId!=0 || GetCustomControllerById(controllerUid)==null)throw new Exception("Incorrect map identity arguments");var map=new Mapping.ControllerMap_Editor {id=8,categoryId=categoryId,layoutId=layoutId,customControllerUid=controllerUid};Maps.Add(map);if(AddEntryDuringMapCreate)map.actionElementMaps.Add(new Rewired.ActionElementMap(99,Rewired.ControllerElementType.Axis,9,Rewired.Pole.Positive,Rewired.AxisRange.Full,false));return true;}
         public Mapping.ControllerMap_Editor GetCustomControllerMap(int category,int uid,int layout) {return Maps.Find(m=>m.categoryId==category && m.customControllerUid==uid && m.layoutId==layout);}

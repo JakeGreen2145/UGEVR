@@ -12,7 +12,7 @@ using UnityEngine;
 namespace Ugevr
 {
     // Experimental profile for one observed build. All target members invoked here are public.
-    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput
+    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics
     {
         public const string Profile="firewatch-2017-rewired-right-stick-trigger-v1";
         public const string ObservedTriggerProfile="firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1";
@@ -39,6 +39,10 @@ namespace Ugevr
         public string FaultReason {get;private set;}
         public string CleanupStatus {get;private set;}
         public int AppliedUpdates {get;private set;}
+        public RewiredFailureInfo LastFailure {get;private set;}
+        string addStage;
+        bool? preflightReady;
+        int? preflightDefinitions,preflightCustomDevices,preflightJoysticks;
         public bool NeedsCleanup {get {return mutationAttempted && (!definitionRemoved || !deviceRemoved || subscribed || ambiguous);}}
         PublicOwnedRewiredInput(string reason) {UnavailableReason=reason;FaultReason="";CleanupStatus="not_created";}
         internal PublicOwnedRewiredInput(Assembly assembly,object manager,Func<double> clock,Func<bool> focused,bool pinned=true)
@@ -101,7 +105,7 @@ namespace Ugevr
                 if(manager==null) return new PublicOwnedRewiredInput("manager_not_active");
                 return new PublicOwnedRewiredInput(core,manager,delegate {return Stopwatch.GetTimestamp()/(double)Stopwatch.Frequency;},delegate {return Application.isFocused;});
             }
-            catch {return new PublicOwnedRewiredInput("public_api_profile_unavailable");}
+            catch(Exception error) {return new PublicOwnedRewiredInput("public_api_profile_unavailable") {LastFailure=RewiredFailureInfo.Capture(error,"factory_public_profile","public_api_exception")};}
         }
         public static bool MatchesIdentity(string name,Guid mvid,string hash,string expectedName,Guid expectedMvid,string expectedHash)
         {return name==expectedName && mvid==expectedMvid && hash==expectedHash;}
@@ -124,24 +128,30 @@ namespace Ugevr
             string key=owner.FullName+"/"+token.ToString("x8",CultureInfo.InvariantCulture);MethodInfo method;
             if(methods.TryGetValue(key,out method)) return method;
             method=owner.GetMethod(name,BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly,null,arguments,null);
-            if(!PublicMethodShape(method,owner,name,result,arguments) || (pinned && method.MetadataToken!=token)) throw new InvalidOperationException("Pinned public method shape changed: "+name);
+            if(!PublicMethodShape(method,owner,name,result,arguments) || (pinned && method.MetadataToken!=token)) throw new RewiredOperationException("resolve_public_method_"+name,"public_method_shape_or_token_mismatch");
             methods.Add(key,method);return method;
         }
         object Call(object target,string name,int token,Type result,Type[] arguments,params object[] values)
-        {return M(target.GetType(),name,token,result,arguments).Invoke(target,values);}
+        {
+            MethodInfo method=M(target.GetType(),name,token,result,arguments);
+            try {return method.Invoke(target,values);}
+            catch(Exception error) {throw new RewiredOperationException("invoke_public_method_"+name,"public_method_exception",error);}
+        }
         static object StaticValue(Type owner,string name)
         {
             PropertyInfo property=owner.GetProperty(name,BindingFlags.Public|BindingFlags.Static|BindingFlags.DeclaredOnly);
-            if(property==null || property.GetGetMethod(false)==null || property.GetIndexParameters().Length!=0) throw new InvalidOperationException("Public static property unavailable.");
-            return property.GetValue(null,null);
+            if(property==null || property.GetGetMethod(false)==null || property.GetIndexParameters().Length!=0) throw new RewiredOperationException("read_public_static_"+name,"public_property_shape_unavailable");
+            try {return property.GetValue(null,null);}catch(Exception error){throw new RewiredOperationException("read_public_static_"+name,"public_property_exception",error);}
         }
         static object PublicValue(object target,string name)
         {
-            if(target==null) throw new InvalidOperationException("Public owner unavailable.");
+            if(target==null) throw new RewiredOperationException("read_public_member_"+name,"public_owner_unavailable");
             Type type=target.GetType();PropertyInfo property=type.GetProperty(name,BindingFlags.Public|BindingFlags.Instance);
-            if(property!=null && property.GetGetMethod(false)!=null && property.GetIndexParameters().Length==0) return property.GetValue(target,null);
-            FieldInfo field=type.GetField(name,BindingFlags.Public|BindingFlags.Instance);if(field!=null) return field.GetValue(target);
-            throw new InvalidOperationException("Public member unavailable: "+name);
+            if(property!=null && property.GetGetMethod(false)!=null && property.GetIndexParameters().Length==0)
+                try {return property.GetValue(target,null);}catch(Exception error){throw new RewiredOperationException("read_public_member_"+name,"public_property_exception",error);}
+            FieldInfo field=type.GetField(name,BindingFlags.Public|BindingFlags.Instance);if(field!=null)
+                try {return field.GetValue(target);}catch(Exception error){throw new RewiredOperationException("read_public_member_"+name,"public_field_exception",error);}
+            throw new RewiredOperationException("read_public_member_"+name,"public_member_unavailable");
         }
         static object[] Bounded(object values,int bound)
         {
@@ -158,12 +168,27 @@ namespace Ugevr
         void CheckThread() {if(ownerThread!=System.Threading.Thread.CurrentThread.ManagedThreadId) throw new InvalidOperationException("Unexpected Rewired thread.");}
         public void Add()
         {
+            try {AddCore();}
+            catch(Exception error)
+            {
+                if(LastFailure==null) LastFailure=RewiredFailureInfo.Capture(error,addStage??"add_entry","public_api_exception",preflightReady,preflightDefinitions,preflightCustomDevices,preflightJoysticks);
+                throw;
+            }
+        }
+        void AddCore()
+        {
+            addStage="add_entry";
             if(mutationAttempted) throw new InvalidOperationException("Only one Rewired window per launch.");
             ownerThread=System.Threading.Thread.CurrentThread.ManagedThreadId;
-            if(!(bool)StaticValue(hub,"isReady") || DefinitionIds().Length!=0 || CustomDevices().Length!=0 || Bounded(PublicValue(global,"Joysticks"),64).Length!=0) throw new InvalidOperationException("Existing Rewired definition/device conflict or unready manager.");
+            addStage="preflight_ready";preflightReady=(bool)StaticValue(hub,"isReady");if(preflightReady!=true) throw new RewiredOperationException(addStage,"manager_not_ready");
+            addStage="preflight_definitions";preflightDefinitions=DefinitionIds().Length;if(preflightDefinitions!=0) throw new RewiredOperationException(addStage,"existing_definition_conflict");
+            addStage="preflight_custom_devices";preflightCustomDevices=CustomDevices().Length;if(preflightCustomDevices!=0) throw new RewiredOperationException(addStage,"existing_custom_device_conflict");
+            addStage="preflight_joysticks";preflightJoysticks=Bounded(PublicValue(global,"Joysticks"),64).Length;if(preflightJoysticks!=0) throw new RewiredOperationException(addStage,"existing_joystick_conflict");
             int[] actionIds={31,32,36};string[] actionNames={"LookXAxis_Stick","LookYAxis_Stick","DialogDownButton"};
-            for(int i=0;i<3;++i) if((string)Call(data,"GetActionNameById",0x0600148f,typeof(string),new[]{typeof(int)},actionIds[i])!=actionNames[i]) throw new InvalidOperationException("Action profile changed.");
-            if(!ContainsId((int[])Call(data,"GetMapCategoryIds",0x060014c4,typeof(int[]),Type.EmptyTypes),0) || !ContainsId((int[])Call(data,"GetCustomControllerLayoutIds",0x06001506,typeof(int[]),Type.EmptyTypes),0)) throw new InvalidOperationException("Existing category/layout0 unavailable.");
+            addStage="preflight_action_names";for(int i=0;i<3;++i) if((string)Call(data,"GetActionNameById",0x0600148f,typeof(string),new[]{typeof(int)},actionIds[i])!=actionNames[i]) throw new RewiredOperationException(addStage,"action_profile_mismatch");
+            addStage="preflight_categories";if(!ContainsId((int[])Call(data,"GetMapCategoryIds",0x060014c4,typeof(int[]),Type.EmptyTypes),0)) throw new RewiredOperationException(addStage,"category_zero_unavailable");
+            addStage="preflight_layouts";if(!ContainsId((int[])Call(data,"GetCustomControllerLayoutIds",0x06001506,typeof(int[]),Type.EmptyTypes),0)) throw new RewiredOperationException(addStage,"layout_zero_unavailable");
+            addStage="create_definition";
             mutationAttempted=true;deviceRemoved=true;
             // The pinned nonvirtual CIL creates a fresh concrete definition, then List.Add;
             // its constructors/name helpers contain no application callbacks. A thrown call
@@ -176,20 +201,25 @@ namespace Ugevr
                 if(definition==null && ids.Length==0) definitionRemoved=true;
             }
             if(definition==null || ambiguous) throw new InvalidOperationException("Definition creation outcome unknown.");
+            addStage="snapshot_definition";
             definitionExpected=DefinitionSnapshot();
+            addStage="create_definition_axes";
             for(int i=0;i<3;++i) {Call(definition,"AddAxis",0x06000d06,typeof(void),Type.EmptyTypes);definitionExpected=DefinitionSnapshot();}
             axes=(int[])Call(definition,"GetAxisElementIdentifierIds",0x06000d00,typeof(int[]),Type.EmptyTypes);
             if(axes.Length!=3 || axes[0]==axes[1] || axes[0]==axes[2] || axes[1]==axes[2]) throw new InvalidOperationException("Owned axis shape changed.");
             channelExpected=DefinitionSnapshot(false);
+            addStage="create_definition_map";
             try {if(!(bool)Call(data,"CreateCustomControllerMap",0x0600153c,typeof(bool),new[]{typeof(int),typeof(int),typeof(int)},0,definitionId,0)) throw new InvalidOperationException("Definition map refused.");}
             finally {if(MapCount()==1) editorMap=EditorMap();else if(MapCount()!=0) ambiguous=true;}
             if(editorMap==null || ambiguous) throw new InvalidOperationException("Definition map creation unknown.");
             IList list=PublicValue(editorMap,"actionElementMaps") as IList;if(list==null || list.Count!=0) throw new InvalidOperationException("Unexpected new definition map content preserved.");
             definitionExpected=DefinitionSnapshot();editorEntries=new object[3];
+            addStage="create_map_entries";
             ConstructorInfo constructor=entryType.GetConstructor(new[]{typeof(int),elementEnum,typeof(int),poleEnum,rangeEnum,typeof(bool)});
             for(int i=0;i<3;++i)
             {editorEntries[i]=constructor.Invoke(new object[]{actionIds[i],Enum.Parse(elementEnum,"Axis"),axes[i],Enum.Parse(poleEnum,"Positive"),Enum.Parse(rangeEnum,"Full"),false});list.Add(editorEntries[i]);definitionExpected=DefinitionSnapshot();}
             definitionExpected=DefinitionSnapshot();
+            addStage="create_runtime_controller";
             try {owned=Call(global,"CreateCustomController",0x06002840,controllerType,new[]{typeof(int),typeof(string)},definitionId,tag);}
             finally
             {
@@ -200,10 +230,12 @@ namespace Ugevr
             }
             if(owned==null) throw new InvalidOperationException("Controller creation unavailable.");
             ownedId=Convert.ToInt32(PublicValue(owned,"id"));
+            addStage="assign_system_player";
             Call(playerControllers,"AddController",0x0600225b,typeof(void),new[]{controllerBase,typeof(bool)},owned,false);
             object[] maps=OwnedMaps(player);
             if(maps.Length==0) {Call(playerMaps,"LoadMap",0x06002386,typeof(void),new[]{controllerEnum,typeof(int),typeof(int),typeof(int)},Enum.Parse(controllerEnum,"Custom"),ownedId,0,0);maps=OwnedMaps(player);}
             if(maps.Length!=1) throw new InvalidOperationException("Owned runtime map admission unknown.");runtimeMap=maps[0];
+            addStage="snapshot_runtime_and_subscribe";
             expected=Snapshot();expires=clock()+.5;handler=OnInputUpdate;subscribed=true;inputUpdate.AddEventHandler(null,handler);CleanupStatus="owned_active";
         }
         static bool ContainsId(int[] ids,int id) {if(ids==null || ids.Length>64) throw new InvalidOperationException("Identifier bound exceeded.");foreach(int value in ids) if(value==id) return true;return false;}

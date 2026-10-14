@@ -33,6 +33,7 @@ namespace Ugevr
         bool started,finished;
         public string Status {get;private set;}
         public string Reason {get;private set;}
+        public RewiredFailureInfo Failure {get;private set;}
         public int AddAttempts {get;private set;}
         public int RemoveAttempts {get;private set;}
         public bool Complete {get {return finished;}}
@@ -57,14 +58,16 @@ namespace Ugevr
                 if(!Valid(input)) {Reason=input.UnavailableReason ?? "right_source_unavailable";return;}
                 if(Math.Sqrt(input.X*input.X+input.Y*input.Y)>deadzone || input.Trigger!=0) {Reason="right_source_not_neutral";return;}
                 started=true;startedAt=now;identity=input;generation=runtimeGeneration;
+                string creationStage="factory";
                 try
                 {
                     backend=factory();
-                    if(backend==null || !String.IsNullOrEmpty(backend.UnavailableReason)) {Cancel(backend==null?"backend_unavailable":backend.UnavailableReason,now);return;}
-                    ++AddAttempts;backend.Add();Status="active";Reason="";
+                    if(backend==null || !String.IsNullOrEmpty(backend.UnavailableReason)) {CaptureFailure(null,creationStage,"backend_unavailable");Cancel(backend==null?"backend_unavailable":backend.UnavailableReason,now);return;}
+                    creationStage="add";++AddAttempts;backend.Add();Status="active";Reason="";
+                    creationStage="initial_desired_state";
                     backend.SetDesired(0,0,0,now+.5);
                 }
-                catch {Cancel("public_creation_failed",now);}
+                catch(Exception error) {CaptureFailure(error,creationStage,"public_api_exception");Cancel("public_creation_failed",now);}
                 return;
             }
             if(now-startedAt>=duration) {Cancel("window_deadline",now);return;}
@@ -77,7 +80,12 @@ namespace Ugevr
             if(magnitude<=deadzone) x=y=0;
             else {double scale=Math.Min(1,(magnitude-deadzone)/(1-deadzone))/magnitude;x*=scale;y*=scale;}
             try {backend.SetDesired(x,y,input.Trigger,Math.Min(startedAt+duration,now+.5));}
-            catch {Cancel("public_state_failed",now);}
+            catch(Exception error) {CaptureFailure(error,"set_desired_state","public_api_exception");Cancel("public_state_failed",now);}
+        }
+        void CaptureFailure(Exception error,string stage,string category)
+        {
+            if(Failure!=null) return;var diagnostics=backend as IRewiredFailureDiagnostics;
+            Failure=diagnostics!=null && diagnostics.LastFailure!=null?diagnostics.LastFailure:RewiredFailureInfo.Capture(error,stage,category);
         }
         public void Cancel(string reason,double now)
         {
