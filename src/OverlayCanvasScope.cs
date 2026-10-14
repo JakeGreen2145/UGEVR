@@ -29,6 +29,7 @@ namespace Ugevr
         RigidPose commonHead;
         bool commonHeadSet;
         bool disposed,applied;
+        string verificationPhase="scope-dispose";
         public readonly float PlaneDistance;
         public readonly int OriginalMask;
         public int AppliedMask { get; private set; }
@@ -38,6 +39,7 @@ namespace Ugevr
         public int DerivedPositionRoundoff { get; private set; }
         public int RotationRoundoff { get; private set; }
         public int UnexpectedGeometryChanges { get; private set; }
+        public int SelectedCameraRectRestorations { get; private set; }
         public int SelectedCount { get { return canvases.Count; } }
         public int IsolatedMask {get {return layerLease==null?0:layerLease.Mask;}}
         public string RestorationError { get { return String.Join("; ",errors.ToArray()); } }
@@ -257,6 +259,23 @@ namespace Ugevr
         {
             if(!disposed || !applied) return;
             // Called after the surrounding CameraState restored the desktop camera.
+            verificationPhase="after-camera-restore";
+            RectTransform cameraRect=camera==null?null:camera.transform as RectTransform;
+            if(cameraRect!=null)
+            {
+                foreach(RectState state in rects)
+                {
+                    if(state.Rect==null || state.Rect!=cameraRect) continue;
+                    // CameraState writes world position/rotation after this scope
+                    // restored local UI values. World-to-local float cancellation
+                    // can lose a small anchored offset. Restore its saved canonical
+                    // local pose last; no changed local value is accepted as roundoff.
+                    Attempt(delegate {cameraRect.localRotation=state.LocalRotation;},"final selected camera rect rotation "+state.Name);
+                    Attempt(delegate {cameraRect.anchoredPosition3D=state.AnchoredPosition;},"final selected camera rect anchored position "+state.Name);
+                    ++SelectedCameraRectRestorations;
+                    break;
+                }
+            }
             Attempt(delegate {Canvas.ForceUpdateCanvases();},"final desktop canvas rebuild");
             foreach(RectState state in rects)
             {
@@ -350,7 +369,7 @@ namespace Ugevr
             if (accepted) ++DerivedPositionRoundoff;
             else Conflict("Rect "+name+" id="+state.Id+" "+field+" expected="+Numbers(expected)+" observed="+Numbers(observed)+" maxDelta="+delta);
             if (rectMismatches.Count<64) rectMismatches.Add("{\"name\":"+Quote(name)+",\"instanceId\":"+state.Id+",\"field\":"+Quote(field)+
-                ",\"expected\":"+Numbers(expected)+",\"observed\":"+Numbers(observed)+",\"finite\":"+(finite?"true":"false")+
+                ",\"verificationPhase\":"+Quote(verificationPhase)+",\"expected\":"+Numbers(expected)+",\"observed\":"+Numbers(observed)+",\"finite\":"+(finite?"true":"false")+
                 ",\"maxAbsoluteDelta\":"+delta+",\"acceptedTolerance\":"+tolerance.ToString("R",CultureInfo.InvariantCulture)+",\"acceptedDerivedRoundoff\":"+(accepted?"true":"false")+"}");
         }
         void VerifyRotation(RectState state,float[] expected,float[] observed)
@@ -379,7 +398,7 @@ namespace Ugevr
             if (accepted) ++RotationRoundoff;
             else Conflict("Rect "+name+" id="+state.Id+" localRotation expected="+Numbers(expected)+" observed="+Numbers(observed)+" unit="+unit+" maxDelta="+delta);
             if (rectMismatches.Count<64) rectMismatches.Add("{\"name\":"+Quote(name)+",\"instanceId\":"+state.Id+",\"field\":\"localRotation\",\"expected\":"+Numbers(expected)+
-                ",\"observed\":"+Numbers(observed)+",\"finite\":"+(finite?"true":"false")+",\"unitQuaternion\":"+(unit?"true":"false")+
+                ",\"verificationPhase\":"+Quote(verificationPhase)+",\"observed\":"+Numbers(observed)+",\"finite\":"+(finite?"true":"false")+",\"unitQuaternion\":"+(unit?"true":"false")+
                 ",\"expectedNormSquared\":"+(finite?expectedNorm.ToString("R",CultureInfo.InvariantCulture):"null")+
                 ",\"observedNormSquared\":"+(finite?observedNorm.ToString("R",CultureInfo.InvariantCulture):"null")+
                 ",\"unitNormSquaredTolerance\":0.000002,\"hemisphereAligned\":"+(signAligned?"true":"false")+",\"maxAbsoluteDelta\":"+delta+
@@ -423,6 +442,7 @@ namespace Ugevr
                 .Append(",\"includeOverlayLayers\":").Append(includeLayers?"true":"false").Append(",\"selectedCount\":").Append(canvases.Count)
                 .Append(",\"rectCount\":").Append(rects.Count).Append(",\"destroyedObjects\":").Append(DestroyedObjects)
                 .Append(",\"restorationConflicts\":").Append(RestorationConflicts).Append(",\"derivedPositionRoundoff\":").Append(DerivedPositionRoundoff)
+                .Append(",\"selectedCameraRectRestorations\":").Append(SelectedCameraRectRestorations)
                 .Append(",\"rotationRoundoff\":").Append(RotationRoundoff).Append(",\"unexpectedGeometryChanges\":").Append(UnexpectedGeometryChanges).Append(",\"geometryChangeNotes\":[");
             for(int i=0;i<geometryChanges.Count;++i) {if(i>0)text.Append(',');text.Append(Quote(geometryChanges[i]));}
             text.Append("],\"errors\":[");

@@ -18,7 +18,7 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); SessionChecks();
+        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void ProjectionChecks()
@@ -445,6 +445,39 @@ class Program
         Assert(mixedRejected && originalWorld.gameObject.layer==7 && originalWorld.renderMode==RenderMode.WorldSpace,"Independent world-space canvas inside a selected hierarchy requires an adapter before any mutation");
         overlay.NestedCanvases=null;
         Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;
+    }
+    static void CameraRectOrderChecks()
+    {
+        Canvas.Instances.Clear();Canvas.ForceAction=null;
+        var overlay=Overlay("loading",5);
+        var cameraRect=new RectTransform {name="LoadingCamera",WorldParentOffset=new Vector3(1920,1080,-935.307434f)};
+        cameraRect.localRotation=new Quaternion(0,0,0,1);cameraRect.localScale=new Vector3(1,1,1);
+        var original=new Vector3(.000183105469f,.0000305175781f,-935.307434f);
+        cameraRect.anchoredPosition3D=original;
+        overlay.Rects=new[]{overlay.Rects[0],cameraRect};
+        var camera=new Camera {transform=cameraRect};
+        Vector3 originalWorld=cameraRect.position;
+        cameraRect.position=originalWorld;
+        Assert(cameraRect.anchoredPosition3D.y==0 && original.y!=0,"Restoring a rounded 1080-unit world Y cancels the recorded tiny local offset");
+        cameraRect.anchoredPosition3D=original;
+        var scope=PanelScope(camera,1,2,false);
+        using(var restore=new CameraState(camera))
+        using(scope)
+        {
+            camera.transform.position=new Vector3(0,0,0);
+            scope.ApplyEye();
+        }
+        Assert(scope.RestorationConflicts==0 && cameraRect.anchoredPosition3D.y==0,"Outer CameraState changes a descendant camera's local offset after the UI scope restored it exactly");
+        scope.RebuildRestoredGeometry();
+        Assert(scope.RestorationConflicts==0 && cameraRect.anchoredPosition3D.y==original.y,"Selected camera rectangle is restored canonically after outer camera restoration, without accepting a changed local value");
+        Assert(cameraRect.position.y==originalWorld.y,"Canonical local restoration preserves the original rounded camera world position");
+        Assert(scope.SelectedCameraRectRestorations==1 && scope.DerivedPositionRoundoff==0,"Shared camera/UI ownership repair is recorded separately from any tolerance allowance");
+        var changed=PanelScope(camera,1,2,false);
+        using(var restore=new CameraState(camera)) using(changed) {camera.transform.position=new Vector3(0,0,0);changed.ApplyEye();}
+        Canvas.ForceAction=delegate {cameraRect.anchoredPosition3D=new Vector3(original.x,0,original.z);};
+        changed.RebuildRestoredGeometry();
+        Assert(changed.RestorationConflicts==2 && changed.DiagnosticJson().Contains("\"verificationPhase\":\"after-camera-restore\""),"A final canvas rebuild changing the canonical near-zero position still fails strict restoration and identifies its phase");
+        Canvas.Instances.Clear();Canvas.ForceAction=null;
     }
     static void ExternalProducer(string directory,string content)
     {

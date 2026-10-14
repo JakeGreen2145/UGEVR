@@ -66,9 +66,15 @@ namespace UnityEngine
         public Vector2 anchorMin,anchorMax,pivot,sizeDelta;
         Vector3 anchored,local;
         public Vector3 AnchorReference;
+        public Vector3 WorldParentOffset;
         public Vector3 DerivedLocalReadOffset;
         public Vector3 anchoredPosition3D {get {return anchored;} set {anchored=value;local=new Vector3(value.x+AnchorReference.x,value.y+AnchorReference.y,value.z+AnchorReference.z);} }
         public override Vector3 localPosition {get {return new Vector3(local.x+DerivedLocalReadOffset.x,local.y+DerivedLocalReadOffset.y,local.z+DerivedLocalReadOffset.z);} set {local=value;anchored=new Vector3(value.x-AnchorReference.x,value.y-AnchorReference.y,value.z-AnchorReference.z);} }
+        public override Vector3 position
+        {
+            get {var value=localPosition;return new Vector3(value.x+WorldParentOffset.x,value.y+WorldParentOffset.y,value.z+WorldParentOffset.z);}
+            set {localPosition=new Vector3(value.x-WorldParentOffset.x,value.y-WorldParentOffset.y,value.z-WorldParentOffset.z);}
+        }
         public Rect rect {get {return new Rect {width=sizeDelta.x,height=sizeDelta.y};} }
         public enum Axis {Horizontal,Vertical}
         public void SetSizeWithCurrentAnchors(Axis axis,float value) {if(axis==Axis.Horizontal) sizeDelta.x=value;else sizeDelta.y=value;}
