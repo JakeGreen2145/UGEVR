@@ -11,6 +11,7 @@ namespace Ugevr
         public const string WakeName="outer-1.4.1-right-a-west-axis0-leftstick-v1";
         public const string ButtonOnlyWakeName="outer-1.4.1-deckardmp-right-a-west-button-only-v1";
         public const string ObservedAxis0Name="outer-1.4.1-deckardmp-right-a-west-observed-axis0-leftstick-v1";
+        public const string DualName="outer-1.4.1-dual-hand-a-west-sticks-v1";
         public const string ButtonOnlySerial="frame_testbench_right";
         public const string ButtonOnlyModel="Deckard MP";
         public static LegacyRightSample ReadSafely(CVRSystem system,string profile)
@@ -26,6 +27,19 @@ namespace Ugevr
             return new LegacyRightSample {UnavailableReason="game_profile_unavailable"};
         }
         public static bool Supports(string profile) {return profile==Name || profile==WakeName || profile==ButtonOnlyWakeName || profile==ObservedAxis0Name;}
+        public static bool SupportsDual(string profile) {return profile==DualName;}
+        public static LegacyPairSample ReadDualSafely(CVRSystem system,string profile)
+        {return SupportsDual(profile)?OpenVrLegacyPairReader.ReadSafely(system):new LegacyPairSample {UnavailableReason="game_profile_unavailable"};}
+        public static IOwnedDualGamepad CreateDual(string profile)
+        {
+            if(!SupportsDual(profile)) return (IOwnedDualGamepad)PublicOwnedGamepad.Unavailable("game_profile_unavailable");
+            foreach(Assembly a in AppDomain.CurrentDomain.GetAssemblies()) if(a.GetName().Name=="Assembly-CSharp")
+            {
+                if(a.ManifestModule.ModuleVersionId!=ExpectedGameModule) return (IOwnedDualGamepad)PublicOwnedGamepad.Unavailable("game_compatibility_identity_mismatch");
+                return PublicOwnedGamepad.CreateDual(LayoutPrefix,OwnedGamepadButton.West);
+            }
+            return (IOwnedDualGamepad)PublicOwnedGamepad.Unavailable("game_compatibility_not_loaded");
+        }
         public static OwnedGamepadButton ButtonFor(string profile)
         {
             if(profile==Name) return OwnedGamepadButton.South;

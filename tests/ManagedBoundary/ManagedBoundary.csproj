@@ -15,6 +15,8 @@
     <Compile Include="../../src/PublicEngineEKeyboard.cs" Link="PublicEngineEKeyboard.cs" />
     <Compile Include="../../src/ControllerIdentityDiagnostics.cs" Link="ControllerIdentityDiagnostics.cs" />
     <Compile Include="../../src/OpenVrGamepadDiagnostic.cs" Link="OpenVrGamepadDiagnostic.cs" />
+    <Compile Include="../../src/OpenVrDualGamepadDiagnostic.cs" Link="OpenVrDualGamepadDiagnostic.cs" />
+    <Compile Include="../../src/OpenVrLegacyPairReader.cs" Link="OpenVrLegacyPairReader.cs" />
     <Compile Include="../../src/PublicOwnedGamepad.cs" Link="PublicOwnedGamepad.cs" />
     <Compile Include="../../src/OuterGamepadCompatibilityProfile.cs" Link="OuterGamepadCompatibilityProfile.cs" />
     <Compile Include="../../src/OpenVrLegacyRightReader.cs" Link="OpenVrLegacyRightReader.cs" />
