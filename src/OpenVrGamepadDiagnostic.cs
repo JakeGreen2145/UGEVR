@@ -4,7 +4,7 @@ namespace Ugevr
 {
     public struct LegacyRightSample
     {
-        public bool Available,A;
+        public bool Available,A,AxesAvailable;
         public uint Index,Packet;
         public string Identity;
         public string UnavailableReason;
@@ -156,6 +156,13 @@ namespace Ugevr
             Finish();
         }
         void Finish() {finished=true;Status=pad!=null && pad.NeedsCleanup?"cleanup_unconfirmed":"complete";}
+        // A reversible VR pause cannot spend a window that has not created anything yet.
+        public void Pause(string reason,double now)
+        {
+            if(finished) return;
+            if(started) End(reason,now,true);
+            else {Reason=reason;Status="waiting_neutral";}
+        }
         public void Cancel(string reason,double now) {if(!finished && started) End(reason,now,true);else if(!started) {Reason=reason;finished=true;Status="complete";}}
     }
 }

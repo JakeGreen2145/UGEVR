@@ -39,6 +39,7 @@ public class Injector : BaseUnityPlugin
     HierarchyInventoryProbe hierarchyProbe;
     EngineEInputExperiment engineInputExperiment;
     OpenVrGamepadDiagnostic gamepadDiagnostic;
+    string gamepadDiagnosticProfile;
     double nextInputReport;
     SessionCommand pending;
     MethodInfo getKeyDown;
@@ -88,7 +89,7 @@ public class Injector : BaseUnityPlugin
             compareHierarchyInventory=Config.Bind("Diagnostics","CompareHierarchyInventory",false,"Diagnostic only: permit at most two explicitly requested sequential Resources-versus-scene hierarchy comparisons before an eye pair. Requires CaptureImages and controller session identity; does not replace layer guards.").Value && capturesEnabled;
             allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
             bool allowGamepad=Config.Bind("Input","AllowOpenVrGamepadDiagnostic",false,"Explicit code activation for one bounded owned InputSystem gamepad experiment per launch. Never changes physical keyboard state; game consumption requires observation.").Value;
-            string inputProfile=Config.Bind("Input","DiagnosticProfile","none","Select outer-1.4.1-right-a-west-axis0-leftstick-v1 for original wake/interact or outer-1.4.1-right-a-south-axis0-leftstick-v1 for menu confirm/jump explicitly. This is a test profile, not general game bindings.").Value;
+            string inputProfile=Config.Bind("Input","DiagnosticProfile","none","Select outer-1.4.1-right-a-west-axis0-leftstick-v1 for original wake/interact or outer-1.4.1-right-a-south-axis0-leftstick-v1 for menu confirm/jump explicitly. The restricted outer-1.4.1-deckardmp-right-a-west-button-only-v1 maps no axes. These are test profiles, not general game bindings.").Value;
             string inputConflict=Config.Bind("Input","CurrentGamepadConflictPolicy","refuse","refuse leaves an existing current gamepad untouched. prefer-owned explicitly permits the owned diagnostic pad to become current, with conditional restoration.").Value;
             float inputSeconds=Config.Bind("Input","DiagnosticDurationSeconds",15f,"Bounded 5..300 second diagnostic window, starting only with a neutral valid right controller and focused active VR.").Value;
             float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
@@ -98,6 +99,7 @@ public class Injector : BaseUnityPlugin
                 {
                     if(!session.Available || allowEngineInputExperiment || !OuterGamepadCompatibilityProfile.Supports(inputProfile))
                         throw new InvalidOperationException("Select a valid session, the explicit diagnostic profile and disable the separate E experiment.");
+                    gamepadDiagnosticProfile=inputProfile;
                     gamepadDiagnostic=new OpenVrGamepadDiagnostic(delegate {return OuterGamepadCompatibilityProfile.Create(inputProfile);},inputSeconds,inputDeadzone,inputConflict);
                     Logger.LogWarning("EXPLICIT_INPUT_DIAGNOSTIC profile="+inputProfile+" currentConflict="+inputConflict+" duration="+inputSeconds+"; synthetic owned gamepad, game consumption unknown.");
                 }
@@ -206,19 +208,23 @@ public class Injector : BaseUnityPlugin
         double now=InputClock();bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
         var input=new LegacyRightSample();
         if(enabled && Application.isFocused && !gamepadDiagnostic.Complete)
-            try {input=OpenVrLegacyRightReader.Read(system);} catch { }
+            try {input=OuterGamepadCompatibilityProfile.Read(system,gamepadDiagnosticProfile);} catch { }
         gamepadDiagnostic.Tick(enabled,Application.isFocused,generation,input,now);
         if(now>=nextInputReport)
         {
             nextInputReport=now+1;
-            Logger.LogInfo("INPUT_DIAGNOSTIC status="+gamepadDiagnostic.Status+" reason="+gamepadDiagnostic.Reason+" addAttempts="+gamepadDiagnostic.AddAttempts+
+            Logger.LogInfo("INPUT_DIAGNOSTIC profile="+gamepadDiagnosticProfile+" sourceAxes="+(input.AxesAvailable?"axis0_joystick":"unavailable")+" status="+gamepadDiagnostic.Status+" reason="+gamepadDiagnostic.Reason+" addAttempts="+gamepadDiagnostic.AddAttempts+
                 " queues="+gamepadDiagnostic.Queues+" appliedStateSamples="+gamepadDiagnostic.AppliedSamples+" releaseAttempts="+gamepadDiagnostic.ReleaseAttempts+
                 " neutralObserved="+gamepadDiagnostic.ReleaseObserved+" removeAttempts="+gamepadDiagnostic.RemoveAttempts+" cleanup="+gamepadDiagnostic.CleanupStatus+" gameConsumption=unknown");
         }
     }
-    void CancelGamepadDiagnostic(string reason)
+    void CancelGamepadDiagnostic(string reason,bool reversiblePause=false)
     {
-        if(gamepadDiagnostic!=null) {gamepadDiagnostic.Cancel(reason,InputClock());nextInputReport=0;TickGamepadDiagnostic();}
+        if(gamepadDiagnostic!=null)
+        {
+            if(reversiblePause) gamepadDiagnostic.Pause(reason,InputClock());else gamepadDiagnostic.Cancel(reason,InputClock());
+            nextInputReport=0;TickGamepadDiagnostic();
+        }
     }
 
     void ApplyCommand()
@@ -251,8 +257,8 @@ public class Injector : BaseUnityPlugin
         }
         else if (active)
         {
-            CancelGamepadDiagnostic("session_disabled");
             active=false; renderingActive=false; pendingRecenter=null;
+            CancelGamepadDiagnostic("session_disabled",true);
             RestoreBackground();
             BeginDrain();
         }
@@ -586,7 +592,7 @@ public class Injector : BaseUnityPlugin
             if (initialization) session.InitializationError=error.Message;
         }
         active=false; renderingActive=false; RestoreBackground();
-        CancelGamepadDiagnostic("vr_failure");
+        CancelGamepadDiagnostic("vr_failure",true);
         try { BeginDrain(); } catch (Exception drainError) { Logger.LogError("Drain failed: "+drainError.Message); }
         Publish(true);
     }

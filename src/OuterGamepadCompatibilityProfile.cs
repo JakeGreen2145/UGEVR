@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using Valve.VR;
 
 namespace Ugevr
 {
@@ -8,11 +9,20 @@ namespace Ugevr
     {
         public const string Name="outer-1.4.1-right-a-south-axis0-leftstick-v1";
         public const string WakeName="outer-1.4.1-right-a-west-axis0-leftstick-v1";
-        public static bool Supports(string profile) {return profile==Name || profile==WakeName;}
+        public const string ButtonOnlyWakeName="outer-1.4.1-deckardmp-right-a-west-button-only-v1";
+        public const string ButtonOnlySerial="frame_testbench_right";
+        public const string ButtonOnlyModel="Deckard MP";
+        public static LegacyRightSample Read(CVRSystem system,string profile)
+        {
+            if(profile==ButtonOnlyWakeName) return OpenVrLegacyRightReader.ReadButtonOnly(system,ButtonOnlySerial,ButtonOnlyModel);
+            if(profile==Name || profile==WakeName) return OpenVrLegacyRightReader.Read(system);
+            return new LegacyRightSample {UnavailableReason="game_profile_unavailable"};
+        }
+        public static bool Supports(string profile) {return profile==Name || profile==WakeName || profile==ButtonOnlyWakeName;}
         public static OwnedGamepadButton ButtonFor(string profile)
         {
             if(profile==Name) return OwnedGamepadButton.South;
-            if(profile==WakeName) return OwnedGamepadButton.West;
+            if(profile==WakeName || profile==ButtonOnlyWakeName) return OwnedGamepadButton.West;
             throw new ArgumentException("Select an explicit supported gamepad profile.");
         }
         public const string LayoutPrefix="XInputControllerWindowsUGEVR_";

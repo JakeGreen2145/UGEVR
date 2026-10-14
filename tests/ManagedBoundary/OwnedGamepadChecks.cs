@@ -13,6 +13,7 @@ static class OwnedGamepadChecks
     {
         check(OuterGamepadCompatibilityProfile.Create(OuterGamepadCompatibilityProfile.Name).UnavailableReason=="game_compatibility_not_loaded","Explicit Outer compatibility never loads or guesses a missing game assembly");
         check(OuterGamepadCompatibilityProfile.Supports(OuterGamepadCompatibilityProfile.WakeName) && OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.WakeName)==OwnedGamepadButton.West && OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.Name)==OwnedGamepadButton.South,"Explicit profiles select distinct West wake/interact and South menu/jump outputs");
+        check(OuterGamepadCompatibilityProfile.Supports(OuterGamepadCompatibilityProfile.ButtonOnlyWakeName) && OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.ButtonOnlyWakeName)==OwnedGamepadButton.West,"Restricted button-only profile explicitly selects West separately from joystick and South profiles");
         check(!OuterGamepadCompatibilityProfile.Supports("none") && OuterGamepadCompatibilityProfile.Create("none").UnavailableReason=="game_profile_unavailable","Unknown profiles refuse before looking for game assemblies or mutating InputSystem");
         Hub.Reset();bool rejected=false;try {Backend((OwnedGamepadButton)42);} catch(ArgumentException) {rejected=true;}
         check(rejected && Hub.Registers==0 && Hub.Adds==0,"Unsupported output buttons refuse before layout or device creation");
@@ -66,6 +67,24 @@ static class OwnedGamepadChecks
         Hub.Reset();Hub.RemoveThenThrow=true;b=Backend();b.Add(false);try {b.Remove();} catch { }Hub.RemoveThenThrow=false;b.Remove();
         check(Hub.Removes==1 && !b.NeedsCleanup && Hub.LayoutRemoves==1,"Removal retry confirms original identity already absent without repeated device mutation");
 
+        foreach(string pauseReason in new[]{"session_disabled","vr_failure"})
+        {
+            Hub.Reset();int waitingFactories=0;
+            var waiting=new OpenVrGamepadDiagnostic(delegate {++waitingFactories;return Backend();},5,0.2,"refuse");
+            waiting.Tick(false,true,1,Neutral(),0);waiting.Pause(pauseReason,0.1);waiting.Tick(false,true,1,Neutral(),0.2);
+            check(!waiting.Complete && waiting.Status=="waiting_neutral" && waiting.Reason==pauseReason && waitingFactories==0 && Hub.Adds==0 && Hub.Registers==0,"A reversible pause before activation preserves the first window without any owned resources: "+pauseReason);
+            var pendingInput=Neutral();pendingInput.A=true;waiting.Tick(true,true,2,pendingInput,0.3);
+            check(waitingFactories==0 && waiting.Reason=="right_controller_not_neutral","Resume still waits for deliberate neutral input before spending its authorized first window: "+pauseReason);
+            pendingInput.A=false;waiting.Tick(true,true,2,pendingInput,0.4);
+            check(waiting.Status=="active" && waitingFactories==1 && Hub.Adds==1,"A resumed never-started diagnostic starts exactly its first window: "+pauseReason);
+            pendingInput.A=true;waiting.Tick(true,true,2,pendingInput,0.5);Hub.NormalUpdate();waiting.Pause(pauseReason,0.6);Hub.NormalUpdate();waiting.Tick(true,true,3,Neutral(),0.7);
+            check(waiting.Complete && waiting.ReleaseAttempts==1 && Hub.Removes==1 && waitingFactories==1 && Hub.Adds==1,"Pause after a started window releases once and cannot create a second window: "+pauseReason);
+        }
+        foreach(string lifecycle in new[]{"component_disabled","game_lifecycle_end"})
+        {
+            Hub.Reset();var terminal=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");terminal.Cancel(lifecycle,0);terminal.Tick(true,true,1,Neutral(),1);
+            check(terminal.Complete && Hub.Adds==0 && Hub.Registers==0,"Terminal lifecycle cancellation remains final even when the first window never started: "+lifecycle);
+        }
         Hub.Reset();int factories=0;var p=new OpenVrGamepadDiagnostic(delegate {++factories;return Backend();},5,0.2,"refuse");var input=Neutral();
         p.Tick(false,true,1,input,0);p.Tick(true,false,1,input,1);input.A=true;p.Tick(true,true,1,input,2);
         check(factories==0 && Hub.Adds==0,"Default-off, focus and neutral-controller activation gates precede all device creation");
