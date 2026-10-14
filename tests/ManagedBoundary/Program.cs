@@ -18,7 +18,7 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); RestoreChecks(); TrackingReacquisitionChecks(); SessionChecks();
+        MathChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void TrackingReacquisitionChecks()
@@ -118,7 +118,7 @@ class Program
         }
         catch (InvalidOperationException) { }
         Assert(camera.transform.position.x==4 && camera.transform.position.y==5 && camera.transform.position.z==6,"Position restored after failed render");
-        Assert(camera.transform.rotation.w==1,"Rotation restored"); Assert(Object.ReferenceEquals(camera.targetTexture,target),"Target restored");
+        Assert(camera.transform.rotation.w==1,"Rotation restored"); Assert(System.Object.ReferenceEquals(camera.targetTexture,target),"Target restored");
         Assert(camera.projectionMatrix.Marker==7 && camera.worldToCameraMatrix.Marker==8,"Projection and view restored");
         Assert(camera.rect.x==.1f && camera.rect.y==.2f && camera.rect.width==.3f && camera.rect.height==.4f,"Viewport restored");
         Assert(camera.useOcclusionCulling,"Occlusion restored"); Assert(camera.backgroundColor.a==.5f && camera.backgroundColor.b==.4f,"Background restored");
@@ -172,6 +172,79 @@ class Program
             Assert(consumer.Poll(now.AddSeconds(7))==null && consumer.LastError.Contains("4096"),"Oversized commands rejected");
         }
         finally { Directory.Delete(directory,true); }
+    }
+    static Canvas Overlay(string name,int layer)
+    {
+        var rect=new RectTransform {anchorMin=new Vector2(.1f,.2f),anchorMax=new Vector2(.8f,.9f),pivot=new Vector2(.3f,.4f),sizeDelta=new Vector2(3840,2160),
+            anchoredPosition3D=new Vector3(2,3,4),localPosition=new Vector3(5,6,7),localScale=new Vector3(1,2,3),localRotation=new Quaternion(0,0,0,1)};
+        var canvas=new Canvas {name=name,renderMode=RenderMode.ScreenSpaceOverlay,Rects=new[]{rect},Renderers=new[]{new CanvasRenderer()},planeDistance=100,
+            sortingOrder=10,sortingLayerID=9,pixelPerfect=true,overridePixelPerfect=true,additionalShaderChannels=AdditionalCanvasShaderChannels.TexCoord1,overrideSorting=true,scaleFactor=2,referencePixelsPerUnit=200};
+        canvas.gameObject.layer=layer;canvas.Renderers[0].gameObject.layer=layer;
+        Canvas.Instances.Add(canvas);return canvas;
+    }
+    static void OverlayChecks()
+    {
+        Canvas.Instances.Clear(); Canvas.ForceAction=null;
+        var overlay=Overlay("menu",5); var second=Overlay("loading",8);
+        var world=Overlay("world",6); world.renderMode=RenderMode.WorldSpace;
+        var cameraUi=Overlay("background",7);cameraUi.renderMode=RenderMode.ScreenSpaceCamera;
+        var disabled=Overlay("disabled",5);disabled.isActiveAndEnabled=false;
+        var otherDisplay=Overlay("other display",5);otherDisplay.targetDisplay=1;
+        var nonroot=Overlay("nested",5);nonroot.isRootCanvas=false;
+        var camera=new Camera {cullingMask=~(1<<8)};
+        var originalCamera=new Camera(); overlay.worldCamera=originalCamera;
+        Canvas.ForceAction=delegate {
+            if (overlay.renderMode==RenderMode.ScreenSpaceCamera)
+            {
+                overlay.Rects[0].sizeDelta=new Vector2(1399,1399); overlay.Rects[0].localScale=new Vector3(99,99,99);
+                overlay.scaleFactor=4;overlay.referencePixelsPerUnit=99;overlay.sortingOrder=99;
+                overlay.overridePixelPerfect=false;overlay.additionalShaderChannels=AdditionalCanvasShaderChannels.Normal;
+            }
+        };
+        var scope=new OverlayCanvasScope(camera,1,2,false);
+        try
+        {
+            using (scope) { scope.ApplyEye(); Assert(scope.SelectedCount==2,"Only active root overlays on the selected display are borrowed");
+                Assert(overlay.renderMode==RenderMode.ScreenSpaceCamera && overlay.worldCamera==camera,"Overlay camera binding applied");
+                Assert(overlay.planeDistance==2,"Physical UI plane distance applied");Assert(camera.cullingMask==~(1<<8),"Excluded UI layers are not implicitly included");
+                Assert(world.renderMode==RenderMode.WorldSpace && cameraUi.renderMode==RenderMode.ScreenSpaceCamera,"World and existing camera UI modes unchanged");
+                throw new InvalidOperationException("Failed second-eye render"); }
+        }
+        catch (InvalidOperationException) { }
+        Assert(overlay.renderMode==RenderMode.ScreenSpaceOverlay && overlay.worldCamera==originalCamera && overlay.planeDistance==100,"Canvas mode/camera/distance restored after render failure");
+        Assert(overlay.scaleFactor==2 && overlay.referencePixelsPerUnit==200 && overlay.sortingOrder==10 && overlay.sortingLayerID==9 && overlay.pixelPerfect && overlay.overrideSorting,"Canvas scale and sort state restored");
+        Assert(overlay.overridePixelPerfect && overlay.additionalShaderChannels==AdditionalCanvasShaderChannels.TexCoord1,"Canvas pixel override and shader channels restored");
+        Assert(overlay.Rects[0].sizeDelta.Equals(new Vector2(3840,2160)) && overlay.Rects[0].localScale.Equals(new Vector3(1,2,3)),"Conversion layout changes restored");
+        Assert(overlay.Rects[0].anchorMin.Equals(new Vector2(.1f,.2f)) && overlay.Rects[0].localPosition.Equals(new Vector3(5,6,7)) && overlay.Rects[0].localRotation.w==1,"RectTransform anchors and local pose restored");
+        Assert(scope.RestorationConflicts==0,"Restoration verifies saved values");
+        Assert(scope.DiagnosticJson().Contains("\"excludedOverlayLayers\":256"),"Excluded layer selection recorded");
+        Canvas.ForceAction=null;
+        using (var include=new OverlayCanvasScope(camera,1,2,true)) { include.ApplyEye(); Assert(camera.cullingMask==-1,"Explicit layer remedy includes selected renderer layers"); }
+        Assert(camera.cullingMask==~(1<<8),"Explicit layer remedy restores camera mask");
+        using (var clipped=new OverlayCanvasScope(camera,1,.1,false)) {Assert(clipped.PlaneDistance>camera.nearClipPlane && clipped.PlaneDistance<camera.farClipPlane,"UI plane is strictly inside clipping");}
+        var failScope=new OverlayCanvasScope(camera,1,2,false);failScope.ApplyEye();
+        overlay.ModeSetter=delegate(RenderMode value) {if (value==RenderMode.ScreenSpaceOverlay) throw new Exception("Restoration setter failure");};
+        failScope.Dispose();
+        Assert(failScope.RestorationConflicts>0 && failScope.RestorationError.Contains("setter failure"),"Restoration conflict reported");
+        Assert(second.renderMode==RenderMode.ScreenSpaceOverlay && second.planeDistance==100,"One setter failure does not stop other canvas restoration");
+        Assert(overlay.worldCamera==originalCamera && overlay.planeDistance==100,"One setter failure does not stop remaining properties");
+        overlay.ModeSetter=null;overlay.renderMode=RenderMode.ScreenSpaceOverlay;
+        var destroyed=new OverlayCanvasScope(camera,1,2,false);destroyed.ApplyEye();second.Destroyed=true;second.Rects[0].Destroyed=true;destroyed.Dispose();
+        Assert(destroyed.DestroyedObjects==2,"Destroyed native objects skipped and reported");
+        Assert(overlay.renderMode==RenderMode.ScreenSpaceOverlay,"Destroyed objects do not prevent surviving state restoration");
+        int updates=0;
+        Canvas.ForceAction=delegate {if (++updates==1) {overlay.Rects[0].sizeDelta=new Vector2(7,7);throw new Exception("Canvas update callback failed");}};
+        var updateFailure=new OverlayCanvasScope(camera,1,2,false);
+        try {using (updateFailure) updateFailure.ApplyEye();} catch (Exception) { }
+        Assert(overlay.renderMode==RenderMode.ScreenSpaceOverlay && overlay.Rects[0].sizeDelta.Equals(new Vector2(3840,2160)),"Canvas update failure still restores mode and layout");
+        Assert(updateFailure.RestorationConflicts==0,"Successful restoration after callback failure is distinct from failed rendering");
+        Canvas.Instances.Clear();Canvas.ForceAction=null;
+        for (int i=0;i<65;++i) Overlay("root"+i,5);
+        bool limited=false;
+        try {new OverlayCanvasScope(camera,1,2,false);} catch (InvalidOperationException) {limited=true;}
+        Assert(limited,"Oversized root selection fails before conversion");
+        Assert(Canvas.Instances.TrueForAll(canvas=>canvas.renderMode==RenderMode.ScreenSpaceOverlay),"Limit failure leaves original modes intact");
+        Canvas.Instances.Clear();
     }
     static void ExternalProducer(string directory,string content)
     {

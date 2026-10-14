@@ -51,7 +51,7 @@ namespace Ugevr
         {
             object value=Property(instance,name); return value==null?"null":Text(Convert.ToString(value,CultureInfo.InvariantCulture));
         }
-        public static void Write(string directory,int frame,CVRSystem runtime,Camera selected,Matrix4x4[] beforeRender)
+        public static void Write(string directory,int frame,CVRSystem runtime,Camera selected,Matrix4x4[] beforeRender,string overlayState)
         {
             Camera[] cameras=Camera.allCameras;
             var body=new StringBuilder("{\"diagnosticVersion\":1,\"gameFrame\":").Append(Time.frameCount)
@@ -101,7 +101,8 @@ namespace Ugevr
                 }
             }
             body.Append("],\"canvasTypeAvailable\":").Append(canvasType==null?"false":"true").Append(",\"canvasCount\":").Append(canvasCount)
-                .Append(",\"rootCanvasCount\":").Append(rootCount).Append(",\"scope\":\"Enabled cameras and active root canvases after eye restoration. Projection matrices were sampled before game render callbacks. No game getters or render state were changed.\"}");
+                .Append(",\"rootCanvasCount\":").Append(rootCount).Append(",\"overlayCapture\":").Append(overlayState ?? "null")
+                .Append(",\"scope\":\"Enabled cameras and active root canvases after eye restoration. Projection matrices were sampled before game render callbacks. Snapshot queries do not execute game getters or mutate game state.\"}");
             File.WriteAllText(Path.Combine(directory,"capture-diagnostics-"+frame+".json"),body.ToString());
         }
     }

@@ -10,5 +10,6 @@
     <Compile Include="../../src/TrackingReacquisition.cs" Link="TrackingReacquisition.cs" />
     <Compile Include="../../src/InjectorSession.cs" Link="InjectorSession.cs" />
     <Compile Include="../../src/CameraState.cs" Link="CameraState.cs" />
+    <Compile Include="../../src/OverlayCanvasScope.cs" Link="OverlayCanvasScope.cs" />
   </ItemGroup>
 </Project>

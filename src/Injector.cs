@@ -44,6 +44,8 @@ public class Injector : BaseUnityPlugin
     bool active=true, runtimeReady, draining, renderingActive, quitting;
     bool ownsBackground, oldBackground;
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
+    bool captureOverlayCanvases,includeOverlayLayers;
+    double overlayPlaneMeters;
     double unitsPerMeter;
     string evidenceDir, pendingRecenter, trackingDiagnostic;
     float phaseStarted, nextReport, lastSubmittedAt;
@@ -63,9 +65,13 @@ public class Injector : BaseUnityPlugin
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
             disableOcclusionCulling=Config.Bind("Rendering","DisableOcclusionCulling",false,"Explicit fidelity remedy: disable the selected camera's occlusion culling only during eye rendering.").Value;
+            captureOverlayCanvases=Config.Bind("UI","CaptureOverlayCanvases",false,"Experimental: borrow active screen overlay canvases during eye rendering and restore desktop state.").Value;
+            includeOverlayLayers=Config.Bind("UI","IncludeOverlayLayers",false,"Explicitly include selected overlay canvas renderer layers in the borrowed camera mask; may also reveal other geometry on those layers.").Value;
+            overlayPlaneMeters=Config.Bind("UI","OverlayPlaneDistanceMeters",2f,"Experimental overlay camera plane distance in physical meters; bounded by game camera clipping.").Value;
             if (Double.IsNaN(unitsPerMeter) || Double.IsInfinity(unitsPerMeter) || unitsPerMeter<=0)
                 throw new ArgumentException("UnitsPerMeter must be finite and greater than zero.");
             if (disableOcclusionCulling) Logger.LogWarning("EXPLICIT_FIDELITY_REMEDY DisableOcclusionCulling=true; game culling is restored after the eye pair.");
+            if (captureOverlayCanvases) Logger.LogWarning("EXPERIMENTAL_UI_ADAPTER CaptureOverlayCanvases=true; only active root overlay canvases are borrowed; IncludeOverlayLayers="+includeOverlayLayers+". Layout, canvas callbacks and headset readability require validation.");
             string directory=Environment.GetEnvironmentVariable("UGEVR_SESSION_DIRECTORY");
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
@@ -273,7 +279,11 @@ public class Injector : BaseUnityPlugin
         RigidPose anchor=new RigidPose(Position(basePosition),Rotation(baseRotation));
         var actualEyes=new RigidPose[2];
         var beforeRenderProjection=new Matrix4x4[2];
+        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers):null;
+        try
+        {
         using (var restore=new CameraState(camera))
+        using (overlays)
         {
             for (int i=0;i<2;++i)
             {
@@ -289,9 +299,20 @@ public class Injector : BaseUnityPlugin
                 // Evidence must describe the applied engine transform, including
                 // Unity float precision, rather than only the requested math result.
                 actualEyes[i]=new RigidPose(Position(camera.transform.position),Rotation(camera.transform.rotation));
+                if (overlays!=null) overlays.ApplyEye(i);
                 camera.Render();
             }
         }
+        }
+        finally
+        {
+            if (overlays!=null && overlays.RestorationConflicts>0)
+            {
+                Logger.LogError("UI_RESTORATION_CONFLICT "+overlays.RestorationError);
+                if (session!=null) session.LastError="UI restoration conflict: "+overlays.RestorationError;
+            }
+        }
+        if (overlays!=null && overlays.RestorationConflicts>0) throw new InvalidOperationException("UI state could not be fully restored: "+overlays.RestorationError);
         SetEyeTextures(eyes[0].GetNativeTexturePtr(),eyes[1].GetNativeTexturePtr());
         GL.IssuePluginEvent(renderEvent,1);
         phase=2; phaseStarted=Time.realtimeSinceStartup; ++rendered;
@@ -301,12 +322,13 @@ public class Injector : BaseUnityPlugin
             File.Delete(request);
             CaptureEye(0); CaptureEye(1);
             WriteCapture(head,anchor,actualEyes,camera.transform.position==basePosition && camera.transform.rotation==baseRotation);
-            try { CameraDiagnostics.Write(evidenceDir,rendered,system,camera,beforeRenderProjection); }
+            try { CameraDiagnostics.Write(evidenceDir,rendered,system,camera,beforeRenderProjection,overlays==null?null:overlays.DiagnosticJson()); }
             catch (Exception diagnosticError) { Logger.LogWarning("Capture diagnostics unavailable: "+diagnosticError.Message); }
             RequestMirrorCapture(Path.Combine(evidenceDir,"compositor-left-"+rendered+".bmp"));
             GL.IssuePluginEvent(renderEvent,2);
         }
-        Report("VR_FRAME rendered="+rendered+" submitted="+submittedPairs+" frame="+frameId+" generation="+generation);
+        Report("VR_FRAME rendered="+rendered+" submitted="+submittedPairs+" frame="+frameId+" generation="+generation+
+            (overlays==null?"":" uiOverlayRoots="+overlays.SelectedCount+" uiPlane="+overlays.PlaneDistance+" excludedUILayers="+(overlays.OverlayLayerMask & ~overlays.AppliedMask)));
     }
 
     void HandleTrackingInterruption(PoseCallbackDisposition disposition)

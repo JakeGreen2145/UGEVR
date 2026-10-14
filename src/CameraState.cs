@@ -14,6 +14,7 @@ namespace Ugevr
         readonly bool automaticProjection, automaticView;
         readonly Rect rect;
         readonly bool occlusion;
+        readonly int cullingMask;
         readonly Color background;
         readonly CameraClearFlags clearFlags;
         bool restored;
@@ -24,6 +25,7 @@ namespace Ugevr
             target=camera.targetTexture; projection=camera.projectionMatrix;
             view=camera.worldToCameraMatrix; rect=camera.rect;
             occlusion=camera.useOcclusionCulling; background=camera.backgroundColor;
+            cullingMask=camera.cullingMask;
             clearFlags=camera.clearFlags;
             // Unity exposes matrix values, not whether a setter override is active.
             // Compare against the engine's own defaults rather than approximating
@@ -48,6 +50,7 @@ namespace Ugevr
             camera.targetTexture=target;
             camera.transform.position=position; camera.transform.rotation=rotation;
             camera.rect=rect; camera.useOcclusionCulling=occlusion;
+            camera.cullingMask=cullingMask;
             camera.backgroundColor=background; camera.clearFlags=clearFlags;
             if (automaticProjection) camera.ResetProjectionMatrix(); else camera.projectionMatrix=projection;
             if (automaticView) camera.ResetWorldToCameraMatrix(); else camera.worldToCameraMatrix=view;

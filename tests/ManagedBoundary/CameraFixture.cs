@@ -2,6 +2,22 @@
 // restoration, not native Unity object destruction or Camera.Render behavior.
 namespace UnityEngine
 {
+    public class Object
+    {
+        static int nextId;
+        readonly int id=++nextId;
+        public bool Destroyed;
+        public string name="fixture";
+        public int GetInstanceID() { return id; }
+        public static Object[] FindObjectsOfType(System.Type type) { return type==typeof(Canvas)?Canvas.Instances.ToArray():new Object[0]; }
+        public static bool operator ==(Object a,Object b) { return (System.Object.ReferenceEquals(a,null) || a.Destroyed)?(System.Object.ReferenceEquals(b,null) || b.Destroyed):System.Object.ReferenceEquals(a,b); }
+        public static bool operator !=(Object a,Object b) { return !(a==b); }
+        public override bool Equals(object other) { return System.Object.ReferenceEquals(this,other); }
+        public override int GetHashCode() { return id; }
+    }
+    public class GameObject { public int layer; }
+    public class Component : Object { public GameObject gameObject=new GameObject(); }
+    public struct Vector2 { public float x,y; public Vector2(float x,float y) {this.x=x;this.y=y;} }
     public struct Vector3 { public float x,y,z; public Vector3(float x,float y,float z) { this.x=x;this.y=y;this.z=z; } }
     public struct Quaternion { public float x,y,z,w; public Quaternion(float x,float y,float z,float w) { this.x=x;this.y=y;this.z=z;this.w=w; } }
     public struct Matrix4x4 { public float Marker; public float this[int i] { get { return i==0?Marker:0; } } }
@@ -9,8 +25,40 @@ namespace UnityEngine
     public struct Color { public float r,g,b,a; }
     public class RenderTexture { }
     public enum CameraClearFlags { Skybox=1, Color=2, Depth=3, Nothing=4 }
-    public class Transform { public Vector3 position; public Quaternion rotation; }
-    public class Camera
+    public class Transform : Component
+    {
+        public Vector3 position,localPosition,localScale;
+        public Quaternion rotation,localRotation;
+    }
+    public class RectTransform : Transform
+    {
+        public Vector2 anchorMin,anchorMax,pivot,sizeDelta;
+        public Vector3 anchoredPosition3D;
+    }
+    public class CanvasRenderer : Component { }
+    public enum RenderMode {ScreenSpaceOverlay,ScreenSpaceCamera,WorldSpace}
+    public enum AdditionalCanvasShaderChannels {None=0,TexCoord1=1,Normal=2}
+    public class Canvas : Component
+    {
+        public static System.Collections.Generic.List<Canvas> Instances=new System.Collections.Generic.List<Canvas>();
+        public static System.Action ForceAction;
+        public static void ForceUpdateCanvases() { if (ForceAction!=null) ForceAction(); }
+        public bool isActiveAndEnabled=true,isRootCanvas=true;
+        public int targetDisplay,sortingOrder,sortingLayerID;
+        public bool overrideSorting,pixelPerfect,overridePixelPerfect;
+        public AdditionalCanvasShaderChannels additionalShaderChannels;
+        public float planeDistance,scaleFactor=1,referencePixelsPerUnit=100;
+        public Camera worldCamera;
+        public System.Action<RenderMode> ModeSetter;
+        RenderMode mode;
+        public RenderMode renderMode {get {return mode;} set {if (ModeSetter!=null) ModeSetter(value);mode=value;} }
+        public RectTransform[] Rects=new RectTransform[0];
+        public Transform transform { get {return Rects.Length==0?null:Rects[0];} }
+        public Rect pixelRect=new Rect {width=3840,height=2160};
+        public CanvasRenderer[] Renderers=new CanvasRenderer[0];
+        public T[] GetComponentsInChildren<T>(bool inactive) { return (T[])(object)(typeof(T)==typeof(RectTransform)?(System.Array)Rects:Renderers); }
+    }
+    public class Camera : Component
     {
         public Transform transform=new Transform();
         public RenderTexture targetTexture;
@@ -24,5 +72,7 @@ namespace UnityEngine
         public bool useOcclusionCulling;
         public Color backgroundColor;
         public CameraClearFlags clearFlags;
+        public int cullingMask=-1,targetDisplay;
+        public float nearClipPlane=1,farClipPlane=2500;
     }
 }
