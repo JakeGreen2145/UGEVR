@@ -122,6 +122,35 @@ var clock = new FakeClock(); var samples = new List<WindowSample>();
 int samplesCount = ControllerWindow.Run(new FakeReadback(123, 123), new FakeIdentity(7, 7), clock, 123, 7, samples.Add);
 Check(samplesCount == 300 && samples.Count == 300 && clock.ElapsedSeconds >= 15, "fixed 15 seconds maximum 300 samples");
 Check(samples[^1].Sequence == 299 && samples[^1].ElapsedSeconds < 15 && clock.MinSleep >= .049999, "20Hz no catchup burst");
+Check(!windowOptions.HeadPose && !json.Contains("headPose"), "head opt-in absent by default including JSON");
+var headArgs = new[] { "--controller-window", "--expected-scene-pid", "123", "--expected-process-start-utc-ticks", "7", "--head-pose" };
+Check(ProbeOptions.Parse(headArgs).HeadPose, "head option accepted with bounded controller window");
+Reject(new[] { "--head-pose" });
+Reject(new[] { "--controllers", "--expected-scene-pid", "123", "--head-pose" });
+Reject(new[] { "--controller-window", "--expected-scene-pid", "123", "--expected-process-start-utc-ticks", "7", "--head-pose", "--head-pose" });
+var headSource = new FakeReadback(123, 123);
+var headSample = ControllerWindow.Capture(headSource, new FakeIdentity(7, 7), new FakeClock(), 123, 7, 0, true);
+Check(headSample.Snapshot.HeadPose is { DeviceIndex: 0, DeviceClass: "HMD", Connected: true, PoseValid: true, TrackingResult: "Running_OK", Status: "observed" }, "same-client raw HMD identity and validity");
+Check(headSample.Snapshot.HeadPose.Transform.Length == 12 && headSample.Snapshot.HeadPose.Transform[7] == 1.6f && headSource.PoseCalls == 1, "head uses one existing Standing pose query");
+Check(headSource.Sizes.Count == 2 && headSource.IntProperties.Count == 10, "head adds no controller state or property queries");
+Check(JsonSerializer.Serialize(headSample, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }).Contains("\"headPose\":{\"deviceIndex\":0"), "optional head schema emitted");
+var noHead = ControllerProbe.Capture(new FakeReadback(123, 123) { HeadClass = ETrackedDeviceClass.GenericTracker }, 123, true).HeadPose;
+Check(noHead.Status == "device_class_mismatch" && noHead.Transform == null && noHead.PoseValid == null, "wrong head class is explicit unknown");
+var invalidHead = ControllerProbe.Capture(new FakeReadback(123, 123) { HeadValid = false }, 123, true).HeadPose;
+Check(invalidHead.Status == "pose_unavailable" && invalidHead.PoseValid == false, "invalid raw head does not claim receipt");
+var disconnectedHead = ControllerProbe.Capture(new FakeReadback(123, 123) { HeadConnected = false }, 123, true).HeadPose;
+Check(disconnectedHead.Status == "pose_unavailable" && disconnectedHead.Connected == false, "disconnected raw head remains explicit");
+var nonfiniteHead = ControllerProbe.Capture(new FakeReadback(123, 123) { HeadNonFinite = true }, 123, true).HeadPose;
+Check(nonfiniteHead.Status == "nonfinite_pose" && nonfiniteHead.Transform[7] == null && JsonSerializer.Serialize(nonfiniteHead).Length > 0, "nonfinite raw head serializes null without fabricated pose");
+var missingHeadPose = ControllerProbe.Capture(new FakeReadback(123, 123) { MissingPoses = true, NoControllers = true }, 123, true).HeadPose;
+Check(missingHeadPose.Status == "pose_unavailable" && missingHeadPose.Transform == null, "missing raw pose array is explicit unknown");
+var headMismatchSource = new FakeReadback(456, 456);
+Check(ControllerWindow.Capture(headMismatchSource, new FakeIdentity(7, 7), new FakeClock(), 123, 7, 0, true).Snapshot == null && headMismatchSource.PoseCalls == 0, "initial focus rejects head before pose query");
+Check(ControllerWindow.Capture(new FakeReadback(123, 456), new FakeIdentity(7, 7), new FakeClock(), 123, 7, 0, true).Snapshot.HeadPose == null, "inner focus change discards head");
+Check(ControllerWindow.Capture(new FakeReadback(123, 456) { FocusChangeAfterReads = 3 }, new FakeIdentity(7, 7), new FakeClock(), 123, 7, 0, true).Snapshot.HeadPose == null, "final focus change discards head");
+Check(ControllerWindow.Capture(new FakeReadback(123, 123), new FakeIdentity(7, 8), new FakeClock(), 123, 7, 0, true).Snapshot.HeadPose == null, "process reuse discards head");
+var headClock = new FakeClock(); var headSamples = new List<WindowSample>();
+Check(ControllerWindow.Run(new FakeReadback(123, 123), new FakeIdentity(7, 7), headClock, 123, 7, headSamples.Add, true) == 300 && headSamples.TrueForAll(s => s.Snapshot.HeadPose != null), "head option preserves bounded window limit");
 var slowClock = new FakeClock(); int slowCount = ControllerWindow.Run(new FakeReadback(123, 123), new FakeIdentity(7, 7), slowClock, 123, 7, s => slowClock.Advance(.4));
 Check(slowCount < 40 && slowClock.MinSleep >= .049999, "slow reads reduce count without bursts");
 var crossedClock = new FakeClock(); var crossedSamples = new List<WindowSample>();
@@ -166,6 +195,9 @@ sealed class FakeReadback(uint? before, uint? after) : IControllerReadback
     public int FocusChangeAfterReads = 1;
     public Action OnPoses;
     public int ReadCalls;
+    public int PoseCalls;
+    public ETrackedDeviceClass HeadClass = ETrackedDeviceClass.HMD;
+    public bool HeadValid = true, HeadConnected = true, HeadNonFinite, MissingPoses, NoControllers;
     public bool Input = true;
     public bool NonFinite;
     public bool IdentityError;
@@ -179,12 +211,16 @@ sealed class FakeReadback(uint? before, uint? after) : IControllerReadback
     public TrackedDevicePose_t[] Poses() {
         OnPoses?.Invoke();
         ReadCalls++;
+        PoseCalls++;
+        if (MissingPoses) return null;
         var poses = new TrackedDevicePose_t[ControllerProbe.DeviceLimit];
+        poses[0] = new TrackedDevicePose_t { bPoseIsValid = HeadValid, bDeviceIsConnected = HeadConnected,
+            eTrackingResult = ETrackingResult.Running_OK, mDeviceToAbsoluteTracking = new HmdMatrix34_t { m0 = 1, m5 = 1, m10 = 1, m7 = HeadNonFinite ? float.PositiveInfinity : 1.6f } };
         poses[2] = new TrackedDevicePose_t { bPoseIsValid = true, bDeviceIsConnected = true,
             eTrackingResult = ETrackingResult.Running_OK, mDeviceToAbsoluteTracking = new HmdMatrix34_t { m3 = 0.13f } };
         return poses;
     }
-    public ETrackedDeviceClass DeviceClass(uint index) { ReadCalls++; Indices.Add(index); return index == 2 || index == 63 ? ETrackedDeviceClass.Controller : ETrackedDeviceClass.GenericTracker; }
+    public ETrackedDeviceClass DeviceClass(uint index) { ReadCalls++; Indices.Add(index); return index == 0 ? HeadClass : !NoControllers && (index == 2 || index == 63) ? ETrackedDeviceClass.Controller : ETrackedDeviceClass.GenericTracker; }
     public ETrackedControllerRole Role(uint index) => index == 2 ? ETrackedControllerRole.RightHand : ETrackedControllerRole.LeftHand;
     public bool ControllerState(uint index, ref VRControllerState_t state, uint size) {
         ReadCalls++; Sizes.Add(size);

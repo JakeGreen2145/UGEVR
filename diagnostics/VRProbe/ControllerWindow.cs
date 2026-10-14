@@ -48,7 +48,7 @@ internal static class ControllerWindow
     public const double DurationSeconds = 15;
     public const int MaximumSamples = 300;
     public static WindowSample Capture(IControllerReadback source, IProcessIdentity identity, IWindowClock clock,
-        uint pid, long start, int sequence)
+        uint pid, long start, int sequence, bool headPose = false)
     {
         long? before = identity.StartUtcTicks(pid);
         ControllerSnapshot snapshot = null;
@@ -66,26 +66,26 @@ internal static class ControllerWindow
                     focusBefore, focusBefore, null, null, null, "scene_focus_mismatch", "not_verified", "unknown", false);
             }
             inputBefore = source.IsInputAvailable();
-            snapshot = ControllerProbe.Capture(source, pid);
+            snapshot = ControllerProbe.Capture(source, pid, headPose);
             inputAfter = source.IsInputAvailable();
             focusAfter = source.SceneFocusProcess();
             after = identity.StartUtcTicks(pid);
             status = after != start ? "process_identity_changed" :
                 snapshot.Status != "observed" ? snapshot.Status : focusAfter != pid ? "scene_focus_changed" : "observed";
-            if (status != "observed") snapshot = snapshot with { Controllers = Array.Empty<ControllerSample>(), Status = status };
+            if (status != "observed") snapshot = snapshot with { Controllers = Array.Empty<ControllerSample>(), HeadPose = null, Status = status };
         }
         return new WindowSample("sample", sequence, clock.UtcNow, clock.ElapsedSeconds, pid, start, before, after,
             focusBefore, focusAfter, inputBefore, inputAfter, snapshot, status, status == "observed" ? "verified_pid_and_start_ticks" : "not_verified",
             "unknown", false);
     }
     public static int Run(IControllerReadback source, IProcessIdentity identity, IWindowClock clock,
-        uint pid, long start, Action<WindowSample> emit)
+        uint pid, long start, Action<WindowSample> emit, bool headPose = false)
     {
         double began = clock.ElapsedSeconds;
         int sequence = 0;
         while (sequence < MaximumSamples && clock.ElapsedSeconds - began < DurationSeconds)
         {
-            var sample = Capture(source, identity, clock, pid, start, sequence);
+            var sample = Capture(source, identity, clock, pid, start, sequence, headPose);
             // An SDK call may cross the boundary. Its completed read is excluded rather than extending the window.
             if (clock.ElapsedSeconds - began >= DurationSeconds) break;
             emit(sample);

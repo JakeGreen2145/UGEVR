@@ -46,7 +46,7 @@ try {
         Console.Out.Flush();
         windowSamples = ControllerWindow.Run(new OpenVrControllerReadback(vr, OpenVR.Compositor), identity, windowClock,
             options.ExpectedScenePid.Value, options.ExpectedProcessStartUtcTicks.Value,
-            sample => { Console.WriteLine(JsonSerializer.Serialize(sample, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })); Console.Out.Flush(); });
+            sample => { Console.WriteLine(JsonSerializer.Serialize(sample, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })); Console.Out.Flush(); }, options.HeadPose);
     }
     else {
     if (options.Controllers) {

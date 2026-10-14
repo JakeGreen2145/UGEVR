@@ -3,20 +3,23 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json.Serialization;
 using Valve.VR;
 
-internal sealed record ProbeOptions(bool Controllers, uint? ExpectedScenePid, bool ControllerWindow = false, long? ExpectedProcessStartUtcTicks = null)
+internal sealed record ProbeOptions(bool Controllers, uint? ExpectedScenePid, bool ControllerWindow = false, long? ExpectedProcessStartUtcTicks = null, bool HeadPose = false)
 {
     public static ProbeOptions Parse(string[] args)
     {
         bool controllers = false;
         bool window = false;
+        bool head = false;
         long? start = null;
         uint? expectedPid = null;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--controllers" && !controllers) controllers = true;
             else if (args[i] == "--controller-window" && !window) window = true;
+            else if (args[i] == "--head-pose" && !head) head = true;
             else if (args[i] == "--expected-process-start-utc-ticks" && start == null && ++i < args.Length)
             {
                 string value = args[i];
@@ -37,9 +40,9 @@ internal sealed record ProbeOptions(bool Controllers, uint? ExpectedScenePid, bo
             }
             else throw new ArgumentException("Unknown, duplicate or incomplete probe option.");
         }
-        if ((controllers && window) || (controllers || window) != expectedPid.HasValue || window != start.HasValue)
+        if ((controllers && window) || (controllers || window) != expectedPid.HasValue || window != start.HasValue || (head && !window))
             throw new ArgumentException("Select --controllers with a PID, or --controller-window with a PID and process start UTC ticks.");
-        return new ProbeOptions(controllers, expectedPid, window, start);
+        return new ProbeOptions(controllers, expectedPid, window, start, head);
     }
 }
 
@@ -97,14 +100,20 @@ internal sealed record ControllerSample(uint DeviceIndex, string DeviceClass, st
     Int32Property Axis2Type, Int32Property Axis3Type, Int32Property Axis4Type);
 internal sealed record ControllerSnapshot(DateTime Timestamp, string Status, uint ExpectedScenePid,
     uint? FocusProcessBefore, uint? FocusProcessAfter, bool? InputAvailable, uint ControllerStateSize,
-    int DeviceLimit, string ProcessIdentity, string InputReceipt, ControllerSample[] Controllers);
+    int DeviceLimit, string ProcessIdentity, string InputReceipt, ControllerSample[] Controllers)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HeadPoseSample HeadPose { get; init; }
+}
+internal sealed record HeadPoseSample(uint DeviceIndex, string DeviceClass, bool? Connected, bool? PoseValid,
+    string TrackingResult, float?[] Transform, string Status);
 
 internal static class ControllerProbe
 {
     public static readonly int DeviceLimit = Math.Min(64, (int)OpenVR.k_unMaxTrackedDeviceCount);
     public static readonly uint StateSize = checked((uint)Marshal.SizeOf<VRControllerState_t>());
 
-    public static ControllerSnapshot Capture(IControllerReadback source, uint expectedPid)
+    public static ControllerSnapshot Capture(IControllerReadback source, uint expectedPid, bool headPose = false)
     {
         if (expectedPid == 0) throw new ArgumentOutOfRangeException(nameof(expectedPid));
         uint? before = source.SceneFocusProcess();
@@ -115,6 +124,25 @@ internal static class ControllerProbe
 
         bool inputAvailable = source.IsInputAvailable();
         var poses = source.Poses();
+        HeadPoseSample head = null;
+        if (headPose)
+        {
+            const uint index = OpenVR.k_unTrackedDeviceIndex_Hmd;
+            var deviceClass = source.DeviceClass(index);
+            if (deviceClass != ETrackedDeviceClass.HMD)
+                head = new(index, deviceClass.ToString(), null, null, null, null, "device_class_mismatch");
+            else if (poses == null || poses.Length <= index)
+                head = new(index, deviceClass.ToString(), null, null, null, null, "pose_unavailable");
+            else
+            {
+                var pose = poses[index];
+                var transform = Matrix(pose.mDeviceToAbsoluteTracking);
+                string status = Array.Exists(transform, value => !value.HasValue) ? "nonfinite_pose" :
+                    !pose.bDeviceIsConnected || !pose.bPoseIsValid ? "pose_unavailable" : "observed";
+                head = new(index, deviceClass.ToString(), pose.bDeviceIsConnected, pose.bPoseIsValid,
+                    pose.eTrackingResult.ToString(), transform, status);
+            }
+        }
         var controllers = new List<ControllerSample>();
         for (uint index = 0; index < DeviceLimit; index++)
         {
@@ -139,7 +167,7 @@ internal static class ControllerProbe
         uint? after = source.SceneFocusProcess();
         // Discard potentially mixed-consumer samples if scene focus changed during the read.
         if (after != expectedPid) return Result("scene_focus_changed", after, inputAvailable, Array.Empty<ControllerSample>());
-        return Result("observed", after, inputAvailable, controllers.ToArray());
+        return Result("observed", after, inputAvailable, controllers.ToArray()) with { HeadPose = head };
     }
     static float? Finite(float value) => float.IsFinite(value) ? value : null;
     static float?[] Axis(VRControllerAxis_t value) => new[] { Finite(value.x), Finite(value.y) };
