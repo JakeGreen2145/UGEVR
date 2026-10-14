@@ -46,6 +46,8 @@ public class Injector : BaseUnityPlugin
     bool ownsBackground, oldBackground;
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
     bool captureOverlayCanvases,includeOverlayLayers;
+    bool overlayAfterImageEffects;
+    Camera overlayCamera;
     double overlayPlaneMeters;
     double overlayWidthMeters;
     double unitsPerMeter;
@@ -71,6 +73,7 @@ public class Injector : BaseUnityPlugin
             includeOverlayLayers=Config.Bind("UI","IncludeOverlayLayers",false,"Explicitly include selected overlay canvas renderer layers in the borrowed camera mask; may also reveal other geometry on those layers.").Value;
             overlayPlaneMeters=Config.Bind("UI","OverlayPlaneDistanceMeters",2f,"Experimental overlay camera plane distance in physical meters; bounded by game camera clipping.").Value;
             overlayWidthMeters=Config.Bind("UI","OverlayPanelWidthMeters",1.8f,"Experimental common physical panel width; desktop aspect/layout retained independently of game FOV.").Value;
+            overlayAfterImageEffects=Config.Bind("UI","OverlayAfterImageEffects",false,"Experimental opt-in: render selected overlay UI in an isolated no-effect pass after the game eye's effects. Requires explicit overlay capture activation.").Value;
             if (Double.IsNaN(unitsPerMeter) || Double.IsInfinity(unitsPerMeter) || unitsPerMeter<=0)
                 throw new ArgumentException("UnitsPerMeter must be finite and greater than zero.");
             if (disableOcclusionCulling) Logger.LogWarning("EXPLICIT_FIDELITY_REMEDY DisableOcclusionCulling=true; game culling is restored after the eye pair.");
@@ -284,6 +287,15 @@ public class Injector : BaseUnityPlugin
         var beforeRenderProjection=new Matrix4x4[2];
         OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters):null;
         if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
+        if (overlays!=null && overlays.SelectedCount>0 && overlayAfterImageEffects)
+        {
+            if(overlayCamera==null)
+            {
+                var owner=new GameObject("UGEVR overlay camera");owner.hideFlags=HideFlags.HideAndDontSave;
+                overlayCamera=owner.AddComponent<Camera>();overlayCamera.enabled=false;
+            }
+            overlays.UseAfterEffectsCamera(overlayCamera);
+        }
         try
         {
         using (var restore=new CameraState(camera))
@@ -304,13 +316,22 @@ public class Injector : BaseUnityPlugin
                 // Unity float precision, rather than only the requested math result.
                 actualEyes[i]=new RigidPose(Position(camera.transform.position),Rotation(camera.transform.rotation));
                 if (overlays!=null) overlays.ApplyEye(i);
+                bool isolatedUi=overlays!=null && overlays.IsolatedMask!=0;
+                if(isolatedUi) OverlayCameraPass.Prepare(camera,overlayCamera,overlays.IsolatedMask);
                 camera.Render();
+                if(isolatedUi)
+                {
+                    overlays.ValidateLayerExclusive();
+                    OverlayCameraPass.Render(overlayCamera);
+                }
                 if (overlays!=null) overlays.RecordAfterRender(i);
             }
         }
         }
         finally
         {
+            if(overlayCamera!=null) overlayCamera.targetTexture=null;
+            if(overlays!=null) overlays.RebuildRestoredGeometry();
             if (overlays!=null && overlays.RestorationConflicts>0)
             {
                 Logger.LogError("UI_RESTORATION_CONFLICT "+overlays.RestorationError);
@@ -470,6 +491,7 @@ public class Injector : BaseUnityPlugin
     void StopOwnedWork()
     {
         active=false; renderingActive=false; RestoreBackground();
+        if(overlayCamera!=null) {overlayCamera.enabled=false;overlayCamera.targetTexture=null;}
         try { BeginDrain(); } catch (Exception error) { Logger.LogError("Final drain pending: "+error.Message); }
         if (session!=null) session.LastError="Process teardown: queued native work and GPU completion cannot be acknowledged after the final engine callback.";
         Publish(true);

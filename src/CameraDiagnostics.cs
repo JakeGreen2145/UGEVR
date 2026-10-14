@@ -55,6 +55,9 @@ namespace Ugevr
         {
             Camera[] cameras=Camera.allCameras;
             var body=new StringBuilder("{\"diagnosticVersion\":1,\"gameFrame\":").Append(Time.frameCount)
+                .Append(",\"applicationFocused\":").Append(Application.isFocused?"true":"false")
+                .Append(",\"runInBackground\":").Append(Application.runInBackground?"true":"false")
+                .Append(",\"screenWidth\":").Append(Screen.width).Append(",\"screenHeight\":").Append(Screen.height)
                 .Append(",\"selectedCamera\":").Append(selected==null?"null":Text(selected.name))
                 .Append(",\"cameraCount\":").Append(cameras.Length).Append(",\"cameraLimit\":").Append(Limit)
                 .Append(",\"cameras\":[");

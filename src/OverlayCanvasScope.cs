@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using System.Reflection;
 using UnityEngine;
 
 namespace Ugevr
@@ -18,8 +19,11 @@ namespace Ugevr
         readonly string[] appliedEyes=new string[2];
         readonly string[] afterRenderEyes=new string[2];
         readonly List<string> geometryChanges=new List<string>();
+        readonly List<GameObject> isolatedObjects=new List<GameObject>();
         readonly Camera camera;
         readonly bool includeLayers;
+        OverlayLayerLease layerLease;
+        Camera uiCamera;
         readonly double unitsPerMeter;
         readonly double panelWidthMeters;
         RigidPose commonHead;
@@ -35,6 +39,7 @@ namespace Ugevr
         public int RotationRoundoff { get; private set; }
         public int UnexpectedGeometryChanges { get; private set; }
         public int SelectedCount { get { return canvases.Count; } }
+        public int IsolatedMask {get {return layerLease==null?0:layerLease.Mask;}}
         public string RestorationError { get { return String.Join("; ",errors.ToArray()); } }
 
         sealed class CanvasState
@@ -51,6 +56,7 @@ namespace Ugevr
             public RectTransform Root;
             public float Width,Height,ParentScale;
             public Vector2 Pivot;
+            public string OriginalUiContext;
         }
         sealed class RectState
         {
@@ -93,10 +99,18 @@ namespace Ugevr
                     WorldCamera=canvas.worldCamera,Distance=canvas.planeDistance,ScaleFactor=canvas.scaleFactor,ReferencePixels=canvas.referencePixelsPerUnit,
                     SortingOrder=canvas.sortingOrder,SortingLayer=canvas.sortingLayerID,TargetDisplay=canvas.targetDisplay,
                     OverrideSorting=canvas.overrideSorting,PixelPerfect=canvas.pixelPerfect,OverridePixelPerfect=canvas.overridePixelPerfect,ShaderChannels=canvas.additionalShaderChannels,
-                    Root=root,Width=root.rect.width,Height=root.rect.height,Pivot=root.pivot,ParentScale=parentScale});
+                    Root=root,Width=root.rect.width,Height=root.rect.height,Pivot=root.pivot,ParentScale=parentScale,OriginalUiContext=UiContext(canvas)});
                 OverlayLayerMask|=1<<canvas.gameObject.layer;
+                isolatedObjects.Add(canvas.gameObject);
                 foreach (CanvasRenderer renderer in canvas.GetComponentsInChildren<CanvasRenderer>(true))
-                    if (renderer!=null) OverlayLayerMask|=1<<renderer.gameObject.layer;
+                    if (renderer!=null) {OverlayLayerMask|=1<<renderer.gameObject.layer;isolatedObjects.Add(renderer.gameObject);}
+                foreach(Canvas nested in canvas.GetComponentsInChildren<Canvas>(true))
+                {
+                    if(nested==null) continue;
+                    if(nested!=canvas && nested.isRootCanvas)
+                        throw new InvalidOperationException("Overlay "+canvas.name+" contains an independently rooted canvas; an explicit UI adapter is required before borrowing its hierarchy.");
+                    isolatedObjects.Add(nested.gameObject);
+                }
                 foreach (RectTransform rect in canvas.GetComponentsInChildren<RectTransform>(true))
                 {
                     if (rect==null || !seen.Add(rect.GetInstanceID())) continue;
@@ -116,6 +130,13 @@ namespace Ugevr
             if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
         }
         public void SetCommonHead(RigidPose head) {if (applied) throw new InvalidOperationException("Common panel pose cannot change between eyes.");commonHead=head;commonHeadSet=true;}
+        public void UseAfterEffectsCamera(Camera ui)
+        {
+            if(applied) throw new InvalidOperationException("UI pass selection cannot change between eyes.");
+            if(canvases.Count==0) return;
+            layerLease=new OverlayLayerLease(isolatedObjects);uiCamera=ui;
+        }
+        public void ValidateLayerExclusive() {if(layerLease!=null) layerLease.ValidateExclusive();}
         public void RecordAfterRender(int eye)
         {
             if (eye<0 || eye>1 || !applied) return;
@@ -129,13 +150,14 @@ namespace Ugevr
         void PrepareCommonPanel()
         {
             applied=true;
-            AppliedMask=includeLayers?OriginalMask | OverlayLayerMask:OriginalMask;
+            if(layerLease!=null) layerLease.Apply();
+            AppliedMask=layerLease!=null?OriginalMask & ~layerLease.Mask:(includeLayers?OriginalMask | OverlayLayerMask:OriginalMask);
             camera.cullingMask=AppliedMask;
             foreach (CanvasState state in canvases)
             {
                 if (state.Canvas==null) continue;
                 state.Canvas.renderMode=RenderMode.WorldSpace;
-                state.Canvas.worldCamera=camera;
+                state.Canvas.worldCamera=uiCamera ?? camera;
                 state.Canvas.planeDistance=PlaneDistance;
             }
             Canvas.ForceUpdateCanvases();
@@ -186,6 +208,11 @@ namespace Ugevr
                 Attempt(delegate {canvas.scaleFactor=state.ScaleFactor;},state.Name+" scale factor");
                 Attempt(delegate {canvas.referencePixelsPerUnit=state.ReferencePixels;},state.Name+" reference pixels");
             }
+            if(layerLease!=null)
+            {
+                layerLease.Dispose();DestroyedObjects+=layerLease.DestroyedObjects;
+                foreach(string error in layerLease.Errors) Conflict(error);
+            }
             Attempt(delegate { Canvas.ForceUpdateCanvases(); },"restore canvas geometry");
             foreach (RectState state in rects)
             {
@@ -226,6 +253,26 @@ namespace Ugevr
             }
             if (camera!=null) Attempt(delegate {camera.cullingMask=OriginalMask;},"restore camera UI layers");
         }
+        public void RebuildRestoredGeometry()
+        {
+            if(!disposed || !applied) return;
+            // Called after the surrounding CameraState restored the desktop camera.
+            Attempt(delegate {Canvas.ForceUpdateCanvases();},"final desktop canvas rebuild");
+            foreach(RectState state in rects)
+            {
+                if(state.Rect==null) continue;
+                Attempt(delegate {
+                    Verify(state,"anchorMin",Values(state.AnchorMin),Values(state.Rect.anchorMin));
+                    Verify(state,"anchorMax",Values(state.AnchorMax),Values(state.Rect.anchorMax));
+                    Verify(state,"pivot",Values(state.Pivot),Values(state.Rect.pivot));
+                    Verify(state,"sizeDelta",Values(state.Size),Values(state.Rect.sizeDelta));
+                    Verify(state,"anchoredPosition3D",Values(state.AnchoredPosition),Values(state.Rect.anchoredPosition3D));
+                    Verify(state,"localPosition",Values(state.LocalPosition),Values(state.Rect.localPosition),true);
+                    Verify(state,"localScale",Values(state.LocalScale),Values(state.Rect.localScale));
+                    VerifyRotation(state,Values(state.LocalRotation),Values(state.Rect.localRotation));
+                },"verify final desktop rectangle "+state.Name);
+            }
+        }
         static string Quote(string value)
         {
             if (value==null) return "null";
@@ -240,6 +287,35 @@ namespace Ugevr
             return text.Append('"').ToString();
         }
         static string Number(float value) { return Single.IsNaN(value) || Single.IsInfinity(value)?"null":value.ToString("R",CultureInfo.InvariantCulture); }
+        static string UiContext(Canvas canvas)
+        {
+            var text=new StringBuilder("[");int count=0,scanned=0;
+            foreach(Component component in canvas.GetComponents<Component>())
+            {
+                if(++scanned>64) break;
+                if(component==null) continue;
+                string type=component.GetType().FullName;
+                string[] properties;
+                if(type=="UnityEngine.UI.CanvasScaler") properties=new[]{"enabled","uiScaleMode","referenceResolution","screenMatchMode","matchWidthOrHeight","scaleFactor","referencePixelsPerUnit","dynamicPixelsPerUnit"};
+                else if(type=="UnityEngine.UI.GraphicRaycaster") properties=new[]{"enabled","ignoreReversedGraphics","blockingObjects","blockingMask","eventCamera"};
+                else continue;
+                if(count++>0) text.Append(',');text.Append("{\"type\":").Append(Quote(type));
+                foreach(string name in properties)
+                {
+                    text.Append(',').Append(Quote(name)).Append(':');
+                    try
+                    {
+                        PropertyInfo property=component.GetType().GetProperty(name,BindingFlags.Public|BindingFlags.Instance);
+                        object value=property==null?null:property.GetValue(component,null);
+                        var engineObject=value as UnityEngine.Object;
+                        text.Append(value==null?"null":Quote(engineObject!=null?engineObject.name:Convert.ToString(value,CultureInfo.InvariantCulture)));
+                    }
+                    catch {text.Append("null");}
+                }
+                text.Append('}');
+            }
+            return text.Append(']').ToString();
+        }
         static float[] Values(Vector2 value) { return new[]{value.x,value.y}; }
         static float[] Values(Vector3 value) { return new[]{value.x,value.y,value.z}; }
         static float[] Values(Quaternion value) { return new[]{value.x,value.y,value.z,value.w}; }
@@ -321,6 +397,7 @@ namespace Ugevr
                 text.Append("{\"name\":").Append(Quote(canvases[i].Name)).Append(",\"mode\":").Append(Quote(canvas.renderMode.ToString()))
                     .Append(",\"worldCamera\":").Append(canvas.worldCamera==null?"null":Quote(canvas.worldCamera.name))
                     .Append(",\"planeDistance\":").Append(Number(canvas.planeDistance)).Append(",\"scaleFactor\":").Append(Number(canvas.scaleFactor))
+                    .Append(",\"engineUiContext\":").Append(UiContext(canvas))
                     .Append(",\"pixelRect\":[").Append(Number(canvas.pixelRect.x)).Append(',').Append(Number(canvas.pixelRect.y)).Append(',')
                     .Append(Number(canvas.pixelRect.width)).Append(',').Append(Number(canvas.pixelRect.height)).Append(']');
                 if (root!=null) text.Append(",\"rootPosition\":").Append(Vector(root.position)).Append(",\"rootRotation\":[")
@@ -338,6 +415,9 @@ namespace Ugevr
                 .Append(",\"planeDistance\":").Append(PlaneDistance.ToString("R",CultureInfo.InvariantCulture))
                 .Append(",\"commonHeadPosition\":").Append(Vector(new Vector3((float)commonHead.Position.X,(float)commonHead.Position.Y,(float)commonHead.Position.Z)))
                 .Append(",\"layout\":\"original desktop logical dimensions and aspect\"")
+                .Append(",\"afterImageEffects\":").Append(layerLease==null?"false":"true")
+                .Append(",\"isolatedLayer\":").Append(layerLease==null?-1:layerLease.Layer)
+                .Append(",\"isolatedObjectCount\":").Append(layerLease==null?0:layerLease.ObjectCount)
                 .Append(",\"originalMask\":").Append(OriginalMask).Append(",\"appliedMask\":").Append(AppliedMask)
                 .Append(",\"overlayLayerMask\":").Append(OverlayLayerMask).Append(",\"excludedOverlayLayers\":").Append(OverlayLayerMask & ~AppliedMask)
                 .Append(",\"includeOverlayLayers\":").Append(includeLayers?"true":"false").Append(",\"selectedCount\":").Append(canvases.Count)
@@ -353,7 +433,8 @@ namespace Ugevr
                 if (i>0) text.Append(','); var state=canvases[i];
                 text.Append("{\"name\":").Append(Quote(state.Name)).Append(",\"instanceId\":").Append(state.Id)
                     .Append(",\"originalMode\":").Append(Quote(state.Mode.ToString())).Append(",\"originalPlaneDistance\":").Append(Number(state.Distance))
-                    .Append(",\"sortingOrder\":").Append(state.SortingOrder).Append('}');
+                    .Append(",\"sortingOrder\":").Append(state.SortingOrder).Append(",\"originalEngineUiContext\":").Append(state.OriginalUiContext)
+                    .Append(",\"restoredEngineUiContext\":").Append(state.Canvas==null?"null":UiContext(state.Canvas)).Append('}');
             }
             return text.Append("],\"appliedEyes\":[").Append(appliedEyes[0] ?? "null").Append(',').Append(appliedEyes[1] ?? "null")
                 .Append("],\"afterRenderEyes\":[").Append(afterRenderEyes[0] ?? "null").Append(',').Append(afterRenderEyes[1] ?? "null").Append("]}").ToString();

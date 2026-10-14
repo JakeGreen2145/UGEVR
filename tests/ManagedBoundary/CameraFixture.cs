@@ -15,14 +15,38 @@ namespace UnityEngine
         public override bool Equals(object other) { return System.Object.ReferenceEquals(this,other); }
         public override int GetHashCode() { return id; }
     }
-    public class GameObject { public int layer; }
-    public class Component : Object { public GameObject gameObject=new GameObject(); }
+    public struct Scene {public bool Valid,isLoaded;public bool IsValid() {return Valid;}}
+    public class GameObject : Object
+    {
+        int savedLayer;
+        public System.Action<int> LayerSetter;
+        public int layer {get {return savedLayer;} set {if(LayerSetter!=null) LayerSetter(value);savedLayer=value;}}
+        public Scene scene=new Scene {Valid=true,isLoaded=true};
+    }
+    public class Component : Object { public GameObject gameObject=new GameObject();public T[] GetComponents<T>() {return new T[0];} }
+    public class Renderer : Component { }
+    public static class Resources
+    {
+        public static System.Collections.Generic.List<Object> Extras=new System.Collections.Generic.List<Object>();
+        public static Object[] FindObjectsOfTypeAll(System.Type type)
+        {
+            var found=new System.Collections.Generic.List<Object>();
+            foreach(var canvas in Canvas.Instances)
+            {
+                if(type==typeof(Transform)) found.AddRange(canvas.Rects);
+                if(type==typeof(CanvasRenderer)) found.AddRange(canvas.Renderers);
+            }
+            foreach(var item in Extras) if(type.IsInstanceOfType(item)) found.Add(item);
+            return found.ToArray();
+        }
+    }
+    public static class LayerMask {public static System.Func<int,string> Name;public static string LayerToName(int layer) {return Name==null?"":Name(layer);} }
     public struct Vector2 { public float x,y; public Vector2(float x,float y) {this.x=x;this.y=y;} }
     public struct Vector3 { public float x,y,z; public Vector3(float x,float y,float z) { this.x=x;this.y=y;this.z=z; } }
     public struct Quaternion { public float x,y,z,w; public Quaternion(float x,float y,float z,float w) { this.x=x;this.y=y;this.z=z;this.w=w; } }
     public struct Matrix4x4 { public float Marker; public float this[int i] { get { return i==0?Marker:0; } } }
     public struct Rect { public float x,y,width,height; }
-    public struct Color { public float r,g,b,a; }
+    public struct Color { public float r,g,b,a;public static Color clear {get {return new Color();}} }
     public class RenderTexture { }
     public enum CameraClearFlags { Skybox=1, Color=2, Depth=3, Nothing=4 }
     public class Transform : Component
@@ -70,7 +94,8 @@ namespace UnityEngine
         public Transform transform { get {return Rects.Length==0?null:Rects[0];} }
         public Rect pixelRect=new Rect {width=3840,height=2160};
         public CanvasRenderer[] Renderers=new CanvasRenderer[0];
-        public T[] GetComponentsInChildren<T>(bool inactive) { return (T[])(object)(typeof(T)==typeof(RectTransform)?(System.Array)Rects:Renderers); }
+        public Canvas[] NestedCanvases;
+        public T[] GetComponentsInChildren<T>(bool inactive) { return (T[])(object)(typeof(T)==typeof(Canvas)?(System.Array)(NestedCanvases??new[]{this}):typeof(T)==typeof(RectTransform)?(System.Array)Rects:Renderers); }
     }
     public class Camera : Component
     {
@@ -88,5 +113,11 @@ namespace UnityEngine
         public CameraClearFlags clearFlags;
         public int cullingMask=-1,targetDisplay;
         public float nearClipPlane=1,farClipPlane=2500;
+        public bool enabled;
+        public RenderingPath renderingPath;
+        public System.Action RenderAction;
+        public void Render() {if(RenderAction!=null) RenderAction();}
+        public void CopyFrom(Camera source) {targetTexture=source.targetTexture;projectionMatrix=source.projectionMatrix;worldToCameraMatrix=source.worldToCameraMatrix;rect=source.rect;cullingMask=source.cullingMask;clearFlags=source.clearFlags;nearClipPlane=source.nearClipPlane;farClipPlane=source.farClipPlane;}
     }
+    public enum RenderingPath {Forward,DeferredShading}
 }

@@ -18,7 +18,7 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); SessionChecks();
+        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void ProjectionChecks()
@@ -211,6 +211,7 @@ class Program
         var canvas=new Canvas {name=name,renderMode=RenderMode.ScreenSpaceOverlay,Rects=new[]{rect},Renderers=new[]{new CanvasRenderer()},planeDistance=100,
             sortingOrder=10,sortingLayerID=9,pixelPerfect=true,overridePixelPerfect=true,additionalShaderChannels=AdditionalCanvasShaderChannels.TexCoord1,overrideSorting=true,scaleFactor=2,referencePixelsPerUnit=200};
         canvas.gameObject.layer=layer;canvas.Renderers[0].gameObject.layer=layer;
+        rect.gameObject=canvas.gameObject;
         Canvas.Instances.Add(canvas);return canvas;
     }
     static void OverlayChecks()
@@ -371,6 +372,79 @@ class Program
         using(angle) angle.ApplyEye();
         Assert(angle.RestorationConflicts>0 && angle.RotationRoundoff==0,"Real unit-quaternion angle change rejected");
         Canvas.Instances.Clear();Canvas.ForceAction=null;
+    }
+    static void AfterEffectsChecks()
+    {
+        Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;
+        var overlay=Overlay("menu",5);var originalWorld=Overlay("world",7);originalWorld.renderMode=RenderMode.WorldSpace;
+        var used=new Transform();used.gameObject.layer=31;Resources.Extras.Add(used);
+        LayerMask.Name=layer=>layer==30?"Reserved":null;
+        var scene=new Camera {enabled=true,targetTexture=new RenderTexture(),renderingPath=RenderingPath.DeferredShading,cullingMask=-1,clearFlags=CameraClearFlags.Skybox};
+        var ui=new Camera();var originalTarget=scene.targetTexture;
+        var scope=PanelScope(scene,1,2,false);scope.UseAfterEffectsCamera(ui);
+        var order=new System.Collections.Generic.List<string>();
+        using(scope)
+        {
+            scope.ApplyEye(0);
+            Assert(scope.IsolatedMask==1<<29,"Private layer avoids loaded scene objects and named project layers");
+            Assert(overlay.gameObject.layer==29 && overlay.Renderers[0].gameObject.layer==29,"Only selected root and UI renderer objects move to private layer");
+            Assert(originalWorld.gameObject.layer==7 && originalWorld.renderMode==RenderMode.WorldSpace,"Original world-space UI remains unchanged");
+            Assert(scene.cullingMask==~(1<<29),"Game eye excludes only unused private UI layer");
+            OverlayCameraPass.Prepare(scene,ui,scope.IsolatedMask);
+            scene.RenderAction=delegate {order.Add("world-effects");};
+            ui.RenderAction=delegate {
+                order.Add("ui-no-effects");Assert(ui.targetTexture==originalTarget,"UI pass writes the same eye target");
+                Assert(ui.clearFlags==CameraClearFlags.Depth && ui.renderingPath==RenderingPath.Forward && !ui.enabled,"Private UI camera clears depth and stays disabled for normal rendering");
+                Assert(ui.cullingMask==1<<29 && !ui.useOcclusionCulling,"UI pass draws only private UI, without scene occlusion");
+            };
+            scene.Render();scope.ValidateLayerExclusive();OverlayCameraPass.Render(ui);scope.RecordAfterRender(0);
+            Assert(order.Count==2 && order[0]=="world-effects" && order[1]=="ui-no-effects","UI follows the original game render and effects");
+            Assert(ui.targetTexture==null && scene.targetTexture==originalTarget,"Private camera releases borrowed target without changing game target");
+        }
+        Assert(overlay.gameObject.layer==5 && overlay.Renderers[0].gameObject.layer==5 && scene.cullingMask==-1,"All owned layers and camera mask restore");
+        Assert(scope.RestorationConflicts==0 && scope.DiagnosticJson().Contains("\"afterImageEffects\":true"),"After-effects ownership and scope are recorded");
+        bool rebuilt=false;
+        Canvas.ForceAction=delegate {rebuilt=true;Assert(overlay.renderMode==RenderMode.ScreenSpaceOverlay && overlay.gameObject.layer==5 && scene.cullingMask==-1,"Final rebuild runs in restored desktop/layer context");};
+        scope.RebuildRestoredGeometry();
+        Assert(rebuilt && scope.RestorationConflicts==0,"Restored layout rebuild is verified before returning to desktop input");
+        Canvas.ForceAction=null;
+        var failing=PanelScope(scene,1,2,false);failing.UseAfterEffectsCamera(ui);
+        try {using(failing) {failing.ApplyEye();OverlayCameraPass.Prepare(scene,ui,failing.IsolatedMask);ui.RenderAction=delegate {throw new Exception("UI render failure");};OverlayCameraPass.Render(ui);}} catch(Exception) { }
+        Assert(ui.targetTexture==null && overlay.gameObject.layer==5 && overlay.renderMode==RenderMode.ScreenSpaceOverlay,"UI render failure releases target and restores borrowed canvas/layers");
+        var collision=PanelScope(scene,1,2,false);collision.UseAfterEffectsCamera(ui);
+        bool rejected=false;
+        using(collision)
+        {
+            collision.ApplyEye();var unowned=new Renderer();unowned.gameObject.layer=29;Resources.Extras.Add(unowned);
+            try {collision.ValidateLayerExclusive();} catch(InvalidOperationException) {rejected=true;}
+        }
+        Assert(rejected && overlay.gameObject.layer==5,"Unowned renderer entering the private layer rejects UI pass with restoration");
+        Resources.Extras.Clear();
+        var changed=new OverlayLayerLease(new[]{overlay.gameObject});
+        changed.Apply();overlay.gameObject.layer=12;changed.Dispose();
+        Assert(overlay.gameObject.layer==12 && changed.Errors.Length==1,"Cleanup preserves and reports a newer game-owned layer change");
+        overlay.gameObject.layer=5;
+        var partial=PanelScope(scene,1,2,false);partial.UseAfterEffectsCamera(ui);
+        overlay.Renderers[0].gameObject.LayerSetter=layer=>{if(layer==31) throw new Exception("layer assignment rejected");};
+        bool layerFailed=false;
+        try {using(partial) {partial.ApplyEye();}} catch(Exception) {layerFailed=true;}
+        overlay.Renderers[0].gameObject.LayerSetter=null;
+        Assert(layerFailed && overlay.gameObject.layer==5 && overlay.Renderers[0].gameObject.layer==5 && partial.RestorationConflicts==0,"Partial layer assignment failure restores already borrowed objects without inventing conflicts on untouched objects");
+        var raced=PanelScope(scene,1,2,false);raced.UseAfterEffectsCamera(ui);
+        var newcomer=new Transform();newcomer.gameObject.layer=31;Resources.Extras.Add(newcomer);
+        bool layerRaced=false;
+        try {using(raced) {raced.ApplyEye();}} catch(InvalidOperationException) {layerRaced=true;}
+        Assert(layerRaced && overlay.gameObject.layer==5,"A new loaded object occupying the private layer before apply rejects before mutation");
+        Resources.Extras.Clear();LayerMask.Name=layer=>"named";
+        bool unavailable=false;
+        try {var noLayer=PanelScope(scene,1,2,false);noLayer.UseAfterEffectsCamera(ui);} catch(InvalidOperationException) {unavailable=true;}
+        Assert(unavailable && overlay.gameObject.layer==5,"No eligible layer fails before mutating game objects");
+        overlay.NestedCanvases=new[]{overlay,originalWorld};
+        bool mixedRejected=false;
+        try {PanelScope(scene,1,2,false);} catch(InvalidOperationException) {mixedRejected=true;}
+        Assert(mixedRejected && originalWorld.gameObject.layer==7 && originalWorld.renderMode==RenderMode.WorldSpace,"Independent world-space canvas inside a selected hierarchy requires an adapter before any mutation");
+        overlay.NestedCanvases=null;
+        Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;
     }
     static void ExternalProducer(string directory,string content)
     {
