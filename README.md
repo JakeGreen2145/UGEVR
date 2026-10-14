@@ -17,7 +17,9 @@ Both final runs exceeded 16,000 successful paired eye submissions. Fourteen trac
 
 **These tests used a simulated SteamVR headset.** They establish a working software path and promise for generalization, not universal compatibility. [Validation metrics](docs/validation.json) contain the recorded checks. Raw captures and machine-specific evidence are kept outside the public repository.
 
-An additional Steam Frame transport probe streamed Firewatch and Outer Wilds using the same development distribution. Both games reached paired eye submission, Windows SteamVR identified the launched game as its renderer, and headset runtime screenshots showed game scenes. A distinctive synthetic pose applied on the headset reached Windows with matching pose matrices. This validates the wireless runtime path; it does not validate physical sensor tracking, lens output, comfort or sustained gameplay. Screen UI and gameplay input remain open checks. See the [physical probe results](docs/physical-probes.md).
+An additional Steam Frame transport probe streamed Firewatch and Outer Wilds using the same development distribution. Both games reached paired eye submission, Windows SteamVR identified the launched game as its renderer, and headset runtime screenshots showed game scenes. A distinctive synthetic pose applied on the headset reached Windows with matching pose matrices. This validates the wireless runtime path; it does not validate physical sensor tracking, lens output, comfort or sustained gameplay.
+
+Later automated Outer Wilds probes forwarded streamed controller input through an explicitly enabled owned Unity gamepad. The game's original wake action responded, and stick events reached the owned device. A larger, closer UI panel made movement prompts readable in host eye captures. Full gameplay, look controls, headset UI readability and the accepted functional gate remain open. See the [physical probe results](docs/physical-probes.md).
 
 ## Current scope
 
@@ -26,7 +28,7 @@ An additional Steam Frame transport probe streamed Firewatch and Outer Wilds usi
 - Tracking relative to the game's camera, with camera state restored after rendering.
 - F8 toggles rendering and F9 recenters when the game's legacy keyboard API is available.
 
-IL2CPP, OpenXR, D3D12, Vulkan, URP/HDRP, motion controllers and multi-camera composition are not implemented or validated. An opt-in screen UI adapter is experimental and has not passed physical validation. Reusing the original camera runs its effects repeatedly; temporal effects and game callbacks may need adaptation. Rendering the desktop view and both eyes adds cost.
+IL2CPP, OpenXR, D3D12, Vulkan, URP/HDRP, general motion-controller integration and multi-camera composition are not implemented or validated. The opt-in input and screen UI adapters are experimental and have not passed the functional gate. Reusing the original camera runs its effects repeatedly; temporal effects and game callbacks may need adaptation. Rendering the desktop view and both eyes adds cost.
 
 ## Wayfinder
 
