@@ -313,6 +313,7 @@ public class Injector : BaseUnityPlugin
         var actualEyes=new RigidPose[2];
         var beforeRenderProjection=new Matrix4x4[2];
         OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds):null;
+        if(overlays!=null && capturesEnabled) overlays.EnableWallTiming();
         if(overlays!=null) overlays.SetDesktopLayoutFlush(desktopFlush);
         if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
         if (overlays!=null && overlays.SelectedCount>0 && overlayAfterImageEffects)
@@ -346,15 +347,15 @@ public class Injector : BaseUnityPlugin
                 actualEyes[i]=new RigidPose(Position(camera.transform.position),Rotation(camera.transform.rotation));
                 if (overlays!=null) overlays.ApplyEye(i);
                 bool isolatedUi=overlays!=null && overlays.IsolatedMask!=0;
-                if(isolatedUi) overlays.ValidateLayerExclusive();
+                if(isolatedUi) overlays.ValidateLayerExclusive(i==0?"before game left":"before game right");
                 if(isolatedUi) OverlayCameraPass.Prepare(camera,overlayCamera,overlays.IsolatedMask);
-                camera.Render();
+                if(overlays!=null) overlays.RenderGameEye(i);else camera.Render();
                 if(overlays!=null) overlays.ValidateInactiveCanvases("after game render");
                 if(isolatedUi)
                 {
-                    overlays.ValidateLayerExclusive();
-                    OverlayCameraPass.Render(overlayCamera);
-                    overlays.ValidateLayerExclusive();
+                    overlays.ValidateLayerExclusive(i==0?"after game left":"after game right");
+                    overlays.RenderUiEye(i);
+                    overlays.ValidateLayerExclusive(i==0?"after UI left":"after UI right");
                 }
                 if(overlays!=null) overlays.ValidateInactiveCanvases("after UI render");
                 if (overlays!=null) overlays.RecordAfterRender(i);

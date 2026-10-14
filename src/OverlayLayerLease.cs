@@ -11,19 +11,21 @@ namespace Ugevr
         readonly Dictionary<int,GameObject> owned=new Dictionary<int,GameObject>();
         readonly List<string> errors=new List<string>();
         readonly int sceneScanLimit;
+        readonly OverlayWallTiming timing;
         bool applied,disposed;
         public readonly int Layer;
         public int Mask {get {return 1<<Layer;}}
         public int ObjectCount {get {return entries.Count;}}
         public int DestroyedObjects {get;private set;}
         public string[] Errors {get {return errors.ToArray();}}
-        public OverlayLayerLease(IEnumerable<GameObject> objects,int requestedLayer=-1,int sceneScanLimit=OverlayLayerInventory.DefaultScanLimit)
+        public OverlayLayerLease(IEnumerable<GameObject> objects,int requestedLayer=-1,int sceneScanLimit=OverlayLayerInventory.DefaultScanLimit,OverlayWallTiming timing=null)
         {
             OverlayLayerInventory.ValidateScanLimit(sceneScanLimit);
             this.sceneScanLimit=sceneScanLimit;
+            this.timing=timing;
             if(requestedLayer!=-1 && (requestedLayer<8 || requestedLayer>31))
                 throw new ArgumentOutOfRangeException("requestedLayer","UI isolation layer must be -1 for automatic selection or 8 through 31.");
-            OverlayLayerInventory inventory=OverlayLayerInventory.Capture(requestedLayer,sceneScanLimit);
+            OverlayLayerInventory inventory=OverlayLayerInventory.Capture(requestedLayer,sceneScanLimit,timing);
             Layer=-1;
             if(requestedLayer!=-1)
             {
@@ -45,27 +47,42 @@ namespace Ugevr
         public void Apply()
         {
             if(disposed) throw new ObjectDisposedException("OverlayLayerLease");
-            CheckExclusive(Resources.FindObjectsOfTypeAll(typeof(Transform)));
+            CheckExclusive("before borrow");
             applied=true;
             foreach(Entry entry in entries) if(entry.Object!=null) {entry.Attempted=true;entry.Object.layer=Layer;}
         }
-        public void ValidateExclusive()
+        public void ValidateExclusive(string stage="validation")
         {
-            CheckExclusive(Resources.FindObjectsOfTypeAll(typeof(Transform)));
-            CheckExclusive(Resources.FindObjectsOfTypeAll(typeof(Renderer)));
-            CheckExclusive(Resources.FindObjectsOfTypeAll(typeof(CanvasRenderer)));
+            CheckExclusive(stage);
         }
-        void CheckExclusive(UnityEngine.Object[] objects)
+        void CheckExclusive(string stage)
         {
-            int scanned=0;
-            foreach(UnityEngine.Object item in objects)
+            // Every component's layer/scene ownership belongs to its GameObject.
+            // One complete GameObject query includes non-renderers and inactive objects.
+            long queryStart=timing==null?0:OverlayWallTiming.Timestamp();
+            UnityEngine.Object[] objects=Resources.FindObjectsOfTypeAll(typeof(GameObject));
+            long queryTicks=timing==null?0:OverlayWallTiming.Timestamp()-queryStart;
+            long inspectionStart=timing==null?0:OverlayWallTiming.Timestamp();
+            int scanned=0;bool complete=false;
+            try
             {
-                if(++scanned>sceneScanLimit) throw new InvalidOperationException("UI layer validation exceeds the configured "+sceneScanLimit+" object inspection limit. The UI pass was skipped.");
-                var component=item as Component;
-                GameObject owner=null;
-                bool ownedAlive=component!=null && owned.TryGetValue(component.gameObject.GetInstanceID(),out owner) && owner!=null;
-                if(component!=null && component.gameObject.scene.IsValid() && component.gameObject.scene.isLoaded && component.gameObject.layer==Layer && !ownedAlive)
-                    throw new InvalidOperationException("An unowned scene object entered the isolated UI layer: "+component.name+". The UI pass was skipped.");
+                foreach(GameObject item in objects)
+                {
+                    if(scanned>=sceneScanLimit) throw new InvalidOperationException("UI layer validation exceeds the configured "+sceneScanLimit+" GameObject inspection limit. The UI pass was skipped.");
+                    ++scanned;
+                    // Most objects are on other layers. Avoid scene and identity native getters for them.
+                    if(item==null || item.layer!=Layer) continue;
+                    GameObject owner;
+                    if(owned.TryGetValue(item.GetInstanceID(),out owner) && owner!=null) continue;
+                    var scene=item.scene;
+                    if(scene.IsValid() && scene.isLoaded)
+                        throw new InvalidOperationException("An unowned scene object entered the isolated UI layer: "+item.name+". The UI pass was skipped.");
+                }
+                complete=true;
+            }
+            finally
+            {
+                if(timing!=null) timing.RecordScan(stage,objects.Length,scanned,complete,queryTicks,OverlayWallTiming.Timestamp()-inspectionStart);
             }
         }
         public void Dispose()
@@ -93,7 +110,7 @@ namespace Ugevr
         }
         void RecordExclusiveFailure(string stage)
         {
-            try {ValidateExclusive();}
+            try {ValidateExclusive(stage);}
             catch(Exception error) {if(errors.Count<64) errors.Add("UI layer exclusivity "+stage+": "+error.Message);}
         }
     }

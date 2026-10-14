@@ -43,7 +43,7 @@ static class OverlayIsolationChecks
             }
             var asset=new Transform();asset.gameObject.layer=20;asset.gameObject.scene=new Scene {Valid=false,isLoaded=false};Resources.Extras.Add(asset);
             using(var ignoresAsset=new OverlayLayerLease(new[]{selected.gameObject},20)) {ignoresAsset.Apply();ignoresAsset.ValidateExclusive();}
-            assert(selected.gameObject.layer==5,"Unloaded asset transforms do not occupy a scene isolation layer");
+            assert(selected.gameObject.layer==5,"Unloaded asset GameObjects do not occupy a scene isolation layer");
             Resources.Extras.Remove(asset);
             var raced=new OverlayLayerLease(new[]{selected.gameObject},20);
             var newcomer=new Transform();newcomer.gameObject.layer=20;newcomer.gameObject.activeSelf=false;Resources.Extras.Add(newcomer);
@@ -69,12 +69,13 @@ static class OverlayIsolationChecks
             var canvas=new Canvas {name="selected overlay",renderMode=RenderMode.ScreenSpaceOverlay,Rects=new[]{rect},Renderers=new CanvasRenderer[0]};
             canvas.gameObject=rect.gameObject;Canvas.Instances.Add(canvas);
             var camera=new Camera {nearClipPlane=.3f,farClipPlane=100,cullingMask=-1};
-            var scope=new OverlayCanvasScope(camera,1,2,false);scope.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));scope.UseAfterEffectsCamera(new Camera(),20);
-            scope.ApplyEye();scope.Dispose();
+            var scope=new OverlayCanvasScope(camera,1,2,false);scope.EnableWallTiming();scope.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));scope.UseAfterEffectsCamera(new Camera(),20);
+            scope.ApplyEye();scope.RenderGameEye(0);scope.Dispose();
             var rebuiltNewcomer=new Transform();rebuiltNewcomer.gameObject.layer=20;rebuiltNewcomer.gameObject.activeSelf=false;
             Canvas.ForceAction=delegate {Resources.Extras.Add(rebuiltNewcomer);};
             scope.RebuildRestoredGeometry();Canvas.ForceAction=null;
             assert(scope.RestorationConflicts>0 && canvas.gameObject.layer==5 && rebuiltNewcomer.gameObject.layer==20,"Final desktop rebuild revalidates exclusive layer and preserves a new game-owned object");
+            assert(scope.DiagnosticJson().Contains("\"wallTiming\":{") && scope.DiagnosticJson().Contains("after desktop restoration") && scope.DiagnosticJson().Contains("\"complete\":false"),"Restoration failure evidence retains bounded timing for the fresh final exclusivity query");
             Canvas.Instances.Clear();Resources.Extras.Clear();
             LayerMask.Name=layer=>new string('x',1000);
             OverlayLayerInventory boundedNames=OverlayLayerInventory.Capture(20);
@@ -89,24 +90,25 @@ static class OverlayIsolationChecks
             assert(unicode.IndexOf('\ud800')<0 && unicode.IndexOf('\ufffe')<0 && unicode.IndexOf('\uffff')<0,"Layer inventory YAML cannot contain lone surrogates or forbidden Unicode noncharacters");
             Resources.Extras.Clear();var repeated=new Transform();repeated.gameObject.layer=4;
             for(int i=0;i<100001;++i) Resources.Extras.Add(repeated);
-            bool capped=false;
-            try {OverlayLayerInventory.Capture(20);}
+            bool capped=false;var capTiming=new OverlayWallTiming();
+            try {OverlayLayerInventory.Capture(20,100000,capTiming);}
             catch(OverlayLayerSelectionException error)
             {
-                capped=!error.Inventory.Complete && error.Inventory.ScannedTransforms==100000;
+                capped=!error.Inventory.Complete && error.Inventory.ScannedGameObjects==100000;
                 string incomplete=error.Inventory.DiagnosticYaml("run",17,20,error.Message);
-                assert(error.Inventory.DiscoveredTransformCount==100001 && error.Inventory.ScanLimit==100000 && incomplete.Contains("discovered_transform_count: 100001") && incomplete.Contains("scan_limit: 100000") && incomplete.Contains("scan_complete: false"),"Incomplete inventory records the complete query length and configured inspection limit");
+                assert(error.Inventory.DiscoveredGameObjectCount==100001 && error.Inventory.ScanLimit==100000 && incomplete.Contains("discovered_gameobject_count: 100001") && incomplete.Contains("inspection_object_kind: 'GameObject'") && incomplete.Contains("schema_version: 2") && !incomplete.Contains("transform") && incomplete.Contains("scan_limit: 100000") && incomplete.Contains("scan_complete: false"),"Incomplete GameObject inventory records its object kind, complete query length and configured inspection limit");
+                assert(incomplete.Contains("query_wall_ticks:") && incomplete.Contains("inspection_wall_ticks:") && capTiming.DiagnosticJson().Contains("\"complete\":false"),"Cap failure retains opt-in query and partial-inspection wall timing");
             }
             assert(capped,"Oversized layer inventory is explicitly incomplete and cannot prove an unused candidate");
             bool defaultLeaseRejected=false;
             try {new OverlayLayerLease(new[]{selected.gameObject},20);} catch(OverlayLayerSelectionException error) {defaultLeaseRejected=!error.Inventory.Complete && error.Inventory.ScanLimit==100000;}
             assert(defaultLeaseRejected && selected.gameObject.layer==5,"Default lease rejects an incomplete inventory before selecting or mutating the candidate layer");
             OverlayLayerInventory expanded=OverlayLayerInventory.Capture(20,100001);
-            assert(expanded.Complete && expanded.ScannedTransforms==100001 && expanded.DiscoveredTransformCount==100001 && expanded.ScanLimit==100001 && expanded.OccupiedCount(4)==100001,"Explicit larger bound inspects the entire returned transform inventory");
+            assert(expanded.Complete && expanded.ScannedGameObjects==100001 && expanded.DiscoveredGameObjectCount==100001 && expanded.ScanLimit==100001 && expanded.OccupiedCount(4)==100001,"Explicit larger bound inspects the entire returned GameObject inventory");
             using(var expandedLease=new OverlayLayerLease(new[]{selected.gameObject},20,100001))
             {
                 expandedLease.Apply();expandedLease.ValidateExclusive();
-                assert(selected.gameObject.layer==20,"Larger bound applies to both inventory and transform exclusivity checks");
+                assert(selected.gameObject.layer==20,"Larger bound applies to both inventory and GameObject exclusivity checks");
             }
             assert(selected.gameObject.layer==5,"Expanded-bound lease restores the selected layer");
             Resources.Extras.RemoveAt(Resources.Extras.Count-1);
@@ -144,7 +146,58 @@ static class OverlayIsolationChecks
                 try {new OverlayLayerLease(new[]{selected.gameObject},20,invalidLimit);} catch(ArgumentOutOfRangeException) {leaseRejected=true;}
                 assert(inventoryRejected && leaseRejected && selected.gameObject.layer==5,"Inventory and lease reject invalid scene scan bound "+invalidLimit+" before mutation");
             }
+            foreach(Component component in new Component[]{new Transform(),new Renderer(),new CanvasRenderer()})
+            {
+                foreach(bool active in new[]{false,true})
+                {
+                    using(var lease=new OverlayLayerLease(new[]{selected.gameObject},20))
+                    {
+                        lease.Apply();component.gameObject.layer=20;component.gameObject.activeSelf=active;Resources.Extras.Add(component);
+                        bool collision=false;try {lease.ValidateExclusive();} catch(InvalidOperationException error) {collision=error.Message.Contains("unowned");}
+                        assert(collision,"Single GameObject inventory rejects a late "+(active?"active ":"inactive ")+component.GetType().Name+" owner");
+                        Resources.Extras.Clear();
+                    }
+                    assert(component.gameObject.layer==20 && selected.gameObject.layer==5,"Collision restores owned state without changing the new object's layer");
+                }
+            }
+            var direct=new GameObject();direct.layer=20;direct.activeSelf=false;
+            using(var lease=new OverlayLayerLease(new[]{selected.gameObject},20))
+            {
+                lease.Apply();Resources.Extras.Add(direct);
+                bool collision=false;try {lease.ValidateExclusive();} catch(InvalidOperationException) {collision=true;}
+                assert(collision,"An inactive direct GameObject with no fixture component is still an exclusivity collision");
+                Resources.Extras.Clear();
+            }
+            var offLayer=new GameObject();offLayer.layer=4;Resources.Extras.Add(offLayer);
+            using(var lease=new OverlayLayerLease(new[]{selected.gameObject},20))
+            {
+                lease.Apply();offLayer.SceneQueries=0;offLayer.InstanceIdQueries=0;Resources.QueryTypes.Clear();
+                lease.ValidateExclusive();
+                assert(Resources.QueryTypes.Count==1 && Resources.QueryTypes[0]==typeof(GameObject),"Each exclusivity boundary performs exactly one fresh GameObject inventory query");
+                assert(offLayer.SceneQueries==0 && offLayer.InstanceIdQueries==0,"Objects on other layers avoid scene and instance-ID getter calls during exclusivity inspection");
+            }
+            Resources.Extras.Clear();
+            var destroyedOwned=new GameObject();destroyedOwned.layer=5;
+            var destroyedLease=new OverlayLayerLease(new[]{destroyedOwned},20);destroyedLease.Apply();
+            int oldId=destroyedOwned.GetInstanceID();destroyedOwned.Destroyed=true;
+            var reused=new GameObject {InstanceIdOverride=oldId};reused.layer=20;Resources.Extras.Add(reused);
+            bool destroyedCollision=false;try {destroyedLease.ValidateExclusive();} catch(InvalidOperationException) {destroyedCollision=true;}
+            destroyedLease.Dispose();
+            assert(destroyedCollision && destroyedLease.DestroyedObjects==1 && reused.layer==20,"Destroyed owned object does not authorize an unrelated new object reusing its instance ID");
+            Resources.Extras.Clear();
+            var timing=new OverlayWallTiming();
+            OverlayLayerInventory measured=OverlayLayerInventory.Capture(20,100000,timing);
+            using(var lease=new OverlayLayerLease(new[]{selected.gameObject},20,100000,timing)) {lease.Apply();lease.ValidateExclusive("measured boundary");}
+            var timedCamera=new Camera();timing.Render(timedCamera,0,false);timedCamera.targetTexture=new RenderTexture();timing.Render(timedCamera,0,true);
+            string timingJson=timing.DiagnosticJson();
+            assert(measured.WallTimingEnabled && measured.DiagnosticYaml("run",17,20,"measured").Contains("wall_clock_frequency:") && timingJson.Contains("measured boundary") && timingJson.Contains("\"gameReturned\":true") && timingJson.Contains("\"uiReturned\":true") && timedCamera.targetTexture==null,"Opt-in timing separates inventory inspections and returning game/UI renders without changing target cleanup");
+            assert(!maximum.WallTimingEnabled && !maximum.DiagnosticYaml("run",17,20,"unmeasured").Contains("wall_clock_frequency:"),"Wall timing remains absent when diagnostics are disabled");
+            timedCamera.RenderAction=delegate {throw new InvalidOperationException("controlled render failure");};timedCamera.targetTexture=new RenderTexture();
+            bool renderFailure=false;try {timing.Render(timedCamera,1,true);} catch(InvalidOperationException) {renderFailure=true;}
+            assert(renderFailure && timedCamera.targetTexture==null && timing.DiagnosticJson().Contains("\"uiAttempted\":true,\"uiReturned\":false"),"Timing records a failed UI render while retaining exception propagation and target cleanup");
+            for(int i=0;i<20;++i) timing.RecordScan("bounded",1,1,true,0,0);
+            assert(timing.DiagnosticJson().Contains("\"scanCapacity\":16") && !timing.DiagnosticJson().Contains("\"droppedScans\":0"),"Per-pair scan timing evidence has a fixed record capacity");
         }
-        finally {Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;}
+        finally {Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();Resources.QueryTypes.Clear();LayerMask.Name=null;}
     }
 }

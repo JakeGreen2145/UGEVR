@@ -8,8 +8,9 @@ namespace UnityEngine
         readonly int id=++nextId;
         public bool Destroyed;
         public int? InstanceIdOverride;
+        public int InstanceIdQueries;
         public string name="fixture";
-        public int GetInstanceID() { return InstanceIdOverride ?? id; }
+        public int GetInstanceID() { ++InstanceIdQueries;return InstanceIdOverride ?? id; }
         public static Object[] FindObjectsOfType(System.Type type) { return type==typeof(Canvas)?Canvas.Instances.ToArray():new Object[0]; }
         public static bool operator ==(Object a,Object b) { return (System.Object.ReferenceEquals(a,null) || a.Destroyed)?(System.Object.ReferenceEquals(b,null) || b.Destroyed):System.Object.ReferenceEquals(a,b); }
         public static bool operator !=(Object a,Object b) { return !(a==b); }
@@ -23,7 +24,9 @@ namespace UnityEngine
         public System.Action<int> LayerSetter;
         public bool activeSelf=true;
         public int layer {get {return savedLayer;} set {if(LayerSetter!=null) LayerSetter(value);savedLayer=value;}}
-        public Scene scene=new Scene {Valid=true,isLoaded=true};
+        Scene savedScene=new Scene {Valid=true,isLoaded=true};
+        public int SceneQueries;
+        public Scene scene {get {++SceneQueries;return savedScene;} set {savedScene=value;}}
         public bool activeInHierarchy=true;
     }
     public class Component : Object
@@ -43,15 +46,29 @@ namespace UnityEngine
     public static class Resources
     {
         public static System.Collections.Generic.List<Object> Extras=new System.Collections.Generic.List<Object>();
+        public static System.Collections.Generic.List<System.Type> QueryTypes=new System.Collections.Generic.List<System.Type>();
         public static Object[] FindObjectsOfTypeAll(System.Type type)
         {
+            QueryTypes.Add(type);
             var found=new System.Collections.Generic.List<Object>();
+            var canvasObjects=new System.Collections.Generic.HashSet<GameObject>();
             foreach(var canvas in Canvas.Instances)
             {
                 if(type==typeof(Transform)) found.AddRange(canvas.Rects);
                 if(type==typeof(CanvasRenderer)) found.AddRange(canvas.Renderers);
+                if(type==typeof(GameObject))
+                {
+                    canvasObjects.Add(canvas.gameObject);
+                    foreach(var rect in canvas.Rects) if(rect!=null) canvasObjects.Add(rect.gameObject);
+                    foreach(var renderer in canvas.Renderers) if(renderer!=null) canvasObjects.Add(renderer.gameObject);
+                }
             }
-            foreach(var item in Extras) if(type.IsInstanceOfType(item)) found.Add(item);
+            if(type==typeof(GameObject)) found.AddRange(canvasObjects);
+            foreach(var item in Extras)
+            {
+                if(type.IsInstanceOfType(item)) found.Add(item);
+                else if(type==typeof(GameObject) && item is Component) found.Add(((Component)item).gameObject);
+            }
             return found.ToArray();
         }
     }

@@ -28,6 +28,7 @@ namespace Ugevr
         readonly Camera camera;
         readonly bool includeLayers;
         OverlayLayerLease layerLease;
+        OverlayWallTiming wallTiming;
         Camera uiCamera;
         readonly double unitsPerMeter;
         readonly double panelWidthMeters;
@@ -49,6 +50,9 @@ namespace Ugevr
         public int SelectedCount { get { return canvases.Count; } }
         public int IsolatedMask {get {return layerLease==null?0:layerLease.Mask;}}
         public string RestorationError { get { return String.Join("; ",errors.ToArray()); } }
+        public void EnableWallTiming() {if(applied || layerLease!=null) throw new InvalidOperationException("Enable timing before UI layer selection.");wallTiming=new OverlayWallTiming();}
+        public void RenderGameEye(int eye) {if(wallTiming==null) camera.Render();else wallTiming.Render(camera,eye,false);}
+        public void RenderUiEye(int eye) {if(wallTiming==null) OverlayCameraPass.Render(uiCamera);else wallTiming.Render(uiCamera,eye,true);}
 
         sealed class CanvasState
         {
@@ -167,9 +171,9 @@ namespace Ugevr
         {
             if(applied) throw new InvalidOperationException("UI pass selection cannot change between eyes.");
             if(canvases.Count==0) return;
-            layerLease=new OverlayLayerLease(isolatedObjects,isolationLayer,sceneScanLimit);uiCamera=ui;
+            layerLease=new OverlayLayerLease(isolatedObjects,isolationLayer,sceneScanLimit,wallTiming);uiCamera=ui;
         }
-        public void ValidateLayerExclusive() {if(layerLease!=null) layerLease.ValidateExclusive();}
+        public void ValidateLayerExclusive(string stage="validation") {if(layerLease!=null) layerLease.ValidateExclusive(stage);}
         public void ValidateInactiveCanvases(string stage)
         {
             foreach(CanvasState state in inactiveCanvases)
@@ -362,7 +366,7 @@ namespace Ugevr
             CaptureLayoutPhase(6);
             Attempt(delegate {Canvas.ForceUpdateCanvases();},"final desktop canvas rebuild");
             CaptureLayoutPhase(7);
-            if(layerLease!=null) Attempt(delegate {layerLease.ValidateExclusive();},"isolated UI layer exclusivity after desktop restoration");
+            if(layerLease!=null) Attempt(delegate {layerLease.ValidateExclusive("after desktop restoration");},"isolated UI layer exclusivity after desktop restoration");
             foreach(RectState state in rects)
             {
                 if(state.Rect==null) continue;
@@ -547,7 +551,8 @@ namespace Ugevr
                     .Append(",\"sortingOrder\":").Append(state.SortingOrder).Append(",\"originalEngineUiContext\":").Append(state.OriginalUiContext)
                     .Append(",\"restoredEngineUiContext\":").Append(state.Canvas==null?"null":UiContext(state.Canvas)).Append('}');
             }
-            text.Append("],\"desktopLayoutFlush\":").Append(desktopLayoutFlush==null?"null":desktopLayoutFlush.DiagnosticJson());
+            text.Append("],\"wallTiming\":").Append(wallTiming==null?"null":wallTiming.DiagnosticJson());
+            text.Append(",\"desktopLayoutFlush\":").Append(desktopLayoutFlush==null?"null":desktopLayoutFlush.DiagnosticJson());
             text.Append(",\"layoutInputDiagnostic\":");
             if(layoutInputs==null) text.Append("null");
             else
