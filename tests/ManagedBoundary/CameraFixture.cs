@@ -95,9 +95,23 @@ namespace UnityEngine
     public static class LayerMask {public static System.Func<int,string> Name;public static string LayerToName(int layer) {return Name==null?"":Name(layer);} }
     public struct Vector2 { public float x,y; public Vector2(float x,float y) {this.x=x;this.y=y;} }
     public class RectOffset {public int left,right,top,bottom;}
-    public struct Vector3 { public float x,y,z; public Vector3(float x,float y,float z) { this.x=x;this.y=y;this.z=z; } }
-    public struct Quaternion { public float x,y,z,w; public Quaternion(float x,float y,float z,float w) { this.x=x;this.y=y;this.z=z;this.w=w; } }
-    public struct Matrix4x4 { public float Marker; public float this[int i] { get { return i==0?Marker:0; } } }
+    public struct Vector3 {
+        public float x,y,z; public Vector3(float x,float y,float z) {this.x=x;this.y=y;this.z=z;}
+        public float sqrMagnitude {get {return x*x+y*y+z*z;}}
+        public static bool operator ==(Vector3 a,Vector3 b) {var d=new Vector3(a.x-b.x,a.y-b.y,a.z-b.z);return d.sqrMagnitude<9.9999994E-11f;}
+        public static bool operator !=(Vector3 a,Vector3 b) {return !(a==b);}
+        public override bool Equals(object other) {return other is Vector3 && this==(Vector3)other;}
+        public override int GetHashCode() {return x.GetHashCode()^y.GetHashCode()^z.GetHashCode();}
+    }
+    public struct Quaternion {
+        public float x,y,z,w; public Quaternion(float x,float y,float z,float w) {this.x=x;this.y=y;this.z=z;this.w=w;}
+        public static float Dot(Quaternion a,Quaternion b) {return a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w;}
+        public static bool operator ==(Quaternion a,Quaternion b) {return Dot(a,b)>.999999f;}
+        public static bool operator !=(Quaternion a,Quaternion b) {return !(a==b);}
+        public override bool Equals(object other) {return other is Quaternion && this==(Quaternion)other;}
+        public override int GetHashCode() {return x.GetHashCode()^y.GetHashCode()^z.GetHashCode()^w.GetHashCode();}
+    }
+    public struct Matrix4x4 { public float Marker;public float[] Elements; public float this[int i] { get { return Elements==null?(i==0?Marker:0):Elements[i]; } } }
     public struct Rect { public float x,y,width,height; }
     public struct Color { public float r,g,b,a;public static Color clear {get {return new Color();}} }
     public class RenderTexture : Object
@@ -111,15 +125,17 @@ namespace UnityEngine
     public class Transform : Component
     {
         public int childCount;
-        public Vector3 localScale;
+        public virtual Vector3 localScale {get;set;}
         public virtual Vector3 position {get {return localPosition;} set {localPosition=value;} }
         public virtual Vector3 localPosition {get;set;}
-        public Quaternion rotation {get {return localRotation;} set {localRotation=value;} }
+        public virtual Quaternion rotation {get {return localRotation;} set {localRotation=value;} }
         Quaternion savedLocalRotation;
         public System.Func<Quaternion,Quaternion> LocalRotationSetter;
-        public Quaternion localRotation {get {return savedLocalRotation;} set {savedLocalRotation=LocalRotationSetter==null?value:LocalRotationSetter(value);} }
+        public virtual Quaternion localRotation {get {return savedLocalRotation;} set {savedLocalRotation=LocalRotationSetter==null?value:LocalRotationSetter(value);} }
         public Transform parent;
-        public Vector3 lossyScale=new Vector3(1,1,1);
+        public virtual Vector3 lossyScale {get;set;}=new Vector3(1,1,1);
+        public virtual Matrix4x4 localToWorldMatrix {get;set;}
+        public virtual Matrix4x4 worldToLocalMatrix {get;set;}
     }
     public class RectTransform : Transform
     {

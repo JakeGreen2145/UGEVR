@@ -617,7 +617,9 @@ public class Injector : BaseUnityPlugin
                 if(cameraPoseDetails!=null)cameraPoseDetails.EyeCapturesReturned=true;
             }
             finally {if(cameraPoseDetails!=null)cameraPoseDetails.Observe("after_eye_captures");}
-            bool gameCameraRestored=camera.transform.position==basePosition && camera.transform.rotation==baseRotation;
+            bool gameCameraRestored=cameraPoseDetails==null?
+                camera.transform.position==basePosition && camera.transform.rotation==baseRotation:
+                CameraRestorationComparison.Evaluate(camera,basePosition,baseRotation,cameraPoseDetails);
             if(cameraPoseDetails!=null)cameraPoseDetails.ExistingGameCameraRestored=gameCameraRestored;
             WriteCapture(head,anchor,actualEyes,gameCameraRestored);
             try { CameraDiagnostics.Write(evidenceDir,rendered,system,camera,beforeRenderProjection,overlays==null?null:overlays.DiagnosticJson()); }
