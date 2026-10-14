@@ -129,10 +129,10 @@ namespace Ugevr
             }
             return b.Append('"').ToString();
         }
-        static string Number<T>(T? value) where T:struct {return value.HasValue?Convert.ToInt64(value.Value,CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture):"null";}
-        static string Unsigned<T>(T? value) where T:struct {return value.HasValue?Convert.ToUInt64(value.Value,CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture):"null";}
-        static string Boolean(bool? value) {return value.HasValue?value.Value.ToString().ToLowerInvariant():"null";}
-        static string Array(double[] values)
+        internal static string Number<T>(T? value) where T:struct {return value.HasValue?Convert.ToInt64(value.Value,CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture):"null";}
+        internal static string Unsigned<T>(T? value) where T:struct {return value.HasValue?Convert.ToUInt64(value.Value,CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture):"null";}
+        internal static string Boolean(bool? value) {return value.HasValue?value.Value.ToString().ToLowerInvariant():"null";}
+        internal static string Array(double[] values)
         {
             if(values==null) return "null";
             var b=new StringBuilder("[");

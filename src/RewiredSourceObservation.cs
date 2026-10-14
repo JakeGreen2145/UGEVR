@@ -35,13 +35,17 @@ namespace Ugevr
         }
     }
 
+    internal sealed class PassiveSourceRecord {public string Yaml,Reason;}
     public sealed class RewiredSourceObservation
     {
         public const int MaximumWindows=3,MaximumSamples=300,MaximumRecordBytes=16384,MaximumWindowBytes=5*1024*1024;
         readonly string directory,runId;
         readonly int processId,ownerThread;
         readonly long frequency,interval;
-        readonly Func<ControllerIdentitySnapshot> read;
+        readonly Func<PassiveSourceRecord> read;
+        readonly string prefix;
+        readonly bool paired;
+        readonly int maximumRecordBytes;
         readonly List<byte[]> records=new List<byte[]>();
         readonly List<string> usedIds=new List<string>();
         readonly UTF8Encoding encoding=new UTF8Encoding(false,true);
@@ -56,12 +60,20 @@ namespace Ugevr
         public string Reason {get;private set;}
         public string LastError {get;private set;}
         public RewiredSourceObservation(string sessionDirectory,string runId,int processId,long frequency,Func<ControllerIdentitySnapshot> read)
+            :this(sessionDirectory,runId,processId,frequency,RightRecord(read),false) {}
+        static Func<PassiveSourceRecord> RightRecord(Func<ControllerIdentitySnapshot> read)
+        {
+            if(read==null)throw new ArgumentException("Observation needs a reader.");
+            return delegate {var snapshot=read();if(snapshot==null)return null;return new PassiveSourceRecord {Yaml=snapshot.ToPrivateYaml(),Reason=snapshot.Verdict};};
+        }
+        internal RewiredSourceObservation(string sessionDirectory,string runId,int processId,long frequency,Func<PassiveSourceRecord> read,bool paired)
         {
             Guid parsed;
             try {parsed=new Guid(runId);} catch {throw new ArgumentException("Observation needs a controller run identity.");}
             if(parsed==Guid.Empty || String.IsNullOrEmpty(sessionDirectory) || !Path.IsPathRooted(sessionDirectory) || processId<=0 || frequency<20 || frequency>Int64.MaxValue/16 || read==null)
                 throw new ArgumentException("Observation needs an absolute owned session, process and bounded clock.");
             directory=Path.Combine(Path.GetFullPath(sessionDirectory),"UnityVR-evidence");this.runId=parsed.ToString("D");this.processId=processId;this.frequency=frequency;
+            this.paired=paired;prefix=paired?"rewired-pair-source":"rewired-source";maximumRecordBytes=paired?RewiredPairSourceObservation.MaximumRecordBytes:MaximumRecordBytes;
             interval=(frequency+19)/20;this.read=read;ownerThread=Thread.CurrentThread.ManagedThreadId;Status="waiting_request";Reason=LastError="";
             RejectReparse(directory);
             // Existing claims survive component recreation and consume the same launch budget.
@@ -75,9 +87,9 @@ namespace Ugevr
             }
             if(File.Exists(Request)) startupRequest=ReadRequest(Request);
         }
-        string Request {get {return Path.Combine(directory,"rewired-source-request");}}
-        string Claim(int number) {return Path.Combine(directory,"rewired-source-request.claimed-"+number);}
-        string Result(int number) {return Path.Combine(directory,"rewired-source-window-"+number+".yaml");}
+        string Request {get {return Path.Combine(directory,prefix+"-request");}}
+        string Claim(int number) {return Path.Combine(directory,prefix+"-request.claimed-"+number);}
+        string Result(int number) {return Path.Combine(directory,prefix+"-window-"+number+".yaml");}
         static bool FiniteTick(long tick) {return tick>=0;}
         public void Tick(bool optIn,bool enabled,bool focused,ulong generation,DateTime utc,long tick)
         {
@@ -112,13 +124,13 @@ namespace Ugevr
                 if(Samples>=MaximumSamples) {Finish("sample_limit",utc,tick);return;}
                 // Schedule from now, never catch up with several reads in one Unity Update.
                 nextSample=tick+interval;
-                ControllerIdentitySnapshot snapshot=read();
+                PassiveSourceRecord snapshot=read();
                 if(snapshot==null) throw new InvalidOperationException("Observation reader returned no record.");
                 string body="---\nsample_number: "+(Samples+1)+"\nmonotonic_ticks: "+tick+"\nruntime_generation: "+generation+
-                    "\ncapture_utc: '"+utc.ToString("o",CultureInfo.InvariantCulture)+"'\n"+snapshot.ToPrivateYaml();
+                    "\ncapture_utc: '"+utc.ToString("o",CultureInfo.InvariantCulture)+"'\n"+snapshot.Yaml;
                 byte[] record=encoding.GetBytes(body);
-                if(record.Length>MaximumRecordBytes || bytes+record.Length>MaximumWindowBytes-4096) {Finish("record_bound_exceeded",utc,tick);return;}
-                records.Add(record);bytes+=record.Length;++Samples;Reason=snapshot.Verdict;
+                if(record.Length>maximumRecordBytes || bytes+record.Length>MaximumWindowBytes-4096) {Finish("record_bound_exceeded",utc,tick);return;}
+                records.Add(record);bytes+=record.Length;++Samples;Reason=snapshot.Reason;
             }
             catch(Exception error)
             {
@@ -141,7 +153,7 @@ namespace Ugevr
                 // Serialize the complete stream before touching an output file. Move never overwrites a prior result.
                 using(var body=new MemoryStream())
                 {
-                    byte[] header=encoding.GetBytes("---\nschema_version: 1\nprivate_device_identity: true\nauthorizes_input: false\nrun_id: '"+runId+"'\nrequest_id: '"+requestId+"'\nprocess_id: "+processId+"\nwindow_number: "+Windows+"\nduration_seconds: 15\nmaximum_samples: 300\nmaximum_sample_rate_hz: 20\nmonotonic_frequency: "+frequency+"\nstart_ticks: "+start+"\ndeadline_ticks: "+deadline+"\n");
+                    byte[] header=encoding.GetBytes("---\nschema_version: "+(paired?"2":"1")+"\n"+(paired?"observer_kind: paired\nmaximum_record_bytes: "+maximumRecordBytes+"\nmaximum_window_bytes: "+MaximumWindowBytes+"\n":"")+"private_device_identity: true\nauthorizes_input: false\nrun_id: '"+runId+"'\nrequest_id: '"+requestId+"'\nprocess_id: "+processId+"\nwindow_number: "+Windows+"\nduration_seconds: 15\nmaximum_samples: 300\nmaximum_sample_rate_hz: 20\nmonotonic_frequency: "+frequency+"\nstart_ticks: "+start+"\ndeadline_ticks: "+deadline+"\n");
                     body.Write(header,0,header.Length);foreach(byte[] record in records) body.Write(record,0,record.Length);
                     byte[] summary=encoding.GetBytes("---\nstatus: complete\nreason: "+ControllerIdentitySnapshot.Scalar(reason)+"\nsamples: "+Samples+"\nend_ticks: "+tick+"\nfinished_utc: '"+utc.ToString("o",CultureInfo.InvariantCulture)+"'\n");body.Write(summary,0,summary.Length);
                     if(body.Length>MaximumWindowBytes) throw new InvalidOperationException("Observation exceeds window byte bound.");

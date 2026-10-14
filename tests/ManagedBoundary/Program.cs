@@ -34,6 +34,7 @@ class Program
         RewiredMapFactoryChecks.Run(Assert);
         RewiredRuntimeChecks.Run(Assert);
         RewiredMapActivationChecks.Run(Assert);
+        RewiredPairSourceChecks.Run(Assert);
         ObservedRewiredChecks.Run(Assert);
         RewiredSourceObservationChecks.Run(Assert);
         Console.WriteLine("Managed boundary checks passed: "+checks);

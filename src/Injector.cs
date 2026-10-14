@@ -46,6 +46,9 @@ public class Injector : BaseUnityPlugin
     RewiredSourceObservation rewiredSourceObservation;
     double nextRewiredSourceReport;
     bool captureRewiredSourceDetails;
+    RewiredPairSourceObservation rewiredPairSourceObservation;
+    double nextRewiredPairSourceReport;
+    bool captureRewiredPairSourceDetails;
     bool captureInputIdentityDetails;
     ControllerIdentityCapture inputIdentityCapture;
     double nextInputReport;
@@ -104,6 +107,7 @@ public class Injector : BaseUnityPlugin
             float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
             captureInputIdentityDetails=Config.Bind("Input","CaptureIdentityDetails",false,"Explicit private diagnostic: capture bounded raw controller serial/model SDK results in this controller-owned session evidence directory. Never include raw IDs in public reports.").Value;
             captureRewiredSourceDetails=Config.Bind("Input","CaptureRewiredSourceDetails",false,"Private passive OpenVR observation only, independent of Rewired input admission. A fresh run-id/request-id file in controller-owned UnityVR-evidence requests 15 seconds, at most 300 samples at 20Hz and three windows per launch. Raw identities stay private; no input is authorized.").Value;
+            captureRewiredPairSourceDetails=Config.Bind("Input","CaptureRewiredPairSourceDetails",false,"Private passive two-hand SDK observation only. A fresh rewired-pair-source-request in the controller-owned UnityVR-evidence requests 15 seconds, at most 300 paired records at 20Hz and three windows per launch. Records preserve independent before/after identity and raw SDK results; no input is authorized.").Value;
             int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Single-hand profiles require 1..10 consecutive valid neutral reads; the dual-hand profile requires exactly 3 stable neutral pair reads before creating the first owned device.").Value;
             bool allowRewired=Config.Bind("Input","AllowRewiredInputDiagnostic",false,"Explicit code activation for one bounded owned public Rewired custom-controller window. Requires CaptureImages, a controller session and exact Firewatch profile; no private game callback is invoked.").Value;
             string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 for a uniquely declared trigger, or firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1 for the inspected Oculus application view and observed finger-trigger axis1. Both explicitly feed normal game actions31/32/36.").Value;
@@ -162,6 +166,11 @@ public class Injector : BaseUnityPlugin
             {
                 try {rewiredSourceObservation=new RewiredSourceObservation(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,delegate {return RewiredSourceReader.Read(system);});}
                 catch(Exception error) {Logger.LogWarning("REWIRED_SOURCE_OBSERVATION unavailable: "+error.GetType().FullName);}
+            }
+            if(captureRewiredPairSourceDetails && session.Available)
+            {
+                try {rewiredPairSourceObservation=new RewiredPairSourceObservation(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,delegate {return RewiredPairSourceReader.Read(system);});}
+                catch(Exception error) {Logger.LogWarning("REWIRED_PAIR_SOURCE_OBSERVATION unavailable: "+error.GetType().FullName);}
             }
             if (capturesEnabled && session.Available)
                 inputProbe=new KeyboardEProbe(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicKeyboardEReader.Create);
@@ -237,6 +246,7 @@ public class Injector : BaseUnityPlugin
         TickGamepadDiagnostic();
         TickRewiredDiagnostic();
         TickRewiredSourceObservation();
+        TickRewiredPairSourceObservation();
         Publish(false);
     }
 
@@ -300,6 +310,14 @@ public class Injector : BaseUnityPlugin
         rewiredSourceObservation.Tick(captureRewiredSourceDetails,enabled,Application.isFocused,generation,DateTime.UtcNow,Stopwatch.GetTimestamp());
         double now=InputClock();if(now<nextRewiredSourceReport) return;nextRewiredSourceReport=now+1;
         Logger.LogInfo("REWIRED_SOURCE_OBSERVATION status="+rewiredSourceObservation.Status+" reason="+rewiredSourceObservation.Reason+" windows="+rewiredSourceObservation.Windows+" samples="+rewiredSourceObservation.Samples+" error="+rewiredSourceObservation.LastError+" authorizesInput=false");
+    }
+    void TickRewiredPairSourceObservation()
+    {
+        if(rewiredPairSourceObservation==null) return;
+        bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
+        rewiredPairSourceObservation.Tick(captureRewiredPairSourceDetails,enabled,Application.isFocused,generation,DateTime.UtcNow,Stopwatch.GetTimestamp());
+        double now=InputClock();if(now<nextRewiredPairSourceReport)return;nextRewiredPairSourceReport=now+1;
+        Logger.LogInfo("REWIRED_PAIR_SOURCE_OBSERVATION status="+rewiredPairSourceObservation.Status+" windows="+rewiredPairSourceObservation.Windows+" samples="+rewiredPairSourceObservation.Samples+" reason="+rewiredPairSourceObservation.Reason+" error="+rewiredPairSourceObservation.LastError);
     }
 
     void ApplyCommand()
@@ -697,12 +715,13 @@ public class Injector : BaseUnityPlugin
     }
     void OnApplicationQuit() { quitting=true; StopOwnedWork(); }
     void OnDestroy() { quitting=true; StopOwnedWork(); }
-    void OnDisable() {CancelGamepadDiagnostic("component_disabled");CancelRewiredDiagnostic("component_disabled");if(rewiredSourceObservation!=null) rewiredSourceObservation.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());}
+    void OnDisable() {CancelGamepadDiagnostic("component_disabled");CancelRewiredDiagnostic("component_disabled");if(rewiredSourceObservation!=null) rewiredSourceObservation.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());if(rewiredPairSourceObservation!=null)rewiredPairSourceObservation.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());}
     void StopOwnedWork()
     {
         CancelGamepadDiagnostic("game_lifecycle_end");
         CancelRewiredDiagnostic("game_lifecycle_end");
         if(rewiredSourceObservation!=null) {rewiredSourceObservation.Cancel("game_lifecycle_end",DateTime.UtcNow,Stopwatch.GetTimestamp());rewiredSourceObservation=null;}
+        if(rewiredPairSourceObservation!=null) {rewiredPairSourceObservation.Cancel("game_lifecycle_end",DateTime.UtcNow,Stopwatch.GetTimestamp());rewiredPairSourceObservation=null;}
         if (inputProbe!=null) { inputProbe.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp()); inputProbe=null; }
         if(hierarchyProbe!=null)
         {
