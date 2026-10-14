@@ -279,6 +279,11 @@ class Program
         {
             scope.ApplyEye(0);var first=rect.position;var firstSize=rect.sizeDelta;var firstScale=rect.localScale;
             camera.transform.position=new Vector3(.03f,0,0);scope.ApplyEye(1);
+            scope.RecordAfterRender(1);
+            Assert(scope.UnexpectedGeometryChanges==0,"Stable post-render root state is recorded separately");
+            rect.sizeDelta=new Vector2(1,1);scope.RecordAfterRender(1);
+            Assert(scope.UnexpectedGeometryChanges==1 && scope.DiagnosticJson().Contains("\"afterRenderEyes\""),"Changed root geometry during rendering is observable");
+            rect.sizeDelta=firstSize;
             Assert(rect.position.Equals(first) && rect.sizeDelta.Equals(firstSize) && rect.localScale.Equals(firstScale),"Both eyes observe identical root geometry");
             Assert(rect.sizeDelta.x==3840 && rect.sizeDelta.y==2160,"Common panel preserves desktop layout aspect");
         }

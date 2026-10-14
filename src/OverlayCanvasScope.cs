@@ -16,6 +16,8 @@ namespace Ugevr
         readonly List<string> errors=new List<string>();
         readonly List<string> rectMismatches=new List<string>();
         readonly string[] appliedEyes=new string[2];
+        readonly string[] afterRenderEyes=new string[2];
+        readonly List<string> geometryChanges=new List<string>();
         readonly Camera camera;
         readonly bool includeLayers;
         readonly double unitsPerMeter;
@@ -31,6 +33,7 @@ namespace Ugevr
         public int RestorationConflicts { get; private set; }
         public int DerivedPositionRoundoff { get; private set; }
         public int RotationRoundoff { get; private set; }
+        public int UnexpectedGeometryChanges { get; private set; }
         public int SelectedCount { get { return canvases.Count; } }
         public string RestorationError { get { return String.Join("; ",errors.ToArray()); } }
 
@@ -113,6 +116,16 @@ namespace Ugevr
             if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
         }
         public void SetCommonHead(RigidPose head) {if (applied) throw new InvalidOperationException("Common panel pose cannot change between eyes.");commonHead=head;commonHeadSet=true;}
+        public void RecordAfterRender(int eye)
+        {
+            if (eye<0 || eye>1 || !applied) return;
+            afterRenderEyes[eye]=AppliedCanvasJson();
+            if (afterRenderEyes[eye]!=appliedEyes[eye])
+            {
+                ++UnexpectedGeometryChanges;
+                if (geometryChanges.Count<2) geometryChanges.Add("eye "+eye+" canvas state changed during Camera.Render; compare appliedEyes and afterRenderEyes.");
+            }
+        }
         void PrepareCommonPanel()
         {
             applied=true;
@@ -330,7 +343,9 @@ namespace Ugevr
                 .Append(",\"includeOverlayLayers\":").Append(includeLayers?"true":"false").Append(",\"selectedCount\":").Append(canvases.Count)
                 .Append(",\"rectCount\":").Append(rects.Count).Append(",\"destroyedObjects\":").Append(DestroyedObjects)
                 .Append(",\"restorationConflicts\":").Append(RestorationConflicts).Append(",\"derivedPositionRoundoff\":").Append(DerivedPositionRoundoff)
-                .Append(",\"rotationRoundoff\":").Append(RotationRoundoff).Append(",\"errors\":[");
+                .Append(",\"rotationRoundoff\":").Append(RotationRoundoff).Append(",\"unexpectedGeometryChanges\":").Append(UnexpectedGeometryChanges).Append(",\"geometryChangeNotes\":[");
+            for(int i=0;i<geometryChanges.Count;++i) {if(i>0)text.Append(',');text.Append(Quote(geometryChanges[i]));}
+            text.Append("],\"errors\":[");
             for (int i=0;i<errors.Count;++i) { if (i>0) text.Append(','); text.Append(Quote(errors[i])); }
             text.Append("],\"rectMismatches\":[").Append(String.Join(",",rectMismatches.ToArray())).Append("],\"selectedRoots\":[");
             for (int i=0;i<canvases.Count;++i)
@@ -340,7 +355,8 @@ namespace Ugevr
                     .Append(",\"originalMode\":").Append(Quote(state.Mode.ToString())).Append(",\"originalPlaneDistance\":").Append(Number(state.Distance))
                     .Append(",\"sortingOrder\":").Append(state.SortingOrder).Append('}');
             }
-            return text.Append("],\"appliedEyes\":[").Append(appliedEyes[0] ?? "null").Append(',').Append(appliedEyes[1] ?? "null").Append("]}").ToString();
+            return text.Append("],\"appliedEyes\":[").Append(appliedEyes[0] ?? "null").Append(',').Append(appliedEyes[1] ?? "null")
+                .Append("],\"afterRenderEyes\":[").Append(afterRenderEyes[0] ?? "null").Append(',').Append(afterRenderEyes[1] ?? "null").Append("]}").ToString();
         }
     }
 }

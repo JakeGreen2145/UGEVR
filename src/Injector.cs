@@ -305,6 +305,7 @@ public class Injector : BaseUnityPlugin
                 actualEyes[i]=new RigidPose(Position(camera.transform.position),Rotation(camera.transform.rotation));
                 if (overlays!=null) overlays.ApplyEye(i);
                 camera.Render();
+                if (overlays!=null) overlays.RecordAfterRender(i);
             }
         }
         }
@@ -318,6 +319,7 @@ public class Injector : BaseUnityPlugin
             }
         }
         if (overlays!=null && overlays.RestorationConflicts>0) throw new InvalidOperationException("UI state could not be fully restored: "+overlays.RestorationError);
+        if (overlays!=null && overlays.UnexpectedGeometryChanges>0) Report("UI_RENDER_STATE_CHANGED count="+overlays.UnexpectedGeometryChanges+"; inspect appliedEyes/afterRenderEyes before claiming UI stereo correctness.");
         SetEyeTextures(eyes[0].GetNativeTexturePtr(),eyes[1].GetNativeTexturePtr());
         GL.IssuePluginEvent(renderEvent,1);
         phase=2; phaseStarted=Time.realtimeSinceStartup; ++rendered;
