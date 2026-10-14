@@ -66,6 +66,7 @@ public class Injector : BaseUnityPlugin
     bool active=true, runtimeReady, draining, renderingActive, quitting;
     bool ownsBackground, oldBackground;
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
+    CameraTransformRestoration cameraTransformRestoration;
     bool allowEngineInputExperiment;
     bool captureOverlayCanvases,includeOverlayLayers;
     bool overlayAfterImageEffects;
@@ -149,6 +150,7 @@ public class Injector : BaseUnityPlugin
             disableOcclusionCulling=Config.Bind("Rendering","DisableOcclusionCulling",false,"Explicit fidelity remedy: disable the selected camera's occlusion culling only during eye rendering.").Value;
             captureOverlayCanvases=Config.Bind("UI","CaptureOverlayCanvases",false,"Experimental: borrow active screen overlay canvases during eye rendering and restore desktop state.").Value;
             flushDesktopLayoutBeforeBorrow=Config.Bind("UI","FlushDesktopLayoutBeforeBorrow",false,"Explicit experimental fallback: flush pending desktop canvas layout once before current camera selection and all state snapshots. Runs game canvas callbacks; requires CaptureOverlayCanvases.").Value;
+            cameraTransformRestoration=CameraLocalRestoration.Parse(Config.Bind("Rendering","CameraTransformRestoration","world","Explicit code experiment: world preserves the current restoration; local-with-world-fallback tests raw local pose restoration only under unchanged finite sampled parent context and last applied raw eye pose. Refusal uses existing world restoration, including its ownership limits; no second correction. Native benefit unproved.").Value);
             restoreBorrowedCameraCurrent=Config.Bind("Rendering","RestoreBorrowedCameraCurrent",false,"Explicit experiment: restore a live selected Camera.current after manual eye renders only from null or an owned rendered-camera context. Foreign current is preserved and reported; desktop fidelity remains unvalidated.").Value;
             includeOverlayLayers=Config.Bind("UI","IncludeOverlayLayers",false,"Explicitly include selected overlay canvas renderer layers in the borrowed camera mask; may also reveal other geometry on those layers.").Value;
             overlayPlaneMeters=Config.Bind("UI","OverlayPlaneDistanceMeters",2f,"Experimental overlay camera plane distance in physical meters; bounded by game camera clipping.").Value;
@@ -533,7 +535,7 @@ public class Injector : BaseUnityPlugin
         {
         if(overlays!=null && overlays.IsolatedMask!=0) currentContext.AllowUiCamera(overlayCamera);
         if(currentContext.Conflict) throw new InvalidOperationException("Camera current experiment failed before borrow: "+currentContext.Outcome);
-        using (var restore=new CameraState(camera,cameraPoseDetails))
+        using (var restore=new CameraState(camera,cameraPoseDetails,cameraTransformRestoration))
         using (overlays)
         {
             for (int i=0;i<2;++i)
@@ -541,6 +543,7 @@ public class Injector : BaseUnityPlugin
                 actualEyes[i]=TrackingMath.ComposeEye(anchor,head,Pose(system.GetEyeToHeadTransform((EVREye)i)),origin,unitsPerMeter,retainGameTilt);
                 camera.transform.position=Vector(actualEyes[i].Position);
                 camera.transform.rotation=QuaternionValue(actualEyes[i].Rotation);
+                restore.RecordOwnedEyePose();
                 camera.ResetWorldToCameraMatrix();
                 camera.projectionMatrix=Projection((EVREye)i,camera.nearClipPlane,camera.farClipPlane);
                 if (disableOcclusionCulling) camera.useOcclusionCulling=false;

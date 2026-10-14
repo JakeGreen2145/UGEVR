@@ -35,6 +35,7 @@
     <Compile Include="../../src/RewiredPairSourceObservation.cs" Link="RewiredPairSourceObservation.cs" />
     <Compile Include="../../vendor/openvr_api.cs" Link="OpenVR.cs" />
     <Compile Include="../../src/CameraRestorationComparison.cs" Link="CameraRestorationComparison.cs" />
+    <Compile Include="../../src/CameraLocalRestoration.cs" Link="CameraLocalRestoration.cs" />
     <Compile Include="../../src/CameraState.cs" Link="CameraState.cs" />
     <Compile Include="../../src/CameraPoseCaptureRequests.cs" Link="CameraPoseCaptureRequests.cs" />
     <Compile Include="../../src/CameraRestorationPoseDiagnostics.cs" Link="CameraRestorationPoseDiagnostics.cs" />

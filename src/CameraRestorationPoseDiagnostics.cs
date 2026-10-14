@@ -62,7 +62,7 @@ namespace Ugevr
     }
     public sealed class CameraRestorationPoseRecord
     {
-        sealed class PoseStage
+        internal sealed class PoseStage
         {
             public string Name,Error,ParentError;
             public int? CameraId,TransformId,ParentId;
@@ -81,6 +81,10 @@ namespace Ugevr
         readonly int ownerThread=Thread.CurrentThread.ManagedThreadId;
         readonly List<PoseStage> stages=new List<PoseStage>();
         bool published;
+        CameraLocalRestoration localRestoration;
+        bool localSelected;
+        internal void SelectLocalMode() {localSelected=true;}
+        internal void SelectLocalRestoration(CameraLocalRestoration experiment) {localSelected=true;localRestoration=experiment;}
         bool comparisonAttempted;
         string comparisonError;
         bool? positionEqual,rotationEqual;
@@ -118,9 +122,12 @@ namespace Ugevr
         internal void ObserveSavedWorld(Vector3 position,Quaternion rotation) {Observe("camera_state_saved",position,rotation);}
         void Observe(string stage,Vector3? savedPosition,Quaternion? savedRotation)
         {
-            if(published || ownerThread!=Thread.CurrentThread.ManagedThreadId || stages.Count>=CameraRestorationPoseDiagnostics.MaximumStages)return;
+            if(published || ownerThread!=Thread.CurrentThread.ManagedThreadId || stages.Count>=CameraRestorationPoseDiagnostics.MaximumStages || (localSelected && stage=="after_canvas_flush"))return;
+            if(!localSelected && stage=="before_camera_state_dispose")throw new ArgumentException("Experiment stage requires explicit local selection.");
+            if(localRestoration!=null && (stage=="camera_state_saved" || stage=="before_camera_state_dispose" || stage=="after_camera_state_dispose"))
+            {stages.Add(localRestoration.DiagnosticStage(stage));return;}
             // Fixed stage vocabulary keeps private records bounded and prevents object names entering logs.
-            if(stage!="anchor_before_scope" && stage!="camera_state_saved" && stage!="after_left_render" && stage!="after_right_render" && stage!="after_camera_state_dispose" && stage!="after_canvas_flush" && stage!="after_current_context" && stage!="after_eye_captures")throw new ArgumentException("Unknown camera evidence stage.");
+            if(stage!="before_camera_state_dispose" && stage!="anchor_before_scope" && stage!="camera_state_saved" && stage!="after_left_render" && stage!="after_right_render" && stage!="after_camera_state_dispose" && stage!="after_canvas_flush" && stage!="after_current_context" && stage!="after_eye_captures")throw new ArgumentException("Unknown camera evidence stage.");
             var value=new PoseStage {Name=stage};stages.Add(value);
             try
             {
@@ -170,10 +177,11 @@ namespace Ugevr
         public string ToPrivateYaml()
         {
             if(EyeCaptureAttempts<0 || EyeCaptureAttempts>2)throw new InvalidOperationException("Invalid image capture attempt count.");
-            var result=new StringBuilder("schema_version: 1\nprivate_camera_pose: true\nchanges_restoration_policy: false\nvr_frame_id: "+frame.ToString(CultureInfo.InvariantCulture)+"\nruntime_generation: "+generation.ToString(CultureInfo.InvariantCulture)+"\nrendered_pair_ordinal: "+renderedPairOrdinal.ToString(CultureInfo.InvariantCulture)+"\ncapture_request_consumed: "+CaptureRequestConsumed.ToString().ToLowerInvariant()+"\neye_capture_attempts: "+EyeCaptureAttempts+"\neye_captures_returned: "+EyeCapturesReturned.ToString().ToLowerInvariant()+"\nexisting_game_camera_restored: "+Bool(ExistingGameCameraRestored)+"\nactual_comparison:\n    attempted: "+comparisonAttempted.ToString().ToLowerInvariant()+"\n    position_equal: "+Bool(positionEqual)+"\n    rotation_term_evaluated: "+(comparedRotation!=null).ToString().ToLowerInvariant()+"\n    rotation_equal: "+Bool(rotationEqual)+"\n    query_error: "+(comparisonError??"null")+"\n    arithmetic: Unity_float_from_actual_comparison_operands\n");
+            var result=new StringBuilder("schema_version: 1\nprivate_camera_pose: true\nchanges_restoration_policy: "+localSelected.ToString().ToLowerInvariant()+"\nselected_restoration_mode: "+(!localSelected?"world":"local-with-world-fallback")+"\nstage_layout: "+(!localSelected?"default_eight":"local_experiment_pre_dispose_replaces_canvas_flush")+"\nvr_frame_id: "+frame.ToString(CultureInfo.InvariantCulture)+"\nruntime_generation: "+generation.ToString(CultureInfo.InvariantCulture)+"\nrendered_pair_ordinal: "+renderedPairOrdinal.ToString(CultureInfo.InvariantCulture)+"\ncapture_request_consumed: "+CaptureRequestConsumed.ToString().ToLowerInvariant()+"\neye_capture_attempts: "+EyeCaptureAttempts+"\neye_captures_returned: "+EyeCapturesReturned.ToString().ToLowerInvariant()+"\nexisting_game_camera_restored: "+Bool(ExistingGameCameraRestored)+"\nactual_comparison:\n    attempted: "+comparisonAttempted.ToString().ToLowerInvariant()+"\n    position_equal: "+Bool(positionEqual)+"\n    rotation_term_evaluated: "+(comparedRotation!=null).ToString().ToLowerInvariant()+"\n    rotation_equal: "+Bool(rotationEqual)+"\n    query_error: "+(comparisonError??"null")+"\n    arithmetic: Unity_float_from_actual_comparison_operands\n");
             Array(result,"anchor_world_position",comparedAnchorPosition);Array(result,"actual_world_position",comparedPosition);
             Array(result,"anchor_world_rotation_xyzw",comparedAnchorRotation);Array(result,"actual_world_rotation_xyzw",comparedRotation);
             Number(result,"position_squared_distance",positionSquaredDistance);Number(result,"rotation_signed_dot",rotationSignedDot);
+            if(localRestoration!=null)result.Append(localRestoration.ToPrivateYaml());
             result.Append("matrix_element_order: Unity_single_index_0_through_15\nstages:\n");
             foreach(var value in stages)
             {

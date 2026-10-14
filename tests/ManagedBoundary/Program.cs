@@ -21,6 +21,7 @@ class Program
         MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); InactiveCanvasChecks(); SessionChecks(); KeyboardProbeChecks();
         UiLayoutDiagnosticChecks.Run(Assert);
         CameraRestorationPoseChecks.Run(Assert);
+        CameraLocalRestorationChecks.Run(Assert);
         CameraComparisonChecks.Run(Assert);
         CameraPoseCaptureRequestChecks.Run(Assert);
         DualCancelChecks.Run(Assert);
