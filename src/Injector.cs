@@ -49,6 +49,7 @@ public class Injector : BaseUnityPlugin
     bool captureOverlayCanvases,includeOverlayLayers;
     bool overlayAfterImageEffects;
     int overlayIsolationLayer=-1,layerFailureCaptures;
+    int overlaySceneScanLimit=OverlayLayerInventory.DefaultScanLimit;
     bool captureLayoutInputs;
     string layoutInputRootRectIds;
     Camera overlayCamera;
@@ -81,7 +82,9 @@ public class Injector : BaseUnityPlugin
             overlayWidthMeters=Config.Bind("UI","OverlayPanelWidthMeters",1.8f,"Experimental common physical panel width; desktop aspect/layout retained independently of game FOV.").Value;
             overlayAfterImageEffects=Config.Bind("UI","OverlayAfterImageEffects",false,"Experimental opt-in: render selected overlay UI in an isolated no-effect pass after the game eye's effects. Requires explicit overlay capture activation.").Value;
             overlayIsolationLayer=Config.Bind("UI","OverlayIsolationLayer",-1,"-1 selects an unused unnamed layer. Explicit 8..31 may borrow a named layer only while no loaded scene object, including inactive objects, occupies it.").Value;
+            overlaySceneScanLimit=Config.Bind("UI","OverlaySceneScanLimit",OverlayLayerInventory.DefaultScanLimit,"Per-query object inspection bound for UI layer inventory and exclusivity. Explicit range 100000..1000000; incomplete inventories reject borrowing. Unity still allocates each complete query result.").Value;
             if(overlayIsolationLayer!=-1 && (overlayIsolationLayer<8 || overlayIsolationLayer>31)) throw new ArgumentOutOfRangeException("OverlayIsolationLayer","Use -1 or 8 through 31.");
+            OverlayLayerInventory.ValidateScanLimit(overlaySceneScanLimit);
             if (Double.IsNaN(unitsPerMeter) || Double.IsInfinity(unitsPerMeter) || unitsPerMeter<=0)
                 throw new ArgumentException("UnitsPerMeter must be finite and greater than zero.");
             if (disableOcclusionCulling) Logger.LogWarning("EXPLICIT_FIDELITY_REMEDY DisableOcclusionCulling=true; game culling is restored after the eye pair.");
@@ -305,7 +308,7 @@ public class Injector : BaseUnityPlugin
                 var owner=new GameObject("UGEVR overlay camera");owner.hideFlags=HideFlags.HideAndDontSave;
                 overlayCamera=owner.AddComponent<Camera>();overlayCamera.enabled=false;
             }
-            try {overlays.UseAfterEffectsCamera(overlayCamera,overlayIsolationLayer);}
+            try {overlays.UseAfterEffectsCamera(overlayCamera,overlayIsolationLayer,overlaySceneScanLimit);}
             catch(OverlayLayerSelectionException selectionError) {WriteLayerFailureDiagnostic(selectionError);overlays.Dispose();throw;}
         }
         try

@@ -10,17 +10,20 @@ namespace Ugevr
         readonly List<Entry> entries=new List<Entry>();
         readonly Dictionary<int,GameObject> owned=new Dictionary<int,GameObject>();
         readonly List<string> errors=new List<string>();
+        readonly int sceneScanLimit;
         bool applied,disposed;
         public readonly int Layer;
         public int Mask {get {return 1<<Layer;}}
         public int ObjectCount {get {return entries.Count;}}
         public int DestroyedObjects {get;private set;}
         public string[] Errors {get {return errors.ToArray();}}
-        public OverlayLayerLease(IEnumerable<GameObject> objects,int requestedLayer=-1)
+        public OverlayLayerLease(IEnumerable<GameObject> objects,int requestedLayer=-1,int sceneScanLimit=OverlayLayerInventory.DefaultScanLimit)
         {
+            OverlayLayerInventory.ValidateScanLimit(sceneScanLimit);
+            this.sceneScanLimit=sceneScanLimit;
             if(requestedLayer!=-1 && (requestedLayer<8 || requestedLayer>31))
                 throw new ArgumentOutOfRangeException("requestedLayer","UI isolation layer must be -1 for automatic selection or 8 through 31.");
-            OverlayLayerInventory inventory=OverlayLayerInventory.Capture(requestedLayer);
+            OverlayLayerInventory inventory=OverlayLayerInventory.Capture(requestedLayer,sceneScanLimit);
             Layer=-1;
             if(requestedLayer!=-1)
             {
@@ -57,7 +60,7 @@ namespace Ugevr
             int scanned=0;
             foreach(UnityEngine.Object item in objects)
             {
-                if(++scanned>100000) throw new InvalidOperationException("UI layer validation exceeds 100000 objects; use an explicit engine adapter.");
+                if(++scanned>sceneScanLimit) throw new InvalidOperationException("UI layer validation exceeds the configured "+sceneScanLimit+" object inspection limit. The UI pass was skipped.");
                 var component=item as Component;
                 GameObject owner=null;
                 bool ownedAlive=component!=null && owned.TryGetValue(component.gameObject.GetInstanceID(),out owner) && owner!=null;

@@ -91,8 +91,59 @@ static class OverlayIsolationChecks
             for(int i=0;i<100001;++i) Resources.Extras.Add(repeated);
             bool capped=false;
             try {OverlayLayerInventory.Capture(20);}
-            catch(OverlayLayerSelectionException error) {capped=!error.Inventory.Complete && error.Inventory.ScannedTransforms==100000;}
+            catch(OverlayLayerSelectionException error)
+            {
+                capped=!error.Inventory.Complete && error.Inventory.ScannedTransforms==100000;
+                string incomplete=error.Inventory.DiagnosticYaml("run",17,20,error.Message);
+                assert(error.Inventory.DiscoveredTransformCount==100001 && error.Inventory.ScanLimit==100000 && incomplete.Contains("discovered_transform_count: 100001") && incomplete.Contains("scan_limit: 100000") && incomplete.Contains("scan_complete: false"),"Incomplete inventory records the complete query length and configured inspection limit");
+            }
             assert(capped,"Oversized layer inventory is explicitly incomplete and cannot prove an unused candidate");
+            bool defaultLeaseRejected=false;
+            try {new OverlayLayerLease(new[]{selected.gameObject},20);} catch(OverlayLayerSelectionException error) {defaultLeaseRejected=!error.Inventory.Complete && error.Inventory.ScanLimit==100000;}
+            assert(defaultLeaseRejected && selected.gameObject.layer==5,"Default lease rejects an incomplete inventory before selecting or mutating the candidate layer");
+            OverlayLayerInventory expanded=OverlayLayerInventory.Capture(20,100001);
+            assert(expanded.Complete && expanded.ScannedTransforms==100001 && expanded.DiscoveredTransformCount==100001 && expanded.ScanLimit==100001 && expanded.OccupiedCount(4)==100001,"Explicit larger bound inspects the entire returned transform inventory");
+            using(var expandedLease=new OverlayLayerLease(new[]{selected.gameObject},20,100001))
+            {
+                expandedLease.Apply();expandedLease.ValidateExclusive();
+                assert(selected.gameObject.layer==20,"Larger bound applies to both inventory and transform exclusivity checks");
+            }
+            assert(selected.gameObject.layer==5,"Expanded-bound lease restores the selected layer");
+            Resources.Extras.RemoveAt(Resources.Extras.Count-1);
+            var lateBeyondDefault=new Transform();lateBeyondDefault.gameObject.layer=20;lateBeyondDefault.gameObject.activeSelf=false;
+            using(var expandedLease=new OverlayLayerLease(new[]{selected.gameObject},20,100001))
+            {
+                expandedLease.Apply();Resources.Extras.Add(lateBeyondDefault);
+                bool collision=false;try {expandedLease.ValidateExclusive();} catch(InvalidOperationException error) {collision=error.Message.Contains("unowned");}
+                assert(collision && lateBeyondDefault.gameObject.layer==20,"Larger bound still rejects an inactive unowned object beyond the default inspection limit");
+            }
+            assert(selected.gameObject.layer==5 && lateBeyondDefault.gameObject.layer==20,"Late collision restores only owned layers with the expanded bound");
+            Resources.Extras.Clear();
+            foreach(Component component in new Component[]{new Renderer(),new CanvasRenderer()})
+            {
+                component.gameObject.layer=4;
+                using(var typedLease=new OverlayLayerLease(new[]{selected.gameObject},20,100001))
+                {
+                    typedLease.Apply();
+                    for(int i=0;i<100001;++i) Resources.Extras.Add(component);
+                    typedLease.ValidateExclusive();
+                    assert(selected.gameObject.layer==20,"Explicit scan limit permits a complete "+component.GetType().Name+" exclusivity query");
+                    Resources.Extras.Add(component);
+                    bool queryCapped=false;try {typedLease.ValidateExclusive();} catch(InvalidOperationException error) {queryCapped=error.Message.Contains("inspection limit");}
+                    assert(queryCapped,"The same configured bound rejects an oversized "+component.GetType().Name+" exclusivity query");
+                    Resources.Extras.Clear();
+                }
+                assert(selected.gameObject.layer==5,"Oversized typed query leaves owned layer cleanup intact");
+            }
+            OverlayLayerInventory maximum=OverlayLayerInventory.Capture(20,1000000);
+            assert(maximum.Complete && maximum.ScanLimit==1000000,"Maximum explicit scene scan limit is accepted");
+            foreach(int invalidLimit in new[]{Int32.MinValue,0,99999,1000001,Int32.MaxValue})
+            {
+                bool inventoryRejected=false,leaseRejected=false;
+                try {OverlayLayerInventory.Capture(20,invalidLimit);} catch(ArgumentOutOfRangeException) {inventoryRejected=true;}
+                try {new OverlayLayerLease(new[]{selected.gameObject},20,invalidLimit);} catch(ArgumentOutOfRangeException) {leaseRejected=true;}
+                assert(inventoryRejected && leaseRejected && selected.gameObject.layer==5,"Inventory and lease reject invalid scene scan bound "+invalidLimit+" before mutation");
+            }
         }
         finally {Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;}
     }

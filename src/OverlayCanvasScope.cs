@@ -161,11 +161,11 @@ namespace Ugevr
             if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
         }
         public void SetCommonHead(RigidPose head) {if (applied) throw new InvalidOperationException("Common panel pose cannot change between eyes.");commonHead=head;commonHeadSet=true;}
-        public void UseAfterEffectsCamera(Camera ui,int isolationLayer=-1)
+        public void UseAfterEffectsCamera(Camera ui,int isolationLayer=-1,int sceneScanLimit=OverlayLayerInventory.DefaultScanLimit)
         {
             if(applied) throw new InvalidOperationException("UI pass selection cannot change between eyes.");
             if(canvases.Count==0) return;
-            layerLease=new OverlayLayerLease(isolatedObjects,isolationLayer);uiCamera=ui;
+            layerLease=new OverlayLayerLease(isolatedObjects,isolationLayer,sceneScanLimit);uiCamera=ui;
         }
         public void ValidateLayerExclusive() {if(layerLease!=null) layerLease.ValidateExclusive();}
         public void ValidateInactiveCanvases(string stage)
