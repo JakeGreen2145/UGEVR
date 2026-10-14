@@ -9,7 +9,6 @@ namespace Ugevr
         public int TriggerAxis;
         public string Identity,UnavailableReason;
         public double X,Y,Trigger;
-        public bool Neutral {get {return Math.Abs(X)<=.2 && Math.Abs(Y)<=.2 && Trigger<=.05;}}
     }
     public interface IOwnedRewiredInput
     {
@@ -56,7 +55,7 @@ namespace Ugevr
             if(!started)
             {
                 if(!Valid(input)) {Reason=input.UnavailableReason ?? "right_source_unavailable";return;}
-                if(!input.Neutral) {Reason="right_source_not_neutral";return;}
+                if(Math.Sqrt(input.X*input.X+input.Y*input.Y)>deadzone || input.Trigger!=0) {Reason="right_source_not_neutral";return;}
                 started=true;startedAt=now;identity=input;generation=runtimeGeneration;
                 try
                 {

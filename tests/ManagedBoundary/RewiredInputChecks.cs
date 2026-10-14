@@ -63,6 +63,15 @@ static class RewiredInputChecks
         int factories=0;var backend=new Backend();var diagnostic=new RewiredInputDiagnostic(delegate {++factories;return backend;},15,.2,"refuse");
         diagnostic.Tick(false,true,1,Neutral(),0);diagnostic.Tick(true,false,1,Neutral(),1);var held=Neutral();held.Trigger=.9;diagnostic.Tick(true,true,1,held,2);
         check(factories==0 && backend.Adds==0,"Disabled, unfocused or nonneutral Rewired admission performs no public backend creation");
+        foreach(double dz in new[]{.1,.2,.8})
+        {
+            var neutralBackend=new Backend();var neutralDiagnostic=new RewiredInputDiagnostic(()=>neutralBackend,15,dz,"refuse");var outside=Neutral();outside.X=outside.Y=dz*.95;neutralDiagnostic.Tick(true,true,1,outside,0);
+            check(neutralBackend.Adds==0,"A diagonal outside the configured radial deadzone cannot arm: "+dz);
+            outside.X=dz;outside.Y=0;outside.Trigger=Double.Epsilon;neutralDiagnostic.Tick(true,true,1,outside,.1);
+            check(neutralBackend.Adds==0,"Even the smallest nonzero raw trigger cannot arm: "+dz);
+            outside.Trigger=0;neutralDiagnostic.Tick(true,true,1,outside,.2);neutralDiagnostic.Tick(true,true,1,outside,.3);
+            check(neutralBackend.Adds==1 && neutralBackend.X==0 && neutralBackend.Y==0 && neutralBackend.Trigger==0,"Configured radial boundary and exactly released trigger admit only zero output: "+dz);
+        }
         diagnostic.Tick(true,true,1,Neutral(),3);check(backend.Adds==1 && backend.X==0 && backend.Trigger==0 && diagnostic.Status=="active","Fresh neutral source admits exactly one owned Rewired controller");
         var moving=Neutral();moving.Packet=2;moving.X=.6;moving.Y=-.4;moving.Trigger=.8;diagnostic.Tick(true,true,1,moving,3.1);
         check(backend.X>0 && backend.Y<0 && backend.Trigger==.8 && Math.Abs(backend.Expires-3.6)<1e-8,"Rewired desired state uses both look axes and analog trigger with bounded source freshness");
@@ -121,7 +130,7 @@ static class RewiredInputChecks
             adapter=Adapter(()=>0);bool refused=false;try{adapter.Add();}catch(Exception){refused=true;}
             check(refused && !adapter.NeedsCleanup && Rewired.ReInput.Subscribers==0 && data.Maps.Count==0,"Public preflight refuses an incompatible or conflicting baseline before mutation: "+conflict);
         }
-        foreach(string change in new[]{"editor-entry","editor-container","runtime-entry-replaced","runtime-map","other-player","axis","axis-id","renamed-definition","duplicate-assignment","id-reuse"})
+        foreach(string change in new[]{"editor-entry","editor-container","runtime-entry-replaced","runtime-map","other-player","axis","axis-id","renamed-definition","duplicate-assignment","id-reuse","tag","axis-range","axis-invert","axis-deadzone","axis-zero","axis-min","axis-max","axis-no-calibration","axis-sensitivity-type","axis-sensitivity","curve-value","curve-weight","curve-wrap","curve-keys-cap","curve-reference","info-format","info-polling","info-special","info-deadzone","info-reference","identifier-name","identifier-positive","identifier-negative","identifier-id","identifier-type","identifier-compound"})
         {
             Rewired.ReInput.Reset();adapter=Adapter(()=>0);adapter.Add();data=Rewired.ReInput.Data;device=Rewired.ReInput.controllers.CustomControllers[0];
             object addition=new object();
@@ -131,6 +140,13 @@ static class RewiredInputChecks
             if(change=="runtime-map")Rewired.ReInput.players.SystemPlayer.controllers.maps.Content.Add(new Rewired.ControllerMap {controllerId=device.id});
             if(change=="other-player")Rewired.ReInput.players.AllPlayers[0].controllers.Controllers.Add(device);
             if(change=="axis")data.Definitions[0].AddAxis();if(change=="axis-id")data.Definitions[0].axes[0].Id=9;if(change=="renamed-definition")data.Definitions[0].name="game changed";
+            var axis=data.Definitions[0].axes[0];var identifier=data.Definitions[0].elementIdentifiers[0];
+            if(change=="tag")device.tag="game retagged";
+            if(change=="axis-range")axis.range=Rewired.AxisRange.Positive;if(change=="axis-invert")axis.invert=true;if(change=="axis-deadzone")axis.deadZone=.1f;if(change=="axis-zero")axis.zero=.1f;if(change=="axis-min")axis.min=-.9f;if(change=="axis-max")axis.max=.9f;if(change=="axis-no-calibration")axis.doNotCalibrateRange=true;if(change=="axis-sensitivity-type")axis.sensitivityType=1;if(change=="axis-sensitivity")axis.sensitivity=1.0000001f;
+            if(change=="curve-value" || change=="curve-weight") {var keys=axis.sensitivityCurve.keys;var key=keys[0];if(change=="curve-value")key.value=.4f;else key.inWeight=.4f;keys[0]=key;axis.sensitivityCurve.keys=keys;}
+            if(change=="curve-wrap")axis.sensitivityCurve.postWrapMode=1;if(change=="curve-keys-cap")axis.sensitivityCurve.keys=new UnityEngine.Keyframe[65];if(change=="curve-reference")axis.sensitivityCurve=new UnityEngine.AnimationCurve();
+            if(change=="info-format")axis.axisInfo.dataFormat=1;if(change=="info-polling")axis.axisInfo.excludeFromPolling=true;if(change=="info-special")axis.axisInfo.specialAxisType=1;if(change=="info-deadzone")axis.axisInfo.pollingDeadZone=.1f;if(change=="info-reference")axis.axisInfo=new Rewired.Data.Mapping.HardwareAxisInfo();
+            if(change=="identifier-name")identifier.name="changed";if(change=="identifier-positive")identifier.positiveName="changed";if(change=="identifier-negative")identifier.negativeName="changed";if(change=="identifier-id")identifier.id=99;if(change=="identifier-type")identifier.elementType=Rewired.ControllerElementType.Button;if(change=="identifier-compound")identifier.compoundElementType=1;
             if(change=="duplicate-assignment")Rewired.ReInput.players.SystemPlayer.controllers.Controllers.Add(device);
             if(change=="id-reuse")data.Definitions[0]=new Rewired.Data.CustomController_Editor {id=2};
             bool preserved=false;try {adapter.Remove();preserved=adapter.NeedsCleanup;}catch(Exception){preserved=adapter.NeedsCleanup;}
@@ -142,7 +158,13 @@ static class RewiredInputChecks
         check(adapter.NeedsCleanup && data.Deletes==0 && data.Maps[0].actionElementMaps.Count==4 && Rewired.ReInput.controllers.CustomControllers.Count==0,"Fresh proof after public device destruction preserves a game addition that appeared during cleanup");
         Rewired.ReInput.Reset();Rewired.ReInput.Data.AddEntryDuringMapCreate=true;adapter=Adapter(()=>0);try{adapter.Add();}catch(Exception){}adapter.Remove();check(adapter.NeedsCleanup && Rewired.ReInput.Data.Deletes==0 && Rewired.ReInput.Data.Maps[0].actionElementMaps.Count==1 && Rewired.ReInput.Data.Maps[0].actionElementMaps[0].actionId==99 && Rewired.ReInput.controllers.CustomControllers.Count==0,"Content already present when the new map returns is preserved without clearing it or creating a device");
         Rewired.ReInput.Reset();Rewired.ReInput.Data.ThrowAxisBefore=true;adapter=Adapter(()=>0);try{adapter.Add();}catch(Exception){}adapter.Remove();check(!adapter.NeedsCleanup && Rewired.ReInput.Data.Definitions.Count==0,"A known partial definition failure cleans the exact last proved owned definition");
+        Rewired.ReInput.Reset();Rewired.ReInput.Data.ThrowDefinitionAfter=true;adapter=Adapter(()=>0);try{adapter.Add();}catch(Exception){}adapter.Remove();check(adapter.NeedsCleanup && Rewired.ReInput.Data.Definitions.Count==1 && Rewired.ReInput.Data.Deletes==0,"A thrown void definition creation cannot prove origin from a single new ID and preserves its unknown outcome");
         Rewired.ReInput.Reset();Rewired.ReInput.controllers.ThrowCreateAfter=true;adapter=Adapter(()=>0);try{adapter.Add();}catch(Exception){}adapter.Remove();check(!adapter.NeedsCleanup && Rewired.ReInput.Data.Definitions.Count==0 && Rewired.ReInput.controllers.CustomControllers.Count==0,"Thrown creation after mutation recovers the unique definition-linked unassigned device and removes only proved owned content");
+        foreach(bool throws in new[]{false,true})
+        {
+            Rewired.ReInput.Reset();Rewired.ReInput.controllers.ForeignCreateNull=!throws;Rewired.ReInput.controllers.ForeignCreateThrow=throws;adapter=Adapter(()=>0);try{adapter.Add();}catch(Exception){}adapter.Remove();
+            check(adapter.NeedsCleanup && Rewired.ReInput.controllers.CustomControllers.Count==1 && Rewired.ReInput.controllers.CustomControllers[0].tag=="game-owned" && Rewired.ReInput.controllers.Destroys==0 && Rewired.ReInput.Data.Deletes==0 && Rewired.ReInput.Subscribers==0,"Null/throw creation never adopts a foreign same-definition device without the exact owned tag");
+        }
         Rewired.ReInput.Reset();adapter=Adapter(()=>0);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];adapter.SetDesired(.4,0,.8,1);Rewired.ReInput.controllers.Joysticks.Add(new Rewired.Controller(99));Rewired.ReInput.Pulse();check(adapter.FaultReason!="" && device.Values[0]==0 && device.Values[2]==0,"A new physical-controller conflict stops the public callback and releases owned axes");
         try{adapter.Remove();}catch(Exception){}check(Rewired.ReInput.controllers.Joysticks.Count==1 && Rewired.ReInput.Subscribers==0,"Cleanup never removes a newly arrived physical controller");Rewired.ReInput.Reset();
     }

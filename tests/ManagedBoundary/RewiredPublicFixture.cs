@@ -1,13 +1,22 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+namespace UnityEngine
+{
+    public struct Keyframe
+    {public float time {get;set;}public float value {get;set;}public float inTangent {get;set;}public float outTangent {get;set;}public int tangentMode {get;set;}public float inWeight {get;set;}public float outWeight {get;set;}public int weightedMode {get;set;}}
+    public class AnimationCurve
+    {public int preWrapMode {get;set;}public int postWrapMode {get;set;}public Keyframe[] keys {get;set;}=new[]{new Keyframe {time=-1,value=-1},new Keyframe {time=1,value=1}};public int length {get {return keys.Length;}}}
+}
 namespace Rewired
 {
+    public class ControllerElementIdentifier
+    {public int id {get;set;}public string name {get;set;}public string positiveName {get;set;}public string negativeName {get;set;}public ControllerElementType elementType {get;set;}public int compoundElementType {get;set;}}
     public enum ControllerType {Joystick=2,Custom=20}
     public enum ControllerElementType {Axis=0,Button=1}
     public enum Pole {Positive=0,Negative=1}
     public enum AxisRange {Full=0,Positive=1,Negative=2}
-    public class Controller {public readonly int id;public ControllerType type;public bool enabled=true;public Controller(int id) {this.id=id;}}
+    public class Controller {public readonly int id;public ControllerType type;public string tag {get;set;}public bool enabled=true;public Controller(int id) {this.id=id;}}
     public sealed class CustomController : Controller
     {
         public int sourceControllerId;
@@ -91,12 +100,12 @@ namespace Rewired
         {
             public List<CustomController> CustomControllers {get;private set;}
             public List<Controller> Joysticks {get;private set;}
-            public bool ThrowCreateAfter;
+            public bool ThrowCreateAfter,ForeignCreateNull,ForeignCreateThrow;
             public int Destroys;
             public Action DestroyAction;
             public ControllerHelper() {CustomControllers=new List<CustomController>();Joysticks=new List<Controller>();}
             public CustomController CreateCustomController(int definitionId,string tag)
-            {if(Data.GetCustomControllerById(definitionId)==null)return null;var controller=new CustomController(40,definitionId);CustomControllers.Add(controller);if(ThrowCreateAfter)throw new Exception("Creation after mutation");return controller;}
+            {if(Data.GetCustomControllerById(definitionId)==null)return null;var controller=new CustomController(40,definitionId){tag=ForeignCreateNull||ForeignCreateThrow?"game-owned":tag};CustomControllers.Add(controller);if(ThrowCreateAfter||ForeignCreateThrow)throw new Exception("Creation after mutation");return ForeignCreateNull?null:controller;}
             public bool DestroyCustomController(CustomController controller)
             {
                 ++Destroys;var all=new List<Player>(players.AllPlayers);all.Add(players.SystemPlayer);
@@ -118,10 +127,15 @@ namespace Rewired.Data
         public int buttonCount {get {return buttons.Count;}}
         public List<Axis> axes {get;private set;}=new List<Axis>();
         public List<object> buttons {get;private set;}=new List<object>();
-        public List<object> elementIdentifiers {get;private set;}=new List<object>();
+        public List<Rewired.ControllerElementIdentifier> elementIdentifiers {get;private set;}=new List<Rewired.ControllerElementIdentifier>();
         public bool ThrowAddAxisBefore;
-        public class Axis {public int Id;public string Name;}
-        public void AddAxis() {if(ThrowAddAxisBefore)throw new Exception("Axis mutation refused");var axis=new Axis {Id=axes.Count,Name="Axis"+axes.Count};axes.Add(axis);elementIdentifiers.Add(new object());}
+        public class Axis
+        {
+            public int elementIdentifierId;public string name;public Rewired.AxisRange range;public bool invert,doNotCalibrateRange;public float deadZone,zero,min=-1,max=1,sensitivity=1;public int sensitivityType;
+            public UnityEngine.AnimationCurve sensitivityCurve=new UnityEngine.AnimationCurve();public Mapping.HardwareAxisInfo axisInfo=new Mapping.HardwareAxisInfo();
+            public int Id {get {return elementIdentifierId;}set {elementIdentifierId=value;}}public string Name {get {return name;}set {name=value;}}
+        }
+        public void AddAxis() {if(ThrowAddAxisBefore)throw new Exception("Axis mutation refused");var axis=new Axis {Id=axes.Count,Name="Axis"+axes.Count};axes.Add(axis);elementIdentifiers.Add(new Rewired.ControllerElementIdentifier {id=axis.Id,name=axis.Name,positiveName=axis.Name+"+",negativeName=axis.Name+"-"});}
         public int[] GetAxisElementIdentifierIds() {return axes.ConvertAll(a=>a.Id).ToArray();}
         public string[] GetAxisNames() {return axes.ConvertAll(a=>a.Name).ToArray();}
     }
@@ -130,8 +144,8 @@ namespace Rewired.Data
         public List<CustomController_Editor> Definitions=new List<CustomController_Editor>();
         public List<Mapping.ControllerMap_Editor> Maps=new List<Mapping.ControllerMap_Editor>();
         public int Deletes;
-        public bool BadAction,ThrowAxisBefore,AddEntryDuringMapCreate;
-        public void AddCustomController() {Definitions.Add(new CustomController_Editor {id=2,ThrowAddAxisBefore=ThrowAxisBefore});}
+        public bool BadAction,ThrowAxisBefore,AddEntryDuringMapCreate,ThrowDefinitionAfter;
+        public void AddCustomController() {Definitions.Add(new CustomController_Editor {id=2,ThrowAddAxisBefore=ThrowAxisBefore});if(ThrowDefinitionAfter)throw new Exception("Unknown definition creation outcome");}
         public int[] GetCustomControllerIds() {return Definitions.ConvertAll(d=>d.id).ToArray();}
         public CustomController_Editor GetCustomControllerById(int id) {return Definitions.Find(d=>d.id==id);}
         public int GetCustomControllerIndex(int id) {return Definitions.FindIndex(d=>d.id==id);}
@@ -147,6 +161,8 @@ namespace Rewired.Data
 }
 namespace Rewired.Data.Mapping
 {
+    public class HardwareAxisInfo
+    {public int dataFormat {get;set;}public bool excludeFromPolling {get;set;}public int specialAxisType {get;set;}public float pollingDeadZone {get;set;}}
     public class ControllerMap_Editor
     {
         public int id,categoryId,layoutId,customControllerUid;
