@@ -4,6 +4,14 @@ using System.Text.Json;
 using System.Runtime.InteropServices;
 using Valve.VR;
 
+ProbeOptions options;
+try { options = ProbeOptions.Parse(args); }
+catch (ArgumentException error) {
+    Console.WriteLine(JsonSerializer.Serialize(new { error = error.Message }));
+    Environment.ExitCode = 2;
+    return;
+}
+
 var initError = EVRInitError.None;
 var vr = OpenVR.Init(ref initError, EVRApplicationType.VRApplication_Background);
 if (vr == null || initError != EVRInitError.None) {
@@ -11,6 +19,12 @@ if (vr == null || initError != EVRInitError.None) {
     Environment.Exit(1);
 }
 try {
+    if (options.Controllers) {
+        var snapshot = ControllerProbe.Capture(new OpenVrControllerReadback(vr, OpenVR.Compositor), options.ExpectedScenePid.Value);
+        Console.WriteLine(JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        Environment.ExitCode = snapshot.Status == "observed" ? 0 : 3;
+        return;
+    }
     string Property(ETrackedDeviceProperty property) {
         var value = new StringBuilder(256); var error = ETrackedPropertyError.TrackedProp_Success;
         vr.GetStringTrackedDeviceProperty(0, property, value, 256, ref error);
