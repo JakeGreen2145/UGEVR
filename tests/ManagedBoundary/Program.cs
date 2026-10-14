@@ -18,7 +18,7 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); InactiveCanvasChecks(); SessionChecks();
+        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); InactiveCanvasChecks(); SessionChecks(); KeyboardProbeChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void ProjectionChecks()
@@ -51,6 +51,97 @@ class Program
             try { EyeProjection.FromOpenVrRaw(bad[0],bad[1],bad[2],bad[3],bad[4],bad[5]); } catch(ArgumentException) { rejected=true; }
             Assert(rejected,"Invalid projection bounds fail before camera rendering");
         }
+    }
+    sealed class ProbeReader : IKeyboardEReader
+    {
+        public int Reads;
+        public string UnavailableReason { get; set; }
+        public bool ThrowOnRead;
+        public KeyboardESample Read()
+        {
+            ++Reads;
+            if (ThrowOnRead) throw new InvalidOperationException("controlled read failure");
+            return new KeyboardESample { DevicePresent=true,DeviceEnabled=true,Down=Reads==1,Press=Reads==1,Release=Reads==2 };
+        }
+    }
+    static void KeyboardProbeChecks()
+    {
+        string root=Path.Combine(Path.GetTempPath(),"ugevr-keyboard-probe-"+Guid.NewGuid().ToString("N"));
+        string evidence=Path.Combine(root,"UnityVR-evidence"); Directory.CreateDirectory(evidence);
+        string request=Path.Combine(evidence,"input-probe-request");
+        DateTime utc=new DateTime(2026,1,1,0,0,0,DateTimeKind.Utc);
+        string run=Guid.NewGuid().ToString("D");
+        var reader=new ProbeReader(); int factories=0;
+        var probe=new KeyboardEProbe(root,run,17,1000,delegate { ++factories; return reader; });
+        try
+        {
+            File.WriteAllText(request,"duration_seconds=4\n");
+            probe.Tick(false,true,utc,0);
+            Assert(factories==0 && reader.Reads==0 && File.Exists(request),"Input probe opt-out leaves sentinel untouched and executes no engine getter");
+            probe.Tick(true,false,utc,0);
+            Assert(factories==1 && probe.Active && reader.Reads==0,"Unfocused input probe starts a bounded window without observing keys");
+            probe.Tick(true,true,utc.AddSeconds(1),1000);
+            probe.Tick(true,true,utc.AddSeconds(2),2000);
+            probe.Tick(true,false,utc.AddSeconds(3),3000);
+            probe.Tick(true,true,utc.AddSeconds(4),4000);
+            string result=File.ReadAllText(Path.Combine(evidence,"input-probe-result-1.yaml"));
+            Assert(!probe.Active && reader.Reads==2 && probe.RequestsConsumed==1,"Four-second deadline excludes a fifth sample and clears reader state");
+            Assert(result.Contains("run_id: '"+run+"'") && result.Contains("process_id: 17") && result.Contains("monotonic_deadline_ticks: 4000") && result.Contains("frame_count: 4") && result.Contains("focused_frame_count: 2"),"Probe result correlates identity and actual bounded frame window");
+            Assert(result.Contains("down_seen: true") && result.Contains("press_seen: true") && result.Contains("release_seen: true") && result.Contains("input_receipt: 'unknown'") && result.Contains("application_focused_all_frames: false"),"Probe aggregates only focused fixed-key observations without claiming game receipt");
+            probe.Tick(true,true,utc.AddSeconds(5),5000);
+            Assert(reader.Reads==2 && factories==1,"Consumed request never replays and idle updates execute no input getters");
+            File.WriteAllText(request,"duration_seconds=4\nkey=Space\n");
+            probe.Tick(true,true,utc.AddSeconds(6),6000);
+            string invalid=File.ReadAllText(Path.Combine(evidence,"input-probe-result-2.yaml"));
+            Assert(invalid.Contains("status: 'invalid_request'") && factories==1,"Arbitrary key or field request is rejected before reader construction");
+            File.WriteAllText(request,"duration_seconds=4\n");
+            probe.Tick(true,true,utc.AddSeconds(7),7000);
+            int beforeCancel=reader.Reads;
+            probe.Cancel(utc.AddMilliseconds(7500),7500);
+            probe.Tick(true,true,utc.AddSeconds(8),8000);
+            Assert(!probe.Active && reader.Reads==beforeCancel && File.ReadAllText(Path.Combine(evidence,"input-probe-result-3.yaml")).Contains("status: 'cancelled'"),"Lifecycle cancellation writes partial result and stops getter calls");
+            File.WriteAllText(request,"duration_seconds=4\n");
+            probe.Tick(true,true,utc.AddSeconds(9),9000);
+            probe.Tick(false,true,utc.AddMilliseconds(9500),9500);
+            Assert(!probe.Active && File.ReadAllText(Path.Combine(evidence,"input-probe-result-4.yaml")).Contains("capture_opt_in_removed"),"Removing capture opt-in cancels the active window");
+            File.WriteAllText(request,"duration_seconds=4\n"); int count=reader.Reads;
+            probe.Tick(true,true,utc.AddSeconds(10),10000);
+            Assert(reader.Reads==count && File.Exists(request) && probe.RequestsConsumed==4,"Four-request run limit preserves later sentinel without observing input");
+            var restarted=new KeyboardEProbe(root,run,17,1000,delegate { ++factories; return reader; });
+            restarted.Tick(true,true,utc.AddSeconds(11),11000);
+            Assert(restarted.RequestsConsumed==4 && File.Exists(request) && reader.Reads==count,"Component restart preserves the same run's request limit");
+            Assert(Directory.GetFiles(evidence,"*.tmp").Length==0,"Atomic input result writes leave no temporary file");
+        }
+        finally { Directory.Delete(Path.GetFullPath(root),true); }
+
+        string unavailableRoot=Path.Combine(Path.GetTempPath(),"ugevr-keyboard-probe-unavailable-"+Guid.NewGuid().ToString("N"));
+        string unavailableEvidence=Path.Combine(unavailableRoot,"UnityVR-evidence"); Directory.CreateDirectory(unavailableEvidence);
+        try
+        {
+            var unavailableReader=new ProbeReader { UnavailableReason="assembly_not_loaded" };
+            var unavailable=new KeyboardEProbe(unavailableRoot,run,17,1000,delegate { return unavailableReader; });
+            File.WriteAllText(Path.Combine(unavailableEvidence,"input-probe-request"),"duration_seconds=4\n");
+            unavailable.Tick(true,true,utc,0);
+            Assert(!unavailable.Active && unavailableReader.Reads==0 && File.ReadAllText(Path.Combine(unavailableEvidence,"input-probe-result-1.yaml")).Contains("status: 'unavailable'"),"Missing InputSystem is a diagnostic result without key calls or VR failure");
+            var throwingReader=new ProbeReader { ThrowOnRead=true };
+            var throwing=new KeyboardEProbe(unavailableRoot,run,17,1000,delegate { return throwingReader; });
+            File.WriteAllText(Path.Combine(unavailableEvidence,"input-probe-request"),"duration_seconds=4\n");
+            throwing.Tick(true,true,utc,0);
+            Assert(!throwing.Active && throwingReader.Reads==1 && File.ReadAllText(Path.Combine(unavailableEvidence,"input-probe-result-2.yaml")).Contains("status: 'error'"),"Public getter failure ends only the diagnostic and records a bounded error");
+            int oversizedFactories=0;
+            var oversized=new KeyboardEProbe(unavailableRoot,run,17,1000,delegate { ++oversizedFactories; return throwingReader; });
+            File.WriteAllText(Path.Combine(unavailableEvidence,"input-probe-request"),new string('x',65536));
+            oversized.Tick(true,true,utc,0);
+            Assert(oversizedFactories==0 && File.ReadAllText(Path.Combine(unavailableEvidence,"input-probe-result-3.yaml")).Contains("status: 'invalid_request'"),"Oversized sentinel is rejected with a bounded read before engine getter resolution");
+            var malformed=new KeyboardEProbe(unavailableRoot,run,17,1000,delegate { ++oversizedFactories; return throwingReader; });
+            File.WriteAllText(Path.Combine(unavailableEvidence,"input-probe-request"),"duration_seconds=5");
+            malformed.Tick(true,true,utc,0);
+            Assert(oversizedFactories==0 && File.ReadAllText(Path.Combine(unavailableEvidence,"input-probe-result-4.yaml")).Contains("status: 'invalid_request'"),"Requested duration cannot extend the four-second window");
+        }
+        finally { Directory.Delete(Path.GetFullPath(unavailableRoot),true); }
+        Guid verified=new Guid("eb31f34a-975f-46d1-9e8a-f468772f04b5");
+        Assert(PublicKeyboardEReader.MatchesIdentity(new AssemblyName("Unity.InputSystem, Version=1.4.1.0"),verified),"Receiver identity accepts only verified InputSystem package artifact");
+        Assert(!PublicKeyboardEReader.MatchesIdentity(new AssemblyName("Unity.InputSystem, Version=1.5.0.0"),verified) && !PublicKeyboardEReader.MatchesIdentity(new AssemblyName("Game.InputManager, Version=1.4.1.0"),verified) && !PublicKeyboardEReader.MatchesIdentity(new AssemblyName("Unity.InputSystem, Version=1.4.1.0"),Guid.Empty),"Different version, game assembly or unverified artifact is unavailable");
     }
     static void TrackingReacquisitionChecks()
     {

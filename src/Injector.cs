@@ -35,6 +35,7 @@ public class Injector : BaseUnityPlugin
     readonly TrackingOrigin origin=new TrackingOrigin();
     readonly TrackingReacquisition tracking=new TrackingReacquisition(5);
     InjectorSession session;
+    KeyboardEProbe inputProbe;
     SessionCommand pending;
     MethodInfo getKeyDown;
     IntPtr renderEvent;
@@ -81,6 +82,8 @@ public class Injector : BaseUnityPlugin
             string directory=Environment.GetEnvironmentVariable("UGEVR_SESSION_DIRECTORY");
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
+            if (capturesEnabled && session.Available)
+                inputProbe=new KeyboardEProbe(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicKeyboardEReader.Create);
             var inputType=Type.GetType("UnityEngine.Input, UnityEngine.InputLegacyModule",false) ??
                 Type.GetType("UnityEngine.Input, UnityEngine.InputModule",false) ?? Type.GetType("UnityEngine.Input, UnityEngine",false);
             if (inputType!=null) getKeyDown=inputType.GetMethod("GetKeyDown",new[] { typeof(string) });
@@ -129,6 +132,7 @@ public class Injector : BaseUnityPlugin
     void Update()
     {
         ++updateCount;
+        if (!quitting && inputProbe!=null) inputProbe.Tick(capturesEnabled,Application.isFocused,DateTime.UtcNow,Stopwatch.GetTimestamp());
         if (session!=null)
         {
             SessionCommand command=session.Poll(DateTime.UtcNow);
@@ -495,6 +499,7 @@ public class Injector : BaseUnityPlugin
     void OnDestroy() { quitting=true; StopOwnedWork(); }
     void StopOwnedWork()
     {
+        if (inputProbe!=null) { inputProbe.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp()); inputProbe=null; }
         active=false; renderingActive=false; RestoreBackground();
         if(overlayCamera!=null) {overlayCamera.enabled=false;overlayCamera.targetTexture=null;}
         try { BeginDrain(); } catch (Exception error) { Logger.LogError("Final drain pending: "+error.Message); }
