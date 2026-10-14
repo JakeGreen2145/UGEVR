@@ -20,6 +20,7 @@ class Program
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
         MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); InactiveCanvasChecks(); SessionChecks(); KeyboardProbeChecks();
         UiLayoutDiagnosticChecks.Run(Assert);
+        CameraRestorationPoseChecks.Run(Assert);
         OverlayIsolationChecks.Run(Assert);
         HierarchyInventoryChecks.Run(Assert);
         NativeUiDiagnosticsChecks.Run(Assert);

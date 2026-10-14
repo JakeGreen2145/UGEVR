@@ -7,6 +7,7 @@ namespace Ugevr
     public sealed class CameraState : IDisposable
     {
         readonly Camera camera;
+        readonly CameraRestorationPoseRecord diagnostic;
         readonly Vector3 position;
         readonly Quaternion rotation;
         readonly RenderTexture target;
@@ -18,10 +19,13 @@ namespace Ugevr
         readonly Color background;
         readonly CameraClearFlags clearFlags;
         bool restored;
-        public CameraState(Camera camera)
+        public CameraState(Camera camera) : this(camera,null) {}
+        public CameraState(Camera camera,CameraRestorationPoseRecord diagnostic)
         {
             this.camera=camera;
+            this.diagnostic=diagnostic;
             position=camera.transform.position; rotation=camera.transform.rotation;
+            if(diagnostic!=null)diagnostic.ObserveSavedWorld(position,rotation);
             target=camera.targetTexture; projection=camera.projectionMatrix;
             view=camera.worldToCameraMatrix; rect=camera.rect;
             occlusion=camera.useOcclusionCulling; background=camera.backgroundColor;
@@ -54,6 +58,7 @@ namespace Ugevr
             camera.backgroundColor=background; camera.clearFlags=clearFlags;
             if (automaticProjection) camera.ResetProjectionMatrix(); else camera.projectionMatrix=projection;
             if (automaticView) camera.ResetWorldToCameraMatrix(); else camera.worldToCameraMatrix=view;
+            if(diagnostic!=null)diagnostic.Observe("after_camera_state_dispose");
         }
         static bool Equal(Matrix4x4 a,Matrix4x4 b)
         {

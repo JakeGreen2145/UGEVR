@@ -49,6 +49,7 @@ public class Injector : BaseUnityPlugin
     RewiredPairSourceObservation rewiredPairSourceObservation;
     double nextRewiredPairSourceReport;
     bool captureRewiredPairSourceDetails;
+    CameraRestorationPoseDiagnostics cameraPoseDiagnostics;
     bool captureInputIdentityDetails;
     ControllerIdentityCapture inputIdentityCapture;
     double nextInputReport;
@@ -95,6 +96,7 @@ public class Injector : BaseUnityPlugin
             unitsPerMeter=Config.Bind("Tracking","UnitsPerMeter",1f,"Game world units per physical meter.").Value;
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
+            bool captureCameraRestorationPose=Config.Bind("Diagnostics","CaptureCameraRestorationPoseDetails",false,"Private passive transform evidence for at most eight capture requests admitted before an eye pair. Requires CaptureImages and a controller session. Records world/local pose and parent instance identity; does not change restoration or its aggregate comparison.").Value && capturesEnabled;
             captureNativeUiState=Config.Bind("Diagnostics","CaptureNativeUiState",false,"Opt-in cached CanvasRenderer cull/clipping/alpha and render-context observations only for capture requests admitted before the eye pair. No native UI state is restored; requires CaptureImages.").Value && capturesEnabled;
             nativeUiRendererLimit=Config.Bind("Diagnostics","NativeUiRendererLimit",NativeUiStateDiagnostics.DefaultRendererLimit,"Explicit native UI diagnostic renderer bound 1024..8192; default 1024. Identity-query occurrences are bounded to eight times this limit. Validated only when CaptureNativeUiState and CaptureImages are enabled.").Value;
             nativeUiRendererLimit=NativeUiStateDiagnostics.ResolveRendererLimit(captureNativeUiState,capturesEnabled,nativeUiRendererLimit);
@@ -162,6 +164,7 @@ public class Injector : BaseUnityPlugin
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
             if(captureInputIdentityDetails && gamepadBinding!=null && gamepadBinding.SupportsIdentityCapture && session.Available) inputIdentityCapture=new ControllerIdentityCapture(evidenceDir);
+            if(captureCameraRestorationPose && session.Available)cameraPoseDiagnostics=new CameraRestorationPoseDiagnostics(evidenceDir);
             if(captureRewiredSourceDetails && session.Available)
             {
                 try {rewiredSourceObservation=new RewiredSourceObservation(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,delegate {return RewiredSourceReader.Read(system);});}
@@ -467,6 +470,9 @@ public class Injector : BaseUnityPlugin
         var beforeRenderProjection=new Matrix4x4[2];
         string request=Path.Combine(evidenceDir,"capture-request");
         CaptureRequestAdmission captureAdmission=CaptureRequestAdmission.BeforePair(captureNativeUiState,capturesEnabled,captureOverlayCanvases,request);
+        CameraRestorationPoseRecord cameraPoseDetails=cameraPoseDiagnostics==null?null:cameraPoseDiagnostics.Begin(true,request,camera,frameId,basePosition,baseRotation,generation,rendered+1);
+        try
+        {
         OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureAdmission.CaptureNativeUiState,nativeUiRendererLimit):null;
         if(overlays!=null && capturesEnabled) overlays.EnableWallTiming();
         if(overlays!=null) overlays.SetDesktopLayoutFlush(desktopFlush);
@@ -486,7 +492,7 @@ public class Injector : BaseUnityPlugin
         {
         if(overlays!=null && overlays.IsolatedMask!=0) currentContext.AllowUiCamera(overlayCamera);
         if(currentContext.Conflict) throw new InvalidOperationException("Camera current experiment failed before borrow: "+currentContext.Outcome);
-        using (var restore=new CameraState(camera))
+        using (var restore=new CameraState(camera,cameraPoseDetails))
         using (overlays)
         {
             for (int i=0;i<2;++i)
@@ -519,6 +525,7 @@ public class Injector : BaseUnityPlugin
                 }
                 if(overlays!=null) overlays.ValidateInactiveCanvases("after UI render");
                 if (overlays!=null) overlays.RecordAfterRender(i);
+                if(cameraPoseDetails!=null)cameraPoseDetails.Observe(i==0?"after_left_render":"after_right_render");
             }
         }
         }
@@ -529,10 +536,12 @@ public class Injector : BaseUnityPlugin
                 if(overlays!=null) overlays.Dispose();
                 if(overlayCamera!=null) overlayCamera.targetTexture=null;
                 if(overlays!=null) overlays.RebuildRestoredGeometry();
+                if(cameraPoseDetails!=null)cameraPoseDetails.Observe("after_canvas_flush");
             }
             finally
             {
                 currentContext.Dispose();
+                if(cameraPoseDetails!=null)cameraPoseDetails.Observe("after_current_context");
                 if(overlays!=null) overlays.SetCurrentCameraRestoration(currentContext);
                 if(currentContext.Conflict) Logger.LogError("CAMERA_CURRENT_OWNERSHIP_CONFLICT "+currentContext.Outcome+"; foreign state preserved or restoration unverified.");
             }
@@ -556,8 +565,19 @@ public class Injector : BaseUnityPlugin
         phase=2; phaseStarted=Time.realtimeSinceStartup; ++rendered;
         if (captureAdmission.TryConsume(request))
         {
-            CaptureEye(0); CaptureEye(1);
-            WriteCapture(head,anchor,actualEyes,camera.transform.position==basePosition && camera.transform.rotation==baseRotation);
+            if(cameraPoseDetails!=null)cameraPoseDetails.CaptureRequestConsumed=true;
+            try
+            {
+                if(cameraPoseDetails!=null)cameraPoseDetails.EyeCaptureAttempts=1;
+                CaptureEye(0);
+                if(cameraPoseDetails!=null)cameraPoseDetails.EyeCaptureAttempts=2;
+                CaptureEye(1);
+                if(cameraPoseDetails!=null)cameraPoseDetails.EyeCapturesReturned=true;
+            }
+            finally {if(cameraPoseDetails!=null)cameraPoseDetails.Observe("after_eye_captures");}
+            bool gameCameraRestored=camera.transform.position==basePosition && camera.transform.rotation==baseRotation;
+            if(cameraPoseDetails!=null)cameraPoseDetails.ExistingGameCameraRestored=gameCameraRestored;
+            WriteCapture(head,anchor,actualEyes,gameCameraRestored);
             try { CameraDiagnostics.Write(evidenceDir,rendered,system,camera,beforeRenderProjection,overlays==null?null:overlays.DiagnosticJson()); }
             catch (Exception diagnosticError) { Logger.LogWarning("Capture diagnostics unavailable: "+diagnosticError.Message); }
             RequestMirrorCapture(Path.Combine(evidenceDir,"compositor-left-"+rendered+".bmp"));
@@ -565,6 +585,15 @@ public class Injector : BaseUnityPlugin
         }
         Report("VR_FRAME rendered="+rendered+" submitted="+submittedPairs+" frame="+frameId+" generation="+generation+
             (overlays==null?"":" uiOverlayRoots="+overlays.SelectedCount+" uiPlane="+overlays.PlaneDistance+" excludedUILayers="+(overlays.OverlayLayerMask & ~overlays.AppliedMask)));
+        }
+        finally
+        {
+            if(cameraPoseDetails!=null)
+            {
+                cameraPoseDetails.Publish();
+                Logger.LogInfo("CAMERA_RESTORATION_POSE_DIAGNOSTIC attempts="+cameraPoseDiagnostics.Attempts+" error="+cameraPoseDiagnostics.LastError);
+            }
+        }
     }
 
     void HandleTrackingInterruption(PoseCallbackDisposition disposition)
