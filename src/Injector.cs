@@ -36,6 +36,7 @@ public class Injector : BaseUnityPlugin
     readonly TrackingReacquisition tracking=new TrackingReacquisition(5);
     InjectorSession session;
     KeyboardEProbe inputProbe;
+    HierarchyInventoryProbe hierarchyProbe;
     EngineEInputExperiment engineInputExperiment;
     SessionCommand pending;
     MethodInfo getKeyDown;
@@ -53,6 +54,7 @@ public class Injector : BaseUnityPlugin
     int overlayIsolationLayer=-1,layerFailureCaptures;
     int overlaySceneScanLimit=OverlayLayerInventory.DefaultScanLimit;
     bool captureLayoutInputs;
+    bool compareHierarchyInventory;
     bool flushDesktopLayoutBeforeBorrow;
     string layoutInputRootRectIds;
     Camera overlayCamera;
@@ -76,6 +78,7 @@ public class Injector : BaseUnityPlugin
             unitsPerMeter=Config.Bind("Tracking","UnitsPerMeter",1f,"Game world units per physical meter.").Value;
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
+            compareHierarchyInventory=Config.Bind("Diagnostics","CompareHierarchyInventory",false,"Diagnostic only: permit at most two explicitly requested sequential Resources-versus-scene hierarchy comparisons before an eye pair. Requires CaptureImages and controller session identity; does not replace layer guards.").Value && capturesEnabled;
             allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
             captureLayoutInputs=Config.Bind("Diagnostics","CaptureLayoutInputs",false,"Opt-in bounded cached text/layout input snapshots for UI restoration mismatches. Requires CaptureImages; no preferred-size, generator or game getters are queried.").Value && capturesEnabled;
             layoutInputRootRectIds=Config.Bind("Diagnostics","LayoutInputRootRectIds","","Optional comma-separated runtime RectTransform IDs selecting diagnostic subtrees plus up to eight ancestors. Empty retains full coverage. Runtime IDs require observed name/parent validation each launch.").Value;
@@ -100,6 +103,8 @@ public class Injector : BaseUnityPlugin
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
             if (capturesEnabled && session.Available)
                 inputProbe=new KeyboardEProbe(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicKeyboardEReader.Create);
+            if(compareHierarchyInventory && session.Available)
+                hierarchyProbe=new HierarchyInventoryProbe(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id);
             if(allowEngineInputExperiment && session.Available)
                 engineInputExperiment=new EngineEInputExperiment(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicEngineEKeyboard.Create,Stopwatch.GetTimestamp);
             var inputType=Type.GetType("UnityEngine.Input, UnityEngine.InputLegacyModule",false) ??
@@ -307,6 +312,7 @@ public class Injector : BaseUnityPlugin
         }
         if (session!=null && session.LastError.StartsWith("camera: ")) session.LastError="";
         if (camera!=lastCamera) { lastCamera=camera; Logger.LogInfo("CAMERA selected="+camera.name+" depth="+camera.depth); }
+        if(hierarchyProbe!=null) hierarchyProbe.Tick(capturesEnabled && compareHierarchyInventory,gameObject,Time.frameCount,DateTime.UtcNow,Stopwatch.GetTimestamp());
         Vector3 basePosition=camera.transform.position;
         Quaternion baseRotation=camera.transform.rotation;
         RigidPose anchor=new RigidPose(Position(basePosition),Rotation(baseRotation));

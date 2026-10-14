@@ -1,3 +1,4 @@
+using UnityEngine.SceneManagement;
 // Only the members borrowed by CameraState are modeled. This fixture verifies
 // restoration, not native Unity object destruction or Camera.Render behavior.
 namespace UnityEngine
@@ -10,6 +11,7 @@ namespace UnityEngine
         public int? InstanceIdOverride;
         public int InstanceIdQueries;
         public string name="fixture";
+        public HideFlags hideFlags;
         public int GetInstanceID() { ++InstanceIdQueries;return InstanceIdOverride ?? id; }
         public static Object[] FindObjectsOfType(System.Type type) { return type==typeof(Canvas)?Canvas.Instances.ToArray():new Object[0]; }
         public static bool operator ==(Object a,Object b) { return (System.Object.ReferenceEquals(a,null) || a.Destroyed)?(System.Object.ReferenceEquals(b,null) || b.Destroyed):System.Object.ReferenceEquals(a,b); }
@@ -17,7 +19,7 @@ namespace UnityEngine
         public override bool Equals(object other) { return System.Object.ReferenceEquals(this,other); }
         public override int GetHashCode() { return id; }
     }
-    public struct Scene {public bool Valid,isLoaded;public bool IsValid() {return Valid;}}
+    public enum HideFlags {None=0,HideInHierarchy=1,DontSave=52,HideAndDontSave=61}
     public class GameObject : Object
     {
         int savedLayer;
@@ -28,6 +30,16 @@ namespace UnityEngine
         public int SceneQueries;
         public Scene scene {get {++SceneQueries;return savedScene;} set {savedScene=value;}}
         public bool activeInHierarchy=true;
+        public Transform[] HierarchyTransforms=new Transform[0];
+        public int HierarchyQueries;
+        public bool? LastIncludeInactive;
+        public System.Action HierarchyQueryAction;
+        public T[] GetComponentsInChildren<T>(bool includeInactive)
+        {
+            ++HierarchyQueries;LastIncludeInactive=includeInactive;if(HierarchyQueryAction!=null) HierarchyQueryAction();
+            if(typeof(T)!=typeof(Transform)) throw new System.NotSupportedException();
+            return (T[])(object)HierarchyTransforms;
+        }
     }
     public class Component : Object
     {
@@ -160,4 +172,25 @@ namespace UnityEngine
         public void CopyFrom(Camera source) {targetTexture=source.targetTexture;projectionMatrix=source.projectionMatrix;worldToCameraMatrix=source.worldToCameraMatrix;rect=source.rect;cullingMask=source.cullingMask;clearFlags=source.clearFlags;nearClipPlane=source.nearClipPlane;farClipPlane=source.farClipPlane;}
     }
     public enum RenderingPath {Forward,DeferredShading}
+}
+namespace UnityEngine.SceneManagement
+{
+    public struct Scene
+    {
+        public bool Valid,isLoaded;
+        public int handle;
+        public UnityEngine.GameObject[] Roots;
+        public System.Action RootsQueryAction;
+        public bool IsValid() {return Valid;}
+        public override int GetHashCode() {return handle;}
+        public override bool Equals(object other) {return other is Scene && ((Scene)other).handle==handle;}
+        public int rootCount {get {return Roots==null?0:Roots.Length;}}
+        public UnityEngine.GameObject[] GetRootGameObjects() {if(RootsQueryAction!=null) RootsQueryAction();return Roots??new UnityEngine.GameObject[0];}
+    }
+    public static class SceneManager
+    {
+        public static System.Collections.Generic.List<Scene> Scenes=new System.Collections.Generic.List<Scene>();
+        public static int sceneCount {get {return Scenes.Count;}}
+        public static Scene GetSceneAt(int index) {return Scenes[index];}
+    }
 }

@@ -21,6 +21,7 @@ class Program
         MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); InactiveCanvasChecks(); SessionChecks(); KeyboardProbeChecks();
         UiLayoutDiagnosticChecks.Run(Assert);
         OverlayIsolationChecks.Run(Assert);
+        HierarchyInventoryChecks.Run(Assert);
         EngineInputExperimentChecks.Run(Assert);
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
