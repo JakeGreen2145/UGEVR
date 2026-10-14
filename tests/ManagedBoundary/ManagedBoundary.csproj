@@ -23,6 +23,7 @@
     <Compile Include="../../src/OpenVrLegacyRightReader.cs" Link="OpenVrLegacyRightReader.cs" />
     <Compile Include="../../src/RewiredInputDiagnostic.cs" Link="RewiredInputDiagnostic.cs" />
     <Compile Include="../../src/RewiredFailureDiagnostics.cs" Link="RewiredFailureDiagnostics.cs" />
+    <Compile Include="../../src/RewiredActionReadback.cs" Link="RewiredActionReadback.cs" />
     <Compile Include="../../src/PublicOwnedRewiredInput.cs" Link="PublicOwnedRewiredInput.cs" />
     <Compile Include="../../src/OpenVrRewiredRightReader.cs" Link="OpenVrRewiredRightReader.cs" />
     <Compile Include="../../src/RewiredSourceObservation.cs" Link="RewiredSourceObservation.cs" />

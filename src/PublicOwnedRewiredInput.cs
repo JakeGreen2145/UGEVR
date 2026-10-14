@@ -7,12 +7,13 @@ using System.IO;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Xml;
 using UnityEngine;
 
 namespace Ugevr
 {
     // Experimental profile for one observed build. All target members invoked here are public.
-    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics,IRewiredRuntimeMonitor
+    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics,IRewiredRuntimeMonitor,IRewiredActionReadback
     {
         public const string Profile="firewatch-2017-rewired-right-stick-trigger-v1";
         public const string ObservedTriggerProfile="firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1";
@@ -23,7 +24,7 @@ namespace Ugevr
         readonly Func<bool> focused;
         readonly string tag="UGEVR-Rewired-"+Guid.NewGuid().ToString("N");
         readonly Dictionary<string,MethodInfo> methods=new Dictionary<string,MethodInfo>();
-        readonly Type hub,dataType,definitionType,axisType,identifierType,runtimeAxesType,calibrationType,editorMapType,controllerType,controllerBase,controllerEnum,elementEnum,poleEnum,rangeEnum,entryType;
+        readonly Type hub,dataType,definitionType,axisType,identifierType,runtimeAxesType,calibrationType,editorMapType,controllerType,controllerBase,runtimeMapType,controllerEnum,elementEnum,poleEnum,rangeEnum,entryType;
         readonly object manager,data,global,players,player,playerControllers,playerMaps;
         readonly EventInfo inputUpdate;
         readonly bool pinned;
@@ -56,6 +57,7 @@ namespace Ugevr
             axisType=assembly.GetType("Rewired.Data.CustomController_Editor+Axis",true);identifierType=assembly.GetType("Rewired.ControllerElementIdentifier",true);
             runtimeAxesType=assembly.GetType("Rewired.ControllerWithAxes",true);calibrationType=assembly.GetType("Rewired.CalibrationMap",true);
             controllerType=assembly.GetType("Rewired.CustomController",true);controllerBase=assembly.GetType("Rewired.Controller",true);
+            runtimeMapType=assembly.GetType("Rewired.ControllerMap",true);
             controllerEnum=assembly.GetType("Rewired.ControllerType",true);elementEnum=assembly.GetType("Rewired.ControllerElementType",true);
             poleEnum=assembly.GetType("Rewired.Pole",true);rangeEnum=assembly.GetType("Rewired.AxisRange",true);entryType=assembly.GetType("Rewired.ActionElementMap",true);
             if(Convert.ToInt32(Enum.Parse(controllerEnum,"Custom"))!=20 || Convert.ToInt32(Enum.Parse(elementEnum,"Axis"))!=0) throw new InvalidOperationException("Enum profile changed.");
@@ -81,6 +83,8 @@ namespace Ugevr
             M(playerMaps.GetType(),"LoadMap",0x06002386,typeof(void),controllerEnum,typeof(int),typeof(int),typeof(int));
             M(controllerType,"SetAxisValue",0x0600088e,typeof(void),typeof(int),typeof(float));
             M(controllerBase,"get_tag",0x06000728,typeof(string));
+            M(controllerBase,"get_enabled",0x06000724,typeof(bool));M(runtimeMapType,"get_enabled",0x06001e2b,typeof(bool));
+            if(M(runtimeMapType,"set_enabled",0x06001e2c,typeof(void),typeof(bool)).IsVirtual) throw new RewiredOperationException("resolve_runtime_map_enabled","virtual_map_enabled_setter_unsupported");
             M(runtimeAxesType,"GetAxisIndexById",0x06000836,typeof(int),typeof(int));M(calibrationType,"ToXmlString",0x06001cb5,typeof(string));
             string[] axisFields={"elementIdentifierId","name","range","invert","deadZone","zero","min","max","doNotCalibrateRange","sensitivityType","sensitivity","sensitivityCurve","axisInfo"};
             int[] axisTokens={0x040007aa,0x040007ab,0x040007ac,0x040007ad,0x040007ae,0x040007af,0x040007b0,0x040007b1,0x040007b2,0x040007b3,0x040007b4,0x040007b5,0x040007b6};
@@ -131,7 +135,16 @@ namespace Ugevr
         {
             string key=owner.FullName+"/"+token.ToString("x8",CultureInfo.InvariantCulture);MethodInfo method;
             if(methods.TryGetValue(key,out method)) return method;
-            method=owner.GetMethod(name,BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly,null,arguments,null);
+            if(name=="GetLastActiveController")
+            {
+                // The shipped helper also exposes a generic zero-argument overload.
+                // Select only the fixed nongeneric shape instead of ambiguous GetMethod.
+                method=null;var candidates=owner.GetMethods(BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly);
+                if(candidates.Length>128) throw new RewiredOperationException("resolve_public_method_"+name,"public_method_query_bound_exceeded");
+                foreach(var candidate in candidates) if(PublicMethodShape(candidate,owner,name,result,arguments) && (!pinned || candidate.MetadataToken==token))
+                {if(method!=null) throw new RewiredOperationException("resolve_public_method_"+name,"public_method_shape_ambiguous");method=candidate;}
+            }
+            else method=owner.GetMethod(name,BindingFlags.Public|BindingFlags.Instance|BindingFlags.DeclaredOnly,null,arguments,null);
             if(!PublicMethodShape(method,owner,name,result,arguments) || (pinned && method.MetadataToken!=token)) throw new RewiredOperationException("resolve_public_method_"+name,"public_method_shape_or_token_mismatch");
             methods.Add(key,method);return method;
         }
@@ -241,13 +254,30 @@ namespace Ugevr
             }
             if(owned==null) throw new InvalidOperationException("Controller creation unavailable.");
             ownedId=Convert.ToInt32(PublicValue(owned,"id"));
+            addStage="require_owned_controller_enabled";
+            if(!OwnedEnabled()) throw new RewiredOperationException(addStage,"owned_controller_disabled");
             addStage="assign_system_player";
             Call(playerControllers,"AddController",0x0600225b,typeof(void),new[]{controllerBase,typeof(bool)},owned,false);
             object[] maps=OwnedMaps(player);
             if(maps.Length==0) {Call(playerMaps,"LoadMap",0x06002386,typeof(void),new[]{controllerEnum,typeof(int),typeof(int),typeof(int)},Enum.Parse(controllerEnum,"Custom"),ownedId,0,0);maps=OwnedMaps(player);}
             if(maps.Length!=1) throw new InvalidOperationException("Owned runtime map admission unknown.");runtimeMap=maps[0];
+            addStage="activate_owned_runtime_map";
+            CheckCurrentContext();
+            if(!RewiredOwnershipSnapshot.Same(definitionExpected,DefinitionSnapshot())) throw new RewiredOperationException(addStage,"definition_changed_before_map_enable");
+            RequireRuntimeMapAdmission();var before=Snapshot(true);var beforeFull=Snapshot();expected=beforeFull;
+            if(!MapEnabled())
+            {
+                // Pinned nonvirtual setter is only _enabled=value; ret. Normal return
+                // and a full proof excluding this single intended field are required.
+                M(runtimeMapType,"set_enabled",0x06001e2c,typeof(void),typeof(bool)).Invoke(runtimeMap,new object[]{true});
+                if(!MapEnabled()) throw new RewiredOperationException(addStage,"owned_map_enable_readback_false");
+                if(!RewiredOwnershipSnapshot.Same(before,Snapshot(true))) throw new RewiredOperationException(addStage,"owned_content_changed_during_map_enable");
+            }
+            else if(!RewiredOwnershipSnapshot.Same(beforeFull,Snapshot())) throw new RewiredOperationException(addStage,"owned_content_changed_before_map_enable");
+            var activated=Snapshot();
+            if(!OwnedEnabled() || !MapEnabled() || !RewiredOwnershipSnapshot.Same(before,Snapshot(true))) throw new RewiredOperationException(addStage,"owned_map_final_activation_unconfirmed");
             addStage="snapshot_runtime_and_subscribe";
-            expected=Snapshot();heartbeatStart=lastMonitorAt=clock();expires=heartbeatStart+.5;handler=OnInputUpdate;subscribed=true;inputUpdate.AddEventHandler(null,handler);CleanupStatus="owned_active";
+            expected=activated;heartbeatStart=lastMonitorAt=clock();expires=heartbeatStart+.5;handler=OnInputUpdate;subscribed=true;inputUpdate.AddEventHandler(null,handler);CleanupStatus="owned_active";
         }
         static bool ContainsId(int[] ids,int id) {if(ids==null || ids.Length>64) throw new InvalidOperationException("Identifier bound exceeded.");foreach(int value in ids) if(value==id) return true;return false;}
         bool DeviceTagged(object device)
@@ -342,7 +372,34 @@ namespace Ugevr
             if(getter==null || (pinned && getter.MetadataToken!=0x06002390)) throw new InvalidOperationException("Map getter changed.");var result=new List<object>();
             foreach(object map in Bounded(getter.Invoke(maps,null),1024)) if(Convert.ToInt32(PublicValue(map,"controllerType"))==20 && Convert.ToInt32(PublicValue(map,"controllerId"))==ownedId) result.Add(map);return result.ToArray();
         }
-        RewiredOwnershipSnapshot Snapshot()
+        bool OwnedEnabled() {return (bool)M(controllerBase,"get_enabled",0x06000724,typeof(bool)).Invoke(owned,null);}
+        bool MapEnabled() {return (bool)M(runtimeMapType,"get_enabled",0x06001e2b,typeof(bool)).Invoke(runtimeMap,null);}
+        void RequireRuntimeMapAdmission()
+        {
+            if(runtimeMap.GetType()!=hub.Assembly.GetType("Rewired.CustomControllerMap",true) || Convert.ToInt32(PublicValue(runtimeMap,"controllerType"))!=20 || Convert.ToInt32(PublicValue(runtimeMap,"controllerId"))!=ownedId || Convert.ToInt32(PublicValue(runtimeMap,"categoryId"))!=0 || Convert.ToInt32(PublicValue(runtimeMap,"layoutId"))!=0 || Convert.ToInt32(PublicValue(runtimeMap,"sourceMapId"))!=Convert.ToInt32(PublicValue(editorMap,"id")))
+                throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_identity_unexpected_preserved");
+            var entries=Bounded(PublicValue(runtimeMap,"AllMaps"),16);if(entries.Length!=3) throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_entries_unexpected_preserved");
+            int[] actions={31,32,36};
+            for(int i=0;i<3;++i)
+                if(Convert.ToInt32(PublicValue(entries[i],"actionId"))!=actions[i] || Convert.ToInt32(PublicValue(entries[i],"elementIdentifierId"))!=axes[i] || Convert.ToInt32(PublicValue(entries[i],"elementType"))!=0 || Convert.ToInt32(PublicValue(entries[i],"axisRange"))!=0 || Convert.ToInt32(PublicValue(entries[i],"axisContribution"))!=0 || (bool)PublicValue(entries[i],"invert"))
+                    throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_entry_profile_unexpected_preserved");
+        }
+        static string MapXmlWithoutEnabled(string xml,bool enabled)
+        {
+            if(String.IsNullOrEmpty(xml) || xml.Length>65536) throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_xml_bound_or_empty");
+            var document=new XmlDocument();document.XmlResolver=null;
+            var settings=new XmlReaderSettings {XmlResolver=null};
+#if NET8_0_OR_GREATER
+            settings.DtdProcessing=DtdProcessing.Prohibit;
+#else
+            settings.ProhibitDtd=true; // net35 has no DtdProcessing property.
+#endif
+            using(var reader=XmlReader.Create(new StringReader(xml),settings)) document.Load(reader);
+            var attribute=document.DocumentElement==null?null:document.DocumentElement.GetAttributeNode("enabled");bool serialized;
+            if(attribute==null || !Boolean.TryParse(attribute.Value,out serialized) || serialized!=enabled) throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_xml_enabled_disagreement");
+            attribute.Value="owned_enabled_transition";return document.OuterXml;
+        }
+        RewiredOwnershipSnapshot Snapshot(bool excludeMapEnabled=false)
         {
             if(Bounded(PublicValue(global,"Joysticks"),64).Length!=0) throw new InvalidOperationException("Physical joystick conflict appeared.");
             RewiredOwnershipSnapshot original=DefinitionSnapshot();var nodes=new List<object>(original.Nodes);var text=new StringBuilder(original.Values);
@@ -354,13 +411,32 @@ namespace Ugevr
                 if(!System.Object.ReferenceEquals(candidate,player)) {if(assigned!=0 || maps.Length!=0) throw new InvalidOperationException("Game added an assignment/map to owned device.");continue;}
                 if(assigned!=1 || maps.Length!=1 || (runtimeMap!=null && !System.Object.ReferenceEquals(maps[0],runtimeMap))) throw new InvalidOperationException("Owned assignment/map changed.");
                 nodes.Add(candidate);nodes.Add(maps[0]);MethodInfo serialize=maps[0].GetType().GetMethod("ToXmlString",Type.EmptyTypes);
-                if(serialize==null || !serialize.IsPublic || serialize.ReturnType!=typeof(string) || (pinned && serialize.MetadataToken!=0x06001ec0)) throw new InvalidOperationException("Public map serialization unavailable.");string xml=(string)serialize.Invoke(maps[0],null);if(String.IsNullOrEmpty(xml)) throw new InvalidOperationException("Runtime map serialization failed or unavailable.");Value(text,xml);
+                if(serialize==null || !serialize.IsPublic || serialize.ReturnType!=typeof(string) || (pinned && serialize.MetadataToken!=0x06001ec0)) throw new InvalidOperationException("Public map serialization unavailable.");string xml=(string)serialize.Invoke(maps[0],null);if(String.IsNullOrEmpty(xml)) throw new InvalidOperationException("Runtime map serialization failed or unavailable.");Value(text,excludeMapEnabled?MapXmlWithoutEnabled(xml,MapEnabled()):xml);
                 object runtimeEntriesCollection=PublicValue(maps[0],"AllMaps");object[] runtimeEntries=Bounded(runtimeEntriesCollection,16);if(runtimeEntries.Length!=3) throw new InvalidOperationException("Runtime map entries changed.");nodes.Add(runtimeEntriesCollection);nodes.AddRange(runtimeEntries);
             }
             return new RewiredOwnershipSnapshot {Nodes=nodes.ToArray(),Values=text.ToString()};
         }
         public void SetDesired(double x,double y,double trigger,double expires)
         {CheckThread();this.x=x;this.y=y;this.trigger=trigger;this.expires=expires;}
+        bool? ReadbackBool(RewiredActionReadback result,int bit,Func<bool> read)
+        {try {return read();}catch {result.FailedFields|=1u<<bit;return null;}}
+        double? ReadbackAxis(RewiredActionReadback result,int bit,Func<float> read)
+        {try {float value=read();if(Single.IsNaN(value) || Single.IsInfinity(value)) {result.FailedFields|=1u<<bit;result.NonfiniteFields|=1u<<bit;return null;}return value;}catch {result.FailedFields|=1u<<bit;return null;}}
+        public RewiredActionReadback CaptureReadback()
+        {
+            var result=new RewiredActionReadback();
+            try {CheckThread();CheckCurrentContext();if(owned==null || deviceRemoved || runtimeMap==null) throw new InvalidOperationException();}
+            catch {result.FailedFields=511;return result;}
+            result.MapEnabled=ReadbackBool(result,0,MapEnabled);result.ControllerEnabled=ReadbackBool(result,1,OwnedEnabled);
+            result.OwnedAxis0=ReadbackAxis(result,2,delegate {return (float)M(runtimeAxesType,"GetAxisRaw",0x06000839,typeof(float),typeof(int)).Invoke(owned,new object[]{0});});
+            result.OwnedAxis1=ReadbackAxis(result,3,delegate {return (float)M(runtimeAxesType,"GetAxisRaw",0x06000839,typeof(float),typeof(int)).Invoke(owned,new object[]{1});});
+            result.OwnedAxis2=ReadbackAxis(result,4,delegate {return (float)M(runtimeAxesType,"GetAxisRaw",0x06000839,typeof(float),typeof(int)).Invoke(owned,new object[]{2});});
+            result.PlayerAction31=ReadbackAxis(result,5,delegate {return (float)M(player.GetType(),"GetAxisRaw",0x060021f9,typeof(float),typeof(int)).Invoke(player,new object[]{31});});
+            result.PlayerAction32=ReadbackAxis(result,6,delegate {return (float)M(player.GetType(),"GetAxisRaw",0x060021f9,typeof(float),typeof(int)).Invoke(player,new object[]{32});});
+            result.PlayerAction36=ReadbackAxis(result,7,delegate {return (float)M(player.GetType(),"GetAxisRaw",0x060021f9,typeof(float),typeof(int)).Invoke(player,new object[]{36});});
+            result.LastActiveMatchesOwned=ReadbackBool(result,8,delegate {return System.Object.ReferenceEquals(owned,M(global.GetType(),"GetLastActiveController",0x06002847,controllerBase).Invoke(global,null));});
+            return result;
+        }
         void ContextFailure(string category)
         {contextLost=true;throw new RewiredOperationException("runtime_context",category);}
         void CheckCurrentContext()
@@ -416,6 +492,7 @@ namespace Ugevr
         {
             if(owned==null || deviceRemoved) return;
             CheckCurrentContext();
+            if(!OwnedEnabled()) throw new RewiredOperationException("write_owned_axes","owned_controller_disabled");
             if(!RewiredOwnershipSnapshot.Same(channelExpected,DefinitionSnapshot(false)) || !RewiredOwnershipSnapshot.Same(runtimeChannelExpected,RuntimeChannelSnapshot()))
                 throw new InvalidOperationException("Original owned channel identity/configuration changed; no values written.");
             Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},0,(float)x);

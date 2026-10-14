@@ -18,7 +18,7 @@ namespace Rewired
     public enum AxisRange {Full=0,Positive=1,Negative=2}
     public class Controller
     {
-        public readonly int id;public ControllerType type;public string tag {get;set;}public bool enabled=true;public Controller(int id) {this.id=id;}
+        public readonly int id;public ControllerType type;public string tag {get;set;}public bool enabled {get;set;}=true;public Controller(int id) {this.id=id;}
         public class Axis {public int id;public string name;public ControllerElementType type;public float pollingDeadZone;public ControllerElementIdentifier elementIdentifier {get;set;}}
     }
     public class ControllerWithAxes : Controller
@@ -27,6 +27,7 @@ namespace Rewired
         public List<Axis> Axes {get;set;}=new List<Axis>();public List<ControllerElementIdentifier> AxisElementIdentifiers {get;set;}=new List<ControllerElementIdentifier>();
         public int axisCount {get {return Axes.Count;}}public CalibrationMap calibrationMap {get;set;}=new CalibrationMap();
         public int GetAxisIndexById(int id) {return Axes.FindIndex(a=>a.id==id);}
+        public float GetAxisRaw(int index) {return ((CustomController)this).Values[index];}
     }
     public class AxisCalibration
     {public bool enabled {get;set;}=true;public float deadZone {get;set;}public float calibratedZero {get;set;}public float calibratedMin {get;set;}=-1;public float calibratedMax {get;set;}=1;public bool invert {get;set;}public int sensitivityType {get;set;}public float sensitivity {get;set;}=1;public bool applyRangeCalibration {get;set;}public UnityEngine.AnimationCurve sensitivityCurve {get;set;}=new UnityEngine.AnimationCurve();}
@@ -59,15 +60,26 @@ namespace Rewired
     {
         public ControllerType controllerType=ControllerType.Custom;
         public int controllerId;
+        public int categoryId,layoutId,sourceMapId;
+        bool enabledValue;
+        public static Action<ControllerMap> EnableAction;
+        public static bool IgnoreEnable,ThrowEnableBefore,ThrowEnableAfter;
+        public static int EnableCalls;
+        public bool enabled {get {return enabledValue;}set {++EnableCalls;if(ThrowEnableBefore)throw new InvalidOperationException("before");if(!IgnoreEnable)enabledValue=value;if(EnableAction!=null)EnableAction(this);if(ThrowEnableAfter)throw new InvalidOperationException("after");}}
         public List<ActionElementMap> Entries=new List<ActionElementMap>();
         public bool EmptyXml;
         public IEnumerable<ActionElementMap> AllMaps {get {return Entries;}}
-        public string ToXmlString() {if(EmptyXml)return "";var text=new StringBuilder();foreach(var entry in Entries) text.Append(entry.actionId).Append('/').Append(entry.elementIdentifierId).Append('/').Append(entry.invert).Append(';');return text.ToString();}
+        public string ToXmlString() {if(EmptyXml)return "";var text=new StringBuilder("<CustomControllerMap enabled=\"").Append(enabledValue).Append("\" categoryId=\"").Append(categoryId).Append("\" layoutId=\"").Append(layoutId).Append("\" sourceMapId=\"").Append(sourceMapId).Append("\">");foreach(var entry in Entries) text.Append("<entry action=\"").Append(entry.actionId).Append("\" element=\"").Append(entry.elementIdentifierId).Append("\" invert=\"").Append(entry.invert).Append("\"/>");return text.Append("</CustomControllerMap>").ToString();}
     }
+    public sealed class CustomControllerMap : ControllerMap {}
     public class Player
     {
         public readonly ControllerHelper controllers;
         public Player() {controllers=new ControllerHelper(this);}
+        public static bool ThrowActionRead,NonfiniteActionRead;
+        public static int ActionReads;
+        public float GetAxisRaw(int actionId)
+        {++ActionReads;if(ThrowActionRead)throw new InvalidOperationException("private fixture text");if(NonfiniteActionRead)return Single.NaN;foreach(var map in controllers.maps.Content) if(map.enabled) foreach(var entry in map.Entries) if(entry.actionId==actionId) {var device=controllers.Controllers.Find(c=>c.id==map.controllerId) as CustomController;return device==null?0:device.Values[entry.elementIdentifierId];}return 0;}
         public class ControllerHelper
         {
             readonly Player owner;
@@ -75,10 +87,11 @@ namespace Rewired
             public List<Controller> Controllers {get;private set;}
             public ControllerHelper(Player owner) {this.owner=owner;maps=new MapHelper(owner);Controllers=new List<Controller>();}
             public void AddController(Controller controller,bool removeFromOtherPlayers)
-            {if(removeFromOtherPlayers) throw new Exception("Unexpected unassignment policy");Controllers.Add(controller);}
+            {if(removeFromOtherPlayers) throw new Exception("Unexpected unassignment policy");Controllers.Add(controller);maps.LoadMap(ControllerType.Custom,controller.id,0,0);}
             public class MapHelper
             {
                 public List<ControllerMap> Content=new List<ControllerMap>();
+                public static Action<ControllerMap> AfterLoad;
                 readonly Player owner;
                 public MapHelper(Player owner) {this.owner=owner;}
                 public void LoadMap(ControllerType type,int id,int category,int layout)
@@ -87,9 +100,10 @@ namespace Rewired
                     if(controller==null || !owner.controllers.Controllers.Contains(controller)) throw new Exception("No assignment");
                     var editor=ReInput.Data.GetCustomControllerMap(category,controller.sourceControllerId,layout);
                     if(editor==null) throw new Exception("No editor map");
-                    var map=new ControllerMap {controllerId=id};
+                    var map=new CustomControllerMap {controllerId=id,categoryId=category,layoutId=layout,sourceMapId=editor.id};
                     foreach(var e in editor.actionElementMaps) map.Entries.Add(new ActionElementMap(e.actionId,e.elementType,e.elementIdentifierId,e.axisContribution,e.axisRange,e.invert));
                     Content.Add(map);
+                    if(AfterLoad!=null)AfterLoad(map);
                 }
                 public IEnumerable<ControllerMap> GetAllMaps() {return Content;}
             }
@@ -103,7 +117,7 @@ namespace Rewired
         public static ControllerHelper controllers {get;private set;}
         public static PlayerHelper players {get;private set;}
         public static event Action InputSourceUpdateEvent;
-        public static void Reset() {Data=new Data.UserData();controllers=new ControllerHelper();players=new PlayerHelper();isReady=true;InputSourceUpdateEvent=null;}
+        public static void Reset() {Data=new Data.UserData();controllers=new ControllerHelper();players=new PlayerHelper();isReady=true;InputSourceUpdateEvent=null;ControllerMap.EnableAction=null;ControllerMap.IgnoreEnable=ControllerMap.ThrowEnableBefore=ControllerMap.ThrowEnableAfter=false;ControllerMap.EnableCalls=0;Player.ThrowActionRead=Player.NonfiniteActionRead=false;Player.ActionReads=0;Player.ControllerHelper.MapHelper.AfterLoad=null;}
         public static void Pulse() {if(InputSourceUpdateEvent!=null) InputSourceUpdateEvent();}
         public static void ClearInputSourceCallbacks() {InputSourceUpdateEvent=null;}
         public static int Subscribers {get {return InputSourceUpdateEvent==null?0:InputSourceUpdateEvent.GetInvocationList().Length;}}
@@ -117,12 +131,15 @@ namespace Rewired
         {
             public List<CustomController> CustomControllers {get;private set;}
             public List<Controller> Joysticks {get;private set;}
-            public bool ThrowCreateAfter,ForeignCreateNull,ForeignCreateThrow;
+            public bool ThrowCreateAfter,ForeignCreateNull,ForeignCreateThrow,CreateDisabled;
             public int Destroys;
             public Action DestroyAction;
             public ControllerHelper() {CustomControllers=new List<CustomController>();Joysticks=new List<Controller>();}
             public CustomController CreateCustomController(int definitionId,string tag)
-            {if(Data.GetCustomControllerById(definitionId)==null)return null;var controller=new CustomController(40,definitionId){tag=ForeignCreateNull||ForeignCreateThrow?"game-owned":tag};CustomControllers.Add(controller);if(ThrowCreateAfter||ForeignCreateThrow)throw new Exception("Creation after mutation");return ForeignCreateNull?null:controller;}
+            {if(Data.GetCustomControllerById(definitionId)==null)return null;var controller=new CustomController(40,definitionId){tag=ForeignCreateNull||ForeignCreateThrow?"game-owned":tag,enabled=!CreateDisabled};CustomControllers.Add(controller);if(ThrowCreateAfter||ForeignCreateThrow)throw new Exception("Creation after mutation");return ForeignCreateNull?null:controller;}
+            public Controller LastActive;
+            public Controller GetLastActiveController() {return LastActive;}
+            public T GetLastActiveController<T>() where T:Controller {throw new InvalidOperationException("Generic overload must never be called");}
             public bool DestroyCustomController(CustomController controller)
             {
                 ++Destroys;var all=new List<Player>(players.AllPlayers);all.Add(players.SystemPlayer);

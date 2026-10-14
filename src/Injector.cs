@@ -110,6 +110,7 @@ public class Injector : BaseUnityPlugin
             string rewiredConflict=Config.Bind("Input","RewiredConflictPolicy","refuse","Only refuse is supported. Existing custom definitions/devices or physical Rewired joysticks reject this prototype; game additions to owned content are preserved.").Value;
             float rewiredSeconds=Config.Bind("Input","RewiredDurationSeconds",15f,"Explicit bounded 5..300 seconds after fresh neutral admission. Source expires after 500ms without a refreshed valid sample.").Value;
             float rewiredDeadzone=Config.Bind("Input","RewiredStickDeadzone",0.2f,"Explicit radial stick deadzone .1...8. The trigger remains an analog axis for the game's ordinary threshold logic.").Value;
+            bool rewiredReadback=Config.Bind("Input","CaptureRewiredActionReadback",false,"Optional bounded fixed public Rewired readbacks at most once per second during the owned input window: enabled state, owned raw axes, system-player raw actions and last-active reference agreement. No names or hardware identity are logged; action aggregation is not game consumption.").Value;
             if(allowRewired)
             {
                 try
@@ -117,7 +118,7 @@ public class Injector : BaseUnityPlugin
                     if(!capturesEnabled || !session.Available || allowGamepad || allowEngineInputExperiment || !PublicOwnedRewiredInput.SupportsProfile(rewiredProfile))
                         throw new InvalidOperationException("Rewired diagnostic requires images/session/profile and no simultaneous gamepad or E experiment.");
                     rewiredDiagnosticProfile=rewiredProfile;
-                    rewiredDiagnostic=new RewiredInputDiagnostic(PublicOwnedRewiredInput.Create,rewiredSeconds,rewiredDeadzone,rewiredConflict);
+                    rewiredDiagnostic=new RewiredInputDiagnostic(PublicOwnedRewiredInput.Create,rewiredSeconds,rewiredDeadzone,rewiredConflict,rewiredReadback);
                     Logger.LogWarning("EXPLICIT_REWIRED_DIAGNOSTIC profile="+rewiredProfile+" duration="+rewiredSeconds+" conflict="+rewiredConflict+"; normal game action consumption remains unobserved.");
                 }
                 catch(Exception error) {Logger.LogWarning("REWIRED_DIAGNOSTIC unavailable: "+error.Message);}
@@ -286,6 +287,7 @@ public class Injector : BaseUnityPlugin
         {
             nextRewiredReport=now+1;
             Logger.LogInfo("REWIRED_DIAGNOSTIC status="+rewiredDiagnostic.Status+" reason="+rewiredDiagnostic.Reason+" addAttempts="+rewiredDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredDiagnostic.AppliedUpdates+" removeAttempts="+rewiredDiagnostic.RemoveAttempts+" cleanup="+rewiredDiagnostic.CleanupStatus+" "+(rewiredDiagnostic.Failure==null?"failureStage=none":rewiredDiagnostic.Failure.ToLog())+" gameConsumption=unknown");
+            if(rewiredDiagnostic.Readback!=null) Logger.LogInfo("REWIRED_READBACK samples="+rewiredDiagnostic.ReadbackSamples+" sampleAgeSeconds="+(now-rewiredDiagnostic.ReadbackAtSeconds).ToString("R",System.Globalization.CultureInfo.InvariantCulture)+" "+rewiredDiagnostic.Readback.ToLog()+" gameConsumption=unknown");
         }
     }
     void CancelRewiredDiagnostic(string reason)

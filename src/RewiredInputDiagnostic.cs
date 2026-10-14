@@ -27,6 +27,8 @@ namespace Ugevr
     {
         readonly Func<IOwnedRewiredInput> factory;
         readonly double duration,deadzone;
+        readonly bool captureReadback;
+        double nextReadback;
         IOwnedRewiredInput backend;
         RewiredRightSample identity;
         double startedAt,lastTick;
@@ -35,16 +37,19 @@ namespace Ugevr
         public string Status {get;private set;}
         public string Reason {get;private set;}
         public RewiredFailureInfo Failure {get;private set;}
+        public RewiredActionReadback Readback {get;private set;}
+        public int ReadbackSamples {get;private set;}
+        public double ReadbackAtSeconds {get;private set;}
         public int AddAttempts {get;private set;}
         public int RemoveAttempts {get;private set;}
         public bool Complete {get {return finished;}}
         public int AppliedUpdates {get {return backend==null?0:backend.AppliedUpdates;}}
         public string CleanupStatus {get {return backend==null?"not_created":backend.CleanupStatus;}}
-        public RewiredInputDiagnostic(Func<IOwnedRewiredInput> factory,double seconds,double deadzone,string conflictPolicy)
+        public RewiredInputDiagnostic(Func<IOwnedRewiredInput> factory,double seconds,double deadzone,string conflictPolicy,bool captureReadback=false)
         {
             if(factory==null || !Finite(seconds) || seconds<5 || seconds>300 || !Finite(deadzone) || deadzone<.1 || deadzone>.8 || conflictPolicy!="refuse")
                 throw new ArgumentException("Rewired diagnostic requires duration 5..300, deadzone .1...8 and explicit refuse policy.");
-            this.factory=factory;duration=seconds;this.deadzone=deadzone;Status="waiting_neutral";Reason="";
+            this.factory=factory;duration=seconds;this.deadzone=deadzone;this.captureReadback=captureReadback;Status="waiting_neutral";Reason="";
         }
         static bool Finite(double value) {return !Double.IsNaN(value) && !Double.IsInfinity(value);}
         static bool Valid(RewiredRightSample sample)
@@ -67,6 +72,7 @@ namespace Ugevr
                     creationStage="add";++AddAttempts;backend.Add();Status="active";Reason="";
                     creationStage="initial_desired_state";
                     backend.SetDesired(0,0,0,now+.5);
+                    CaptureReadback(now);
                 }
                 catch(Exception error) {CaptureFailure(error,creationStage,"public_api_exception");Cancel("public_creation_failed",now);}
                 return;
@@ -86,8 +92,16 @@ namespace Ugevr
             double x=input.X,y=input.Y,magnitude=Math.Sqrt(x*x+y*y);
             if(magnitude<=deadzone) x=y=0;
             else {double scale=Math.Min(1,(magnitude-deadzone)/(1-deadzone))/magnitude;x*=scale;y*=scale;}
-            try {backend.SetDesired(x,y,input.Trigger,Math.Min(startedAt+duration,now+.5));}
+            try {backend.SetDesired(x,y,input.Trigger,Math.Min(startedAt+duration,now+.5));CaptureReadback(now);}
             catch(Exception error) {CaptureFailure(error,"set_desired_state","public_api_exception");Cancel("public_state_failed",now);}
+        }
+        void CaptureReadback(double now)
+        {
+            if(!captureReadback || now<nextReadback) return;
+            nextReadback=now+1;var reader=backend as IRewiredActionReadback;if(reader==null) return;
+            try {Readback=reader.CaptureReadback();}
+            catch {Readback=new RewiredActionReadback {FailedFields=511};}
+            ReadbackAtSeconds=now;++ReadbackSamples;
         }
         void CaptureFailure(Exception error,string stage,string category)
         {
