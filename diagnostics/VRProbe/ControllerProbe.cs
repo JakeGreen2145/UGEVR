@@ -5,15 +5,27 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Valve.VR;
 
-internal sealed record ProbeOptions(bool Controllers, uint? ExpectedScenePid)
+internal sealed record ProbeOptions(bool Controllers, uint? ExpectedScenePid, bool ControllerWindow = false, long? ExpectedProcessStartUtcTicks = null)
 {
     public static ProbeOptions Parse(string[] args)
     {
         bool controllers = false;
+        bool window = false;
+        long? start = null;
         uint? expectedPid = null;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--controllers" && !controllers) controllers = true;
+            else if (args[i] == "--controller-window" && !window) window = true;
+            else if (args[i] == "--expected-process-start-utc-ticks" && start == null && ++i < args.Length)
+            {
+                string value = args[i];
+                foreach (char c in value)
+                    if (c < '0' || c > '9') throw new ArgumentException("Process start ticks must be positive UTC DateTime ticks.");
+                if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out long ticks) || ticks <= 0 || ticks > DateTime.MaxValue.Ticks)
+                    throw new ArgumentException("Process start ticks must be positive UTC DateTime ticks.");
+                start = ticks;
+            }
             else if (args[i] == "--expected-scene-pid" && expectedPid == null && ++i < args.Length)
             {
                 string value = args[i];
@@ -25,9 +37,9 @@ internal sealed record ProbeOptions(bool Controllers, uint? ExpectedScenePid)
             }
             else throw new ArgumentException("Unknown, duplicate or incomplete probe option.");
         }
-        if (controllers != expectedPid.HasValue)
-            throw new ArgumentException("Controller mode requires both --controllers and --expected-scene-pid N.");
-        return new ProbeOptions(controllers, expectedPid);
+        if ((controllers && window) || (controllers || window) != expectedPid.HasValue || window != start.HasValue)
+            throw new ArgumentException("Select --controllers with a PID, or --controller-window with a PID and process start UTC ticks.");
+        return new ProbeOptions(controllers, expectedPid, window, start);
     }
 }
 

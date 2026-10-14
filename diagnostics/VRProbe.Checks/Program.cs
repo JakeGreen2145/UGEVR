@@ -4,6 +4,22 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using Valve.VR;
 
+if (args.Length == 1 && args[0] == "--fake-hung-sdk") {
+    Console.WriteLine("{\"type\":\"sample\",\"fake\":true}"); Console.Out.Flush();
+    Console.Error.WriteLine("fake SDK shutdown entered"); Console.Error.Flush();
+    Console.Write("{\"unfinishedRecord\":"); Console.Out.Flush();
+    System.Threading.Thread.Sleep(System.Threading.Timeout.Infinite);
+    return;
+}
+if (args.Length == 1 && args[0] == "--fake-hung-startup") {
+    System.Threading.Thread.Sleep(System.Threading.Timeout.Infinite);
+    return;
+}
+if (args.Length == 1 && args[0] == "--fake-drained-sdk") {
+    for (int i = 0; i < 2000; i++) { Console.WriteLine(JsonSerializer.Serialize(new { type = "sample", padding = new string('x', 128) })); Console.Error.WriteLine(new string('y', 128)); }
+    Console.WriteLine("{\"type\":\"end\",\"shutdownConfirmed\":true}");
+    return;
+}
 int count = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception(name); count++; }
 void Reject(string[] args) { bool rejected = false; try { ProbeOptions.Parse(args); } catch (ArgumentException) { rejected = true; } Check(rejected, string.Join(" ", args)); }
@@ -56,20 +72,94 @@ Check(noInputSnapshot.InputAvailable == false, "input availability false is obse
 Check(noInputSnapshot.Controllers[0].Axes[0][0] == null && JsonSerializer.Serialize(noInputSnapshot).Length > 0, "nonfinite axis remains unknown serializable");
 var missingIdentity = ControllerProbe.Capture(new FakeReadback(123, 123) { IdentityError = true }, 123);
 Check(missingIdentity.Controllers[0].Serial.Value == null && missingIdentity.Controllers[0].Serial.Error == "TrackedProp_UnknownProperty", "identity failure remains explicit");
+
+var windowOptions = ProbeOptions.Parse(new[] { "--controller-window", "--expected-scene-pid", "123", "--expected-process-start-utc-ticks", "639275456966499101" });
+Check(windowOptions.ControllerWindow && !windowOptions.Controllers && windowOptions.ExpectedProcessStartUtcTicks == 639275456966499101L, "window exact process ticks");
+foreach (var invalid in new[] {
+    new[] { "--controller-window", "--expected-scene-pid", "123" },
+    new[] { "--expected-process-start-utc-ticks", "1" },
+    new[] { "--controllers", "--controller-window", "--expected-scene-pid", "1", "--expected-process-start-utc-ticks", "1" },
+    new[] { "--controllers", "--expected-scene-pid", "1", "--expected-process-start-utc-ticks", "1" },
+    new[] { "--controller-window", "--controller-window", "--expected-scene-pid", "1", "--expected-process-start-utc-ticks", "1" } }) Reject(invalid);
+foreach (string badTicks in new[] { "0", "-1", "+1", " 1", "1e2", "3155378976000000000", "9223372036854775808", "١", "" })
+    Reject(new[] { "--controller-window", "--expected-scene-pid", "1", "--expected-process-start-utc-ticks", badTicks });
+var wrongProcessSource = new FakeReadback(123, 123);
+var wrongProcess = ControllerWindow.Capture(wrongProcessSource, new FakeIdentity(8, 8), new FakeClock(), 123, 7, 0);
+Check(wrongProcess.Status == "process_identity_mismatch" && wrongProcessSource.ReadCalls == 0 && wrongProcess.Snapshot == null, "PID reuse rejected before SDK reads");
+var recycled = ControllerWindow.Capture(new FakeReadback(123, 123), new FakeIdentity(7, 8), new FakeClock(), 123, 7, 1);
+Check(recycled.Status == "process_identity_changed" && recycled.Snapshot.Controllers.Length == 0, "PID reuse during capture discards controllers");
+var exited = ControllerWindow.Capture(new FakeReadback(123, 123), new FakeIdentity(7, null), new FakeClock(), 123, 7, 1);
+Check(exited.Status == "process_identity_changed" && exited.ProcessStartAfter == null, "process exit after read remains unknown");
+var windowSample = ControllerWindow.Capture(new FakeReadback(123, 123), new FakeIdentity(7, 7), new FakeClock(), 123, 7, 3);
+Check(windowSample.Status == "observed" && windowSample.Sequence == 3 && windowSample.ProcessIdentity == "verified_pid_and_start_ticks", "bounded identity and focus accepted");
+Check(windowSample.InputAvailableBefore == true && windowSample.InputAvailableAfter == true && windowSample.InputReceipt == "unknown" && !windowSample.GateEligible, "both availability boundaries no gameplay claim");
+Check(windowSample.Snapshot.Controllers[0].Pressed == "18446744073709551615", "window preserves exact masks and identity");
+var contextChanged = ControllerWindow.Capture(new FakeReadback(123, 456) { FocusChangeAfterReads = 2 }, new FakeIdentity(7, 7), new FakeClock(), 123, 7, 4);
+Check(contextChanged.Status == "scene_focus_changed" && contextChanged.Snapshot.Controllers.Length == 0, "window changed scene excluded");
+var finalContextChanged = ControllerWindow.Capture(new FakeReadback(123, 456) { FocusChangeAfterReads = 3 }, new FakeIdentity(7, 7), new FakeClock(), 123, 7, 4);
+Check(finalContextChanged.FocusProcessBefore == 123 && finalContextChanged.FocusProcessAfter == 456 && finalContextChanged.Snapshot.Controllers.Length == 0, "last focus boundary after availability is preserved");
+var initiallyUnfocused = new FakeReadback(456, 456);
+var unfocusedWindow = ControllerWindow.Capture(initiallyUnfocused, new FakeIdentity(7, 7), new FakeClock(), 123, 7, 0);
+Check(unfocusedWindow.Status == "scene_focus_mismatch" && initiallyUnfocused.ReadCalls == 0 && unfocusedWindow.InputAvailableBefore == null, "fresh initial focus rejects before reads");
+var falseAvailable = ControllerWindow.Capture(new FakeReadback(123, 123) { Input = false }, new FakeIdentity(7, 7), new FakeClock(), 123, 7, 0);
+Check(falseAvailable.InputAvailableBefore == false && falseAvailable.InputAvailableAfter == false && falseAvailable.Status == "observed", "availability does not fabricate delivery");
+var clock = new FakeClock(); var samples = new List<WindowSample>();
+int samplesCount = ControllerWindow.Run(new FakeReadback(123, 123), new FakeIdentity(7, 7), clock, 123, 7, samples.Add);
+Check(samplesCount == 300 && samples.Count == 300 && clock.ElapsedSeconds >= 15, "fixed 15 seconds maximum 300 samples");
+Check(samples[^1].Sequence == 299 && samples[^1].ElapsedSeconds < 15 && clock.MinSleep >= .049999, "20Hz no catchup burst");
+var slowClock = new FakeClock(); int slowCount = ControllerWindow.Run(new FakeReadback(123, 123), new FakeIdentity(7, 7), slowClock, 123, 7, s => slowClock.Advance(.4));
+Check(slowCount < 40 && slowClock.MinSleep >= .049999, "slow reads reduce count without bursts");
+var crossedClock = new FakeClock(); var crossedSamples = new List<WindowSample>();
+int crossedCount = ControllerWindow.Run(new FakeReadback(123, 123) { OnPoses = () => crossedClock.Advance(16) }, new FakeIdentity(7, 7), crossedClock, 123, 7, crossedSamples.Add);
+Check(crossedCount == 0 && crossedSamples.Count == 0, "SDK read crossing fixed window is excluded");
+using (var process = System.Diagnostics.Process.GetCurrentProcess())
+    Check(new ProcessIdentity().StartUtcTicks((uint)process.Id) == process.StartTime.ToUniversalTime().Ticks, "real process start identity read without OpenVR");
+Check(new ProcessIdentity().StartUtcTicks(uint.MaxValue) == null, "unrepresentable process unknown");
+System.Diagnostics.ProcessStartInfo Child(string mode) {
+    var info = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+    if (System.IO.Path.GetFileNameWithoutExtension(Environment.ProcessPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase)) info.ArgumentList.Add(System.Reflection.Assembly.GetExecutingAssembly().Location);
+    info.ArgumentList.Add(mode); return info;
+}
+var output = new System.IO.StringWriter(); var errors = new System.IO.StringWriter();
+int drainedExit = await WindowSupervisor.Run(Child("--fake-drained-sdk"), output, errors, TimeSpan.FromSeconds(10));
+Check(drainedExit == 0 && output.ToString().Contains("\"shutdownConfirmed\":true") && output.ToString().Length > 256000 && errors.ToString().Length > 256000, "large stdout stderr drained through SDK completion");
+output = new System.IO.StringWriter(); errors = new System.IO.StringWriter(); var deadlineClock = System.Diagnostics.Stopwatch.StartNew();
+int hungExit = await WindowSupervisor.Run(Child("--fake-hung-sdk"), output, errors, TimeSpan.FromMilliseconds(500));
+Check(hungExit == 124 && deadlineClock.Elapsed.TotalSeconds < 3, "whole child deadline kills hung SDK");
+Check(output.ToString().Contains("\"fake\":true") && output.ToString().Contains("\"shutdownConfirmed\":false") && !output.ToString().Contains("\"shutdownConfirmed\":true"), "prior samples retained but hung shutdown never confirmed");
+Check(!output.ToString().Contains("unfinishedRecord"), "partial JSON record from killed child excluded");
+Check(errors.ToString().Contains("fake SDK shutdown entered") && WindowSupervisor.WholeDeadlineSeconds == 20, "shutdown and production whole deadline");
+output = new System.IO.StringWriter(); errors = new System.IO.StringWriter();
+int startupExit = await WindowSupervisor.Run(Child("--fake-hung-startup"), output, errors, TimeSpan.FromMilliseconds(500));
+Check(startupExit == 124 && !output.ToString().Contains("\"type\":\"sample\"") && output.ToString().Contains("\"shutdownConfirmed\":false"), "hung initialization bounded without synthetic samples");
 Console.WriteLine($"{count} source-only controller probe checks passed; OpenVR was not initialized.");
 
+sealed class FakeIdentity(long? before, long? after) : IProcessIdentity {
+    int calls;
+    public long? StartUtcTicks(uint pid) => calls++ == 0 ? before : after;
+}
+sealed class FakeClock : IWindowClock {
+    public double ElapsedSeconds { get; private set; }
+    public DateTime UtcNow => new DateTime(638000000000000000, DateTimeKind.Utc).AddSeconds(ElapsedSeconds);
+    public double MinSleep = double.MaxValue;
+    public void Sleep(double seconds) { if (seconds > 0) MinSleep = Math.Min(MinSleep, seconds); Advance(seconds); }
+    public void Advance(double seconds) { ElapsedSeconds += seconds; }
+}
 sealed class FakeReadback(uint? before, uint? after) : IControllerReadback
 {
     int focusReads;
+    public int FocusChangeAfterReads = 1;
+    public Action OnPoses;
     public int ReadCalls;
     public bool Input = true;
     public bool NonFinite;
     public bool IdentityError;
     public List<uint> Indices = new();
     public List<uint> Sizes = new();
-    public uint? SceneFocusProcess() => focusReads++ == 0 ? before : after;
+    public uint? SceneFocusProcess() => focusReads++ < FocusChangeAfterReads ? before : after;
     public bool IsInputAvailable() { ReadCalls++; return Input; }
     public TrackedDevicePose_t[] Poses() {
+        OnPoses?.Invoke();
         ReadCalls++;
         var poses = new TrackedDevicePose_t[ControllerProbe.DeviceLimit];
         poses[2] = new TrackedDevicePose_t { bPoseIsValid = true, bDeviceIsConnected = true,

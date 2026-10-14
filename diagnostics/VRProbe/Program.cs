@@ -4,11 +4,29 @@ using System.Text.Json;
 using System.Runtime.InteropServices;
 using Valve.VR;
 
+bool windowWorker = args.Length > 0 && args[0] == "--controller-window-worker";
+if (windowWorker) args = args[1..];
 ProbeOptions options;
 try { options = ProbeOptions.Parse(args); }
 catch (ArgumentException error) {
     Console.WriteLine(JsonSerializer.Serialize(new { error = error.Message }));
     Environment.ExitCode = 2;
+    return;
+}
+
+if (windowWorker && !options.ControllerWindow) {
+    Environment.ExitCode = 2;
+    return;
+}
+if (options.ControllerWindow && !windowWorker) {
+    Environment.ExitCode = await WindowSupervisor.Run(WindowSupervisor.WorkerStart(args), Console.Out, Console.Error, TimeSpan.FromSeconds(WindowSupervisor.WholeDeadlineSeconds));
+    return;
+}
+var windowClock = options.ControllerWindow ? new WindowClock() : null;
+var identity = options.ControllerWindow ? new ProcessIdentity() : null;
+if (options.ControllerWindow && identity.StartUtcTicks(options.ExpectedScenePid.Value) != options.ExpectedProcessStartUtcTicks) {
+    Console.WriteLine(JsonSerializer.Serialize(new { type = "rejected", status = "process_identity_mismatch", inputReceipt = "unknown", gateEligible = false }));
+    Environment.ExitCode = 3;
     return;
 }
 
@@ -18,7 +36,19 @@ if (vr == null || initError != EVRInitError.None) {
     Console.WriteLine(JsonSerializer.Serialize(new { initError = initError.ToString() }));
     Environment.Exit(1);
 }
+int windowSamples = 0;
 try {
+    if (options.ControllerWindow) {
+        Console.WriteLine(JsonSerializer.Serialize(new { type = "begin", timestamp = DateTime.UtcNow, elapsedSeconds = windowClock.ElapsedSeconds,
+            durationSeconds = ControllerWindow.DurationSeconds, maximumSamples = ControllerWindow.MaximumSamples,
+            expectedScenePid = options.ExpectedScenePid.Value, expectedProcessStartUtcTicks = options.ExpectedProcessStartUtcTicks.Value,
+            observerProcessId = Environment.ProcessId, inputReceipt = "unknown", gateEligible = false }));
+        Console.Out.Flush();
+        windowSamples = ControllerWindow.Run(new OpenVrControllerReadback(vr, OpenVR.Compositor), identity, windowClock,
+            options.ExpectedScenePid.Value, options.ExpectedProcessStartUtcTicks.Value,
+            sample => { Console.WriteLine(JsonSerializer.Serialize(sample, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })); Console.Out.Flush(); });
+    }
+    else {
     if (options.Controllers) {
         var snapshot = ControllerProbe.Capture(new OpenVrControllerReadback(vr, OpenVR.Compositor), options.ExpectedScenePid.Value);
         Console.WriteLine(JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
@@ -68,4 +98,9 @@ try {
         timingValid, timing = new { timing.m_nFrameIndex,timing.m_nNumFramePresents,timing.m_nNumDroppedFrames,timing.m_nNumMisPresented,timing.m_flTotalRenderGpuMs,timing.m_flClientFrameIntervalMs },
         transform = new[]{m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11}
     }));
+    }
 } finally { OpenVR.Shutdown(); }
+if (options.ControllerWindow) {
+    Console.WriteLine(JsonSerializer.Serialize(new { type = "end", samples = windowSamples, elapsedSeconds = windowClock.ElapsedSeconds,
+        shutdownConfirmed = true, inputReceipt = "unknown", gateEligible = false }));
+}
