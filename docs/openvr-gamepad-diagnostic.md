@@ -4,6 +4,8 @@ This source prototype tests explicitly selected mappings through normal Unity in
 
 ## Dual-hand source adapter
 
+The separate explicitly activated [dual-hand cancel profile](outer-dual-cancel-profile.md) adds the measured right-B route to owned East. Existing profiles retain their original one-button behavior.
+
 `outer-1.4.1-dual-hand-a-west-sticks-v1` is a separate opt-in source profile. Physical left axis 0 supplies owned `leftStick` movement, physical right axis 0 supplies owned `rightStick` look, and physical right A supplies owned West for original wake/interact. The existing profiles retain their mappings. `Injector` selects this profile through its existing default-off `AllowOpenVrGamepadDiagnostic` activation gate. A valid controller session and no simultaneous Rewired input or engine E experiment are required. No dual-hand runtime response is inferred from source checks.
 
 `OuterGamepadCompatibilityProfile.SupportsDual`, `CreateDual` and `ReadDualSafely` select this route. It deliberately returns false from the existing single-hand `Supports` method. `OpenVrDualGamepadDiagnostic` accepts the same duration, radial deadzone and explicit current-device conflict policies as the single-hand policy. It requires exactly three consecutive admissible neutral pairs before creating a device. Both hands must have no pressed buttons and each radial magnitude must be at or below the configured deadzone. Focus loss, session disable, unavailable input or a changed context resets this admission. Each hand maps through that same deadzone independently. Only right A forwards a button after admission.

@@ -22,6 +22,7 @@ class Program
         UiLayoutDiagnosticChecks.Run(Assert);
         CameraRestorationPoseChecks.Run(Assert);
         CameraPoseCaptureRequestChecks.Run(Assert);
+        DualCancelChecks.Run(Assert);
         OverlayIsolationChecks.Run(Assert);
         HierarchyInventoryChecks.Run(Assert);
         NativeUiDiagnosticsChecks.Run(Assert);

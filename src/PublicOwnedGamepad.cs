@@ -6,7 +6,7 @@ namespace Ugevr
 {
     // Outer 1.4.1 compatibility is deliberately separate from the generic state policy.
     // The prefix is the inspected game's public-device-name compatibility rule, not hardware identity.
-    public sealed class PublicOwnedGamepad : IOwnedDualGamepad
+    public sealed class PublicOwnedGamepad : IOwnedDualCancelGamepad
     {
         readonly string unavailable;
         readonly Type padType,stateType,descriptionType,vectorType;
@@ -19,6 +19,9 @@ namespace Ugevr
         readonly EventInfo deviceChanges,layoutChanges;
         readonly string identity,layoutName;
         readonly uint buttonMask;
+        readonly PropertyInfo eastButton;
+        readonly uint eastMask;
+        readonly bool cancelState;
         Delegate deviceHandler,layoutHandler;
         object owned,prior;
         string definition;
@@ -36,7 +39,11 @@ namespace Ugevr
         internal PublicOwnedGamepad(Assembly assembly,bool pinnedTokens,string prefix,OwnedGamepadButton target)
             :this(assembly,pinnedTokens,prefix,target,false) {}
         internal PublicOwnedGamepad(Assembly assembly,bool pinnedTokens,string prefix,OwnedGamepadButton target,bool dualState)
+            :this(assembly,pinnedTokens,prefix,target,dualState,false) {}
+        internal PublicOwnedGamepad(Assembly assembly,bool pinnedTokens,string prefix,OwnedGamepadButton target,bool dualState,bool cancelState)
         {
+            if(cancelState && (!dualState || target!=OwnedGamepadButton.West))throw new ArgumentException("Cancel state requires the explicit dual West/East backend.");
+            this.cancelState=cancelState;
             this.dualState=dualState;
             unavailable="";CleanupStatus="not_created";
             identity="ugevr-synthetic-"+Guid.NewGuid().ToString("N");
@@ -78,6 +85,14 @@ namespace Ugevr
             buttonMask=1u<<bit;
             var enumField=enumType.GetField(target.ToString(),BindingFlags.Public|BindingFlags.Static);
             if(enumField==null || !enumField.IsLiteral || (pinnedTokens && enumField.MetadataToken!=(target==OwnedGamepadButton.South?0x040004d4:0x040004d5))) throw new InvalidOperationException("Public button enum changed.");
+            if(cancelState)
+            {
+                eastButton=Property(padType,"buttonEast",false,button);
+                if(pinnedTokens && eastButton.GetGetMethod(false).MetadataToken!=0x06000448)throw new InvalidOperationException("Public East read changed.");
+                int eastBit=Convert.ToInt32(Enum.Parse(enumType,"East",false));var eastField=enumType.GetField("East",BindingFlags.Public|BindingFlags.Static);
+                if(eastBit<0 || eastBit>=32 || eastBit==bit || eastField==null || !eastField.IsLiteral || pinnedTokens && (eastBit!=5 || eastField.MetadataToken!=0x040004d3))throw new InvalidOperationException("Public East enum changed.");
+                eastMask=1u<<eastBit;
+            }
             Type matcher=assembly.GetType("UnityEngine.InputSystem.Layouts.InputDeviceMatcher",true);
             register=Method(hub,"RegisterLayout",new[]{typeof(string),typeof(string),typeof(Nullable<>).MakeGenericType(matcher)},typeof(void),true,pinnedTokens?0x0600031b:0);
             load=Method(hub,"LoadLayout",new[]{typeof(string)},assembly.GetType("UnityEngine.InputSystem.Layouts.InputControlLayout",true),true,pinnedTokens?0x06000325:0);
@@ -101,13 +116,17 @@ namespace Ugevr
         public static IOwnedDualGamepad CreateDual(string prefix,OwnedGamepadButton target)
         {return (IOwnedDualGamepad)CreateBackend(prefix,target,true);}
         static IOwnedGamepad CreateBackend(string prefix,OwnedGamepadButton target,bool dualState)
+            {return CreateBackend(prefix,target,dualState,false);}
+        public static IOwnedDualCancelGamepad CreateDualCancel(string prefix)
+            {return (IOwnedDualCancelGamepad)CreateBackend(prefix,OwnedGamepadButton.West,true,true);}
+        static IOwnedGamepad CreateBackend(string prefix,OwnedGamepadButton target,bool dualState,bool cancelState)
         {
             try
             {
                 foreach(Assembly a in AppDomain.CurrentDomain.GetAssemblies()) if(a.GetName().Name=="Unity.InputSystem")
                 {
                     if(!PublicKeyboardEReader.MatchesIdentity(a.GetName(),a.ManifestModule.ModuleVersionId)) return new PublicOwnedGamepad("assembly_identity_mismatch");
-                    return new PublicOwnedGamepad(a,true,prefix,target,dualState);
+                    return new PublicOwnedGamepad(a,true,prefix,target,dualState,cancelState);
                 }
                 return new PublicOwnedGamepad("assembly_not_loaded");
             }
@@ -221,14 +240,21 @@ namespace Ugevr
             if(!dualState) throw new InvalidOperationException("Select the explicit dual state backend.");
             QueueState(down,moveX,moveY,lookX,lookY);
         }
-        void QueueState(bool down,double x,double y,double lookX,double lookY)
+        public OwnedDualCancelPadState ReadCancel()
+        {
+            if(!cancelState)throw new InvalidOperationException("Select the explicit cancel state backend.");
+            var result=new OwnedDualCancelPadState {Dual=ReadDual()};if(result.Dual.Pad.Added)result.EastDown=(bool)pressed.GetValue(eastButton.GetValue(owned,null),null);return result;
+        }
+        public void QueueCancel(bool west,bool east,double moveX,double moveY,double lookX,double lookY)
+        {if(!cancelState)throw new InvalidOperationException("Select the explicit cancel state backend.");QueueState(west,moveX,moveY,lookX,lookY,east);}
+        void QueueState(bool down,double x,double y,double lookX,double lookY,bool east=false)
         {
             if(!HasOwnedDevice || !Added(owned) || layoutConflict || LayoutDefinition()!=definition) throw new InvalidOperationException("Owned device or layout changed.");
             foreach(double value in new[]{x,y,lookX,lookY}) if(Double.IsNaN(value) || Double.IsInfinity(value) || Math.Abs(value)>1) throw new ArgumentException("Invalid stick state.");
-            bool neutral=!down && x==0 && y==0 && lookX==0 && lookY==0;
+            bool neutral=!down && !east && x==0 && y==0 && lookX==0 && lookY==0;
             if(!Object.ReferenceEquals(Current(),owned)) currentConflict=true;
             if(!neutral && (!(bool)enabled.GetValue(owned,null) || !Object.ReferenceEquals(Current(),owned))) {currentConflict=true;throw new InvalidOperationException("Current gamepad ownership changed.");}
-            object state=Activator.CreateInstance(stateType),v=Activator.CreateInstance(vectorType);buttons.SetValue(state,down?buttonMask:0u);vx.SetValue(v,(float)x);vy.SetValue(v,(float)y);leftStick.SetValue(state,v);
+            object state=Activator.CreateInstance(stateType),v=Activator.CreateInstance(vectorType);buttons.SetValue(state,(down?buttonMask:0u)|(east?eastMask:0u));vx.SetValue(v,(float)x);vy.SetValue(v,(float)y);leftStick.SetValue(state,v);
             if(dualState) {object look=Activator.CreateInstance(vectorType);vx.SetValue(look,(float)lookX);vy.SetValue(look,(float)lookY);rightStick.SetValue(state,look);}
             queue.Invoke(null,new[]{owned,state,(object)(-1.0)});
         }

@@ -12,6 +12,20 @@ namespace Ugevr
         public const string ButtonOnlyWakeName="outer-1.4.1-deckardmp-right-a-west-button-only-v1";
         public const string ObservedAxis0Name="outer-1.4.1-deckardmp-right-a-west-observed-axis0-leftstick-v1";
         public const string DualName="outer-1.4.1-dual-hand-a-west-sticks-v1";
+        public const string DualCancelName="outer-1.4.1-dual-hand-a-west-b-east-sticks-v1";
+        public static bool SupportsDualCancel(string profile) {return profile==DualCancelName;}
+        public static LegacyCancelPairSample ReadDualCancelSafely(CVRSystem system,string profile)
+        {return SupportsDualCancel(profile)?OuterDualCancelSource.ReadSafely(system):new LegacyCancelPairSample {Pair=new LegacyPairSample {UnavailableReason="game_profile_unavailable"}};}
+        public static IOwnedDualCancelGamepad CreateDualCancel(string profile)
+        {
+            if(!SupportsDualCancel(profile))return (IOwnedDualCancelGamepad)PublicOwnedGamepad.Unavailable("game_profile_unavailable");
+            foreach(Assembly a in AppDomain.CurrentDomain.GetAssemblies())if(a.GetName().Name=="Assembly-CSharp")
+            {
+                if(a.ManifestModule.ModuleVersionId!=ExpectedGameModule)return (IOwnedDualCancelGamepad)PublicOwnedGamepad.Unavailable("game_compatibility_identity_mismatch");
+                return PublicOwnedGamepad.CreateDualCancel(LayoutPrefix);
+            }
+            return (IOwnedDualCancelGamepad)PublicOwnedGamepad.Unavailable("game_compatibility_not_loaded");
+        }
         public const string ButtonOnlySerial="frame_testbench_right";
         public const string ButtonOnlyModel="Deckard MP";
         public static LegacyRightSample ReadSafely(CVRSystem system,string profile)
