@@ -12,7 +12,7 @@ using UnityEngine;
 namespace Ugevr
 {
     // Experimental profile for one observed build. All target members invoked here are public.
-    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics
+    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics,IRewiredRuntimeMonitor
     {
         public const string Profile="firewatch-2017-rewired-right-stick-trigger-v1";
         public const string ObservedTriggerProfile="firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1";
@@ -24,7 +24,7 @@ namespace Ugevr
         readonly string tag="UGEVR-Rewired-"+Guid.NewGuid().ToString("N");
         readonly Dictionary<string,MethodInfo> methods=new Dictionary<string,MethodInfo>();
         readonly Type hub,dataType,definitionType,axisType,identifierType,runtimeAxesType,calibrationType,editorMapType,controllerType,controllerBase,controllerEnum,elementEnum,poleEnum,rangeEnum,entryType;
-        readonly object data,global,players,player,playerControllers,playerMaps;
+        readonly object manager,data,global,players,player,playerControllers,playerMaps;
         readonly EventInfo inputUpdate;
         readonly bool pinned;
         object definition,editorMap,owned,runtimeMap;
@@ -35,6 +35,9 @@ namespace Ugevr
         RewiredOwnershipSnapshot definitionExpected,channelExpected,runtimeChannelExpected,expected;
         bool mutationAttempted,subscribed,deviceRemoved,definitionRemoved,ambiguous;
         double x,y,trigger,expires,lastFeedAt;
+        double heartbeatStart,lastCallbackAt,lastMonitorAt,nextFullMonitor;
+        bool callbackObserved,contextLost;
+        public const double CallbackGraceSeconds=.5;
         public string UnavailableReason {get;private set;}
         public string FaultReason {get;private set;}
         public string CleanupStatus {get;private set;}
@@ -47,7 +50,7 @@ namespace Ugevr
         PublicOwnedRewiredInput(string reason) {UnavailableReason=reason;FaultReason="";CleanupStatus="not_created";}
         internal PublicOwnedRewiredInput(Assembly assembly,object manager,Func<double> clock,Func<bool> focused,bool pinned=true)
         {
-            this.clock=clock;this.focused=focused;this.pinned=pinned;UnavailableReason="";FaultReason="";CleanupStatus="not_created";
+            this.manager=manager;this.clock=clock;this.focused=focused;this.pinned=pinned;UnavailableReason="";FaultReason="";CleanupStatus="not_created";
             hub=assembly.GetType("Rewired.ReInput",true);dataType=assembly.GetType("Rewired.Data.UserData",true);
             definitionType=assembly.GetType("Rewired.Data.CustomController_Editor",true);editorMapType=assembly.GetType("Rewired.Data.Mapping.ControllerMap_Editor",true);
             axisType=assembly.GetType("Rewired.Data.CustomController_Editor+Axis",true);identifierType=assembly.GetType("Rewired.ControllerElementIdentifier",true);
@@ -244,7 +247,7 @@ namespace Ugevr
             if(maps.Length==0) {Call(playerMaps,"LoadMap",0x06002386,typeof(void),new[]{controllerEnum,typeof(int),typeof(int),typeof(int)},Enum.Parse(controllerEnum,"Custom"),ownedId,0,0);maps=OwnedMaps(player);}
             if(maps.Length!=1) throw new InvalidOperationException("Owned runtime map admission unknown.");runtimeMap=maps[0];
             addStage="snapshot_runtime_and_subscribe";
-            expected=Snapshot();expires=clock()+.5;handler=OnInputUpdate;subscribed=true;inputUpdate.AddEventHandler(null,handler);CleanupStatus="owned_active";
+            expected=Snapshot();heartbeatStart=lastMonitorAt=clock();expires=heartbeatStart+.5;handler=OnInputUpdate;subscribed=true;inputUpdate.AddEventHandler(null,handler);CleanupStatus="owned_active";
         }
         static bool ContainsId(int[] ids,int id) {if(ids==null || ids.Length>64) throw new InvalidOperationException("Identifier bound exceeded.");foreach(int value in ids) if(value==id) return true;return false;}
         bool DeviceTagged(object device)
@@ -358,9 +361,61 @@ namespace Ugevr
         }
         public void SetDesired(double x,double y,double trigger,double expires)
         {CheckThread();this.x=x;this.y=y;this.trigger=trigger;this.expires=expires;}
+        void ContextFailure(string category)
+        {contextLost=true;throw new RewiredOperationException("runtime_context",category);}
+        void CheckCurrentContext()
+        {
+            if(contextLost) throw new RewiredOperationException("runtime_context","runtime_context_already_lost");
+            try
+            {
+                if(!(bool)StaticValue(hub,"isReady")) ContextFailure("runtime_not_ready");
+                var behaviour=manager as Behaviour;
+                if(behaviour==null || !behaviour.isActiveAndEnabled) ContextFailure("active_manager_unavailable");
+                if(!System.Object.ReferenceEquals(PublicValue(manager,"userData"),data)) ContextFailure("manager_data_changed");
+                if(!System.Object.ReferenceEquals(StaticValue(hub,"controllers"),global)) ContextFailure("global_controller_helper_changed");
+                if(!System.Object.ReferenceEquals(StaticValue(hub,"players"),players)) ContextFailure("global_player_helper_changed");
+                if(!System.Object.ReferenceEquals(PublicValue(players,"SystemPlayer"),player)) ContextFailure("system_player_changed");
+                if(!System.Object.ReferenceEquals(PublicValue(player,"controllers"),playerControllers) || !System.Object.ReferenceEquals(PublicValue(playerControllers,"maps"),playerMaps)) ContextFailure("system_player_helpers_changed");
+                if(owned!=null && !deviceRemoved && !Contains(CustomDevices(),owned)) ContextFailure("owned_device_missing_from_current_context");
+            }
+            catch(Exception error)
+            {
+                contextLost=true;var failure=RewiredFailureInfo.Capture(error,"runtime_context","public_context_read_failed");
+                if(LastFailure==null) LastFailure=failure;if(String.IsNullOrEmpty(FaultReason)) FaultReason=failure.Category;
+                throw;
+            }
+        }
+        public void CheckRuntime()
+        {
+            CheckThread();
+            try
+            {
+                CheckCurrentContext();double now=clock();
+                if(Double.IsNaN(now) || Double.IsInfinity(now) || now<lastMonitorAt || callbackObserved && now<lastCallbackAt)
+                    throw new RewiredOperationException("runtime_monitor","backend_clock_invalid");
+                lastMonitorAt=now;
+                if(now-(callbackObserved?lastCallbackAt:heartbeatStart)>=CallbackGraceSeconds)
+                    throw new RewiredOperationException("runtime_monitor",callbackObserved?"input_callback_stale":"input_callback_never_observed");
+                // Callback checks already inspect the full snapshot. Missing callbacks must
+                // not remove that check entirely; bound this extra inspection to 10Hz.
+                if(now>=nextFullMonitor)
+                {
+                    nextFullMonitor=now+.1;
+                    if(!RewiredOwnershipSnapshot.Same(expected,Snapshot())) throw new RewiredOperationException("runtime_monitor","owned_content_changed");
+                }
+            }
+            catch(Exception error)
+            {
+                var failure=RewiredFailureInfo.Capture(error,"runtime_monitor","public_runtime_monitor_failed");
+                if(LastFailure==null) LastFailure=failure;
+                if(String.IsNullOrEmpty(FaultReason)) FaultReason=failure.Category;
+                throw;
+            }
+        }
         void Apply(double x,double y,double trigger)
         {
             if(owned==null || deviceRemoved) return;
+            CheckCurrentContext();
             if(!RewiredOwnershipSnapshot.Same(channelExpected,DefinitionSnapshot(false)) || !RewiredOwnershipSnapshot.Same(runtimeChannelExpected,RuntimeChannelSnapshot()))
                 throw new InvalidOperationException("Original owned channel identity/configuration changed; no values written.");
             Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},0,(float)x);
@@ -371,13 +426,19 @@ namespace Ugevr
         {
             try
             {
-                CheckThread();double now=clock();
+                CheckThread();CheckCurrentContext();double now=clock();
+                if(Double.IsNaN(now) || Double.IsInfinity(now) || callbackObserved && now<lastCallbackAt || now<heartbeatStart)
+                {
+                    var error=new RewiredOperationException("runtime_callback","backend_clock_invalid");if(LastFailure==null) LastFailure=RewiredFailureInfo.Capture(error,"runtime_callback","backend_clock_invalid");
+                    if(String.IsNullOrEmpty(FaultReason)) FaultReason="source_expired_or_clock_invalid";throw error;
+                }
+                callbackObserved=true;lastCallbackAt=now;
                 bool focus=focused();
                 if(!FeedAllowed(focus,!String.IsNullOrEmpty(FaultReason),now,lastFeedAt,expires)) {Apply(0,0,0);if(String.IsNullOrEmpty(FaultReason)) FaultReason=!focus?"focus_lost":"source_expired_or_clock_invalid";return;}lastFeedAt=now;
                 if(!RewiredOwnershipSnapshot.Same(expected,Snapshot())) throw new InvalidOperationException("Owned content changed.");
                 Apply(x,y,trigger);++AppliedUpdates;
             }
-            catch {FaultReason="owned_content_or_public_feed_changed";if(ownerThread==System.Threading.Thread.CurrentThread.ManagedThreadId) try {Apply(0,0,0);} catch { }}
+            catch {if(String.IsNullOrEmpty(FaultReason)) FaultReason="owned_content_or_public_feed_changed";if(ownerThread==System.Threading.Thread.CurrentThread.ManagedThreadId) try {Apply(0,0,0);} catch { }}
         }
         public void Remove()
         {

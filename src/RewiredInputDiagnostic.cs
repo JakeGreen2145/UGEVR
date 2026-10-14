@@ -21,6 +21,7 @@ namespace Ugevr
         void SetDesired(double x,double y,double trigger,double expires);
         void Remove();
     }
+    public interface IRewiredRuntimeMonitor {void CheckRuntime();}
     // One explicitly selected window. A source sample is permission to feed only until its expiry.
     public sealed class RewiredInputDiagnostic
     {
@@ -72,6 +73,12 @@ namespace Ugevr
             }
             if(now-startedAt>=duration) {Cancel("window_deadline",now);return;}
             if(runtimeGeneration!=generation) {Cancel("runtime_generation_changed",now);return;}
+            var monitor=backend as IRewiredRuntimeMonitor;
+            if(monitor!=null)
+            {
+                try {monitor.CheckRuntime();}
+                catch(Exception error) {CaptureFailure(error,"runtime_monitor","public_runtime_monitor_failed");Cancel(String.IsNullOrEmpty(backend.FaultReason)?"public_runtime_monitor_failed":backend.FaultReason,now);return;}
+            }
             if(!Valid(input)) {Cancel("right_source_unavailable",now);return;}
             if(input.Index!=identity.Index || input.Identity!=identity.Identity || input.TriggerAxis!=identity.TriggerAxis) {Cancel("right_source_identity_or_axis_changed",now);return;}
             if(unchecked(input.Packet-identity.Packet)>0x7fffffffu) {Cancel("source_packet_regressed",now);return;}identity.Packet=input.Packet;

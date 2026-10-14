@@ -95,7 +95,7 @@ namespace Rewired
             }
         }
     }
-    public class InputManager_Base {public Data.UserData userData {get {return ReInput.Data;}}}
+    public class InputManager_Base : UnityEngine.Behaviour {public Data.UserData userData {get {return ReInput.Data;}}}
     public static class ReInput
     {
         public static Data.UserData Data;
@@ -105,6 +105,7 @@ namespace Rewired
         public static event Action InputSourceUpdateEvent;
         public static void Reset() {Data=new Data.UserData();controllers=new ControllerHelper();players=new PlayerHelper();isReady=true;InputSourceUpdateEvent=null;}
         public static void Pulse() {if(InputSourceUpdateEvent!=null) InputSourceUpdateEvent();}
+        public static void ClearInputSourceCallbacks() {InputSourceUpdateEvent=null;}
         public static int Subscribers {get {return InputSourceUpdateEvent==null?0:InputSourceUpdateEvent.GetInvocationList().Length;}}
         public class PlayerHelper
         {
