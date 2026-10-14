@@ -256,6 +256,7 @@ public class Injector : BaseUnityPlugin
         Quaternion baseRotation=camera.transform.rotation;
         RigidPose anchor=new RigidPose(Position(basePosition),Rotation(baseRotation));
         var actualEyes=new RigidPose[2];
+        var beforeRenderProjection=new Matrix4x4[2];
         using (var restore=new CameraState(camera))
         {
             for (int i=0;i<2;++i)
@@ -268,6 +269,7 @@ public class Injector : BaseUnityPlugin
                 if (disableOcclusionCulling) camera.useOcclusionCulling=false;
                 camera.rect=new Rect(0,0,1,1);
                 camera.targetTexture=eyes[i];
+                beforeRenderProjection[i]=camera.projectionMatrix;
                 // Evidence must describe the applied engine transform, including
                 // Unity float precision, rather than only the requested math result.
                 actualEyes[i]=new RigidPose(Position(camera.transform.position),Rotation(camera.transform.rotation));
@@ -283,6 +285,8 @@ public class Injector : BaseUnityPlugin
             File.Delete(request);
             CaptureEye(0); CaptureEye(1);
             WriteCapture(head,anchor,actualEyes,camera.transform.position==basePosition && camera.transform.rotation==baseRotation);
+            try { CameraDiagnostics.Write(evidenceDir,rendered,system,camera,beforeRenderProjection); }
+            catch (Exception diagnosticError) { Logger.LogWarning("Capture diagnostics unavailable: "+diagnosticError.Message); }
             RequestMirrorCapture(Path.Combine(evidenceDir,"compositor-left-"+rendered+".bmp"));
             GL.IssuePluginEvent(renderEvent,2);
         }

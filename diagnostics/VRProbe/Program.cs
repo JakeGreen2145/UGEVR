@@ -23,6 +23,16 @@ try {
     var eyeL = vr.GetEyeToHeadTransform(EVREye.Eye_Left);
     var eyeR = vr.GetEyeToHeadTransform(EVREye.Eye_Right);
     float[] Matrix(HmdMatrix34_t value) => new[]{value.m0,value.m1,value.m2,value.m3,value.m4,value.m5,value.m6,value.m7,value.m8,value.m9,value.m10,value.m11};
+    object Projection(EVREye eye) {
+        float left=0,right=0,top=0,bottom=0;
+        vr.GetProjectionRaw(eye,ref left,ref right,ref top,ref bottom);
+        // These normalized near-plane bounds match Injector.Projection's Unity
+        // Frustum(left*n,right*n,-bottom*n,-top*n,n,f) call. Actual clipping
+        // and applied matrices are recorded by opt-in injector diagnostics.
+        return new {eye=eye.ToString(),left,right,top,bottom,
+            unityFrustumAtUnitNear=new[]{left,right,-bottom,-top},
+            convention="OpenVR tangents; Unity frustum ordered left,right,bottom,top at near=1"};
+    }
     var compositor = OpenVR.Compositor;
     var timing = new Compositor_FrameTiming(); timing.m_nSize = (uint)Marshal.SizeOf(typeof(Compositor_FrameTiming));
     bool timingValid = compositor != null && compositor.GetFrameTiming(ref timing, 0);
@@ -33,6 +43,7 @@ try {
         connected=p.bDeviceIsConnected, trackingResult=p.eTrackingResult.ToString(),
         width, height, eyeOffsetX=new[]{eyeL.m3,eyeR.m3},
         eyeToHead = new[]{Matrix(eyeL),Matrix(eyeR)},
+        projectionRaw=new[]{Projection(EVREye.Eye_Left),Projection(EVREye.Eye_Right)},
         focusProcess=compositor?.GetCurrentSceneFocusProcess(), lastRenderer=compositor?.GetLastFrameRenderer(),
         canRender=compositor?.CanRenderScene(), fullscreen=compositor?.IsFullscreen(),
         gridAlpha=compositor?.GetCurrentGridAlpha(), fade=fade.HasValue ? new[]{fade.Value.r,fade.Value.g,fade.Value.b,fade.Value.a} : null,
