@@ -39,9 +39,10 @@ namespace Ugevr
 
         public UiLayoutDiagnostics(string selector=null)
         {
-            if(String.IsNullOrEmpty(selector) || selector.Trim().Length==0) return;
+            if(String.IsNullOrEmpty(selector)) return;
+            if(selector.Length>256) {Filtered=true;selectorError="Root selector exceeds 256 characters.";return;}
+            if(selector.Trim().Length==0) return;
             Filtered=true;
-            if(selector.Length>256) {selectorError="Root selector exceeds 256 characters.";return;}
             string[] parts=selector.Split(',');
             if(parts.Length>SelectorRootLimit) {selectorError="Too many root IDs; the diagnostic accepts at most sixteen.";return;}
             foreach(string part in parts)

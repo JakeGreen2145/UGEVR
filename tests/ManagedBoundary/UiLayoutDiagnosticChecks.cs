@@ -161,7 +161,7 @@ static class UiLayoutDiagnosticChecks
         var missing=new UiLayoutDiagnostics("2147483647");Register(missing,selected,canvas);missing.FinishAdmission();missing.Capture(0);
         assert(Count(missing,"componentInventoryQueries")==0 && missing.Selection().Contains("\"matched\":false") && !missing.Selection().Contains("invalid-selector"),"Missing valid runtime roots are visible and do not silently expand coverage");
         assert(missing.Selection().Contains("\"status\":\"no-matched-roots\"") && missing.Selection().Contains("\"missingRootCount\":1"),"Missing root coverage has an explicit diagnostic status");
-        string[] invalid={"0","2147483648","-2147483649","-123,-123","abc","1,",new string('1',257),"1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17"};
+        string[] invalid={"0","2147483648","-2147483649","-123,-123","abc","1,",new string('1',257),new string(' ',257),"1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17"};
         foreach(string selector in invalid)
         {
             var bad=new UiLayoutDiagnostics(selector);bad.Add(selected,canvas);bad.FinishAdmission();bad.Capture(0);
