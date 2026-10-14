@@ -29,6 +29,7 @@ namespace Ugevr
         readonly bool includeLayers;
         OverlayLayerLease layerLease;
         OverlayWallTiming wallTiming;
+        readonly NativeUiStateDiagnostics nativeUiState;
         Camera uiCamera;
         readonly double unitsPerMeter;
         readonly double panelWidthMeters;
@@ -51,8 +52,10 @@ namespace Ugevr
         public int IsolatedMask {get {return layerLease==null?0:layerLease.Mask;}}
         public string RestorationError { get { return String.Join("; ",errors.ToArray()); } }
         public void EnableWallTiming() {if(applied || layerLease!=null) throw new InvalidOperationException("Enable timing before UI layer selection.");wallTiming=new OverlayWallTiming();}
-        public void RenderGameEye(int eye) {if(wallTiming==null) camera.Render();else wallTiming.Render(camera,eye,false);}
-        public void RenderUiEye(int eye) {if(wallTiming==null) OverlayCameraPass.Render(uiCamera);else wallTiming.Render(uiCamera,eye,true);}
+        public void RenderGameEye(int eye)
+        {try {if(wallTiming==null) camera.Render();else wallTiming.Render(camera,eye,false);} finally {if(nativeUiState!=null) nativeUiState.Capture(eye==0?1:3);}}
+        public void RenderUiEye(int eye)
+        {try {if(wallTiming==null) OverlayCameraPass.Render(uiCamera);else wallTiming.Render(uiCamera,eye,true);} finally {if(nativeUiState!=null) nativeUiState.Capture(eye==0?2:4);}}
 
         sealed class CanvasState
         {
@@ -80,9 +83,10 @@ namespace Ugevr
             public Quaternion LocalRotation;
         }
 
-        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null)
+        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null,bool captureNativeUiState=false)
         {
             if(captureLayoutInputs) layoutInputs=new UiLayoutDiagnostics(layoutInputRootRectIds);
+            if(captureNativeUiState) nativeUiState=new NativeUiStateDiagnostics(camera);
             this.camera=camera; this.includeLayers=includeLayers;
             this.unitsPerMeter=unitsPerMeter;this.panelWidthMeters=panelWidthMeters;
             OriginalMask=camera.cullingMask; AppliedMask=OriginalMask;
@@ -117,7 +121,11 @@ namespace Ugevr
                 OverlayLayerMask|=1<<canvas.gameObject.layer;
                 isolatedObjects.Add(canvas.gameObject);
                 foreach (CanvasRenderer renderer in canvas.GetComponentsInChildren<CanvasRenderer>(true))
-                    if (renderer!=null) {OverlayLayerMask|=1<<renderer.gameObject.layer;isolatedObjects.Add(renderer.gameObject);}
+                    if (renderer!=null)
+                    {
+                        OverlayLayerMask|=1<<renderer.gameObject.layer;isolatedObjects.Add(renderer.gameObject);
+                        if(nativeUiState!=null) nativeUiState.Admit(renderer,canvases[canvases.Count-1].Id);
+                    }
                 foreach(Canvas nested in canvas.GetComponentsInChildren<Canvas>(true))
                 {
                     if(nested==null) continue;
@@ -154,6 +162,7 @@ namespace Ugevr
             }
             if(layoutInputs!=null) layoutInputs.FinishAdmission();
             CaptureLayoutPhase(0);
+            if(nativeUiState!=null) nativeUiState.Capture(0);
         }
 
         public void ApplyEye(int eye=0)
@@ -174,6 +183,7 @@ namespace Ugevr
             layerLease=new OverlayLayerLease(isolatedObjects,isolationLayer,sceneScanLimit,wallTiming);uiCamera=ui;
         }
         public void ValidateLayerExclusive(string stage="validation") {if(layerLease!=null) layerLease.ValidateExclusive(stage);}
+        public void CaptureNativeUiAfterRestoration() {if(nativeUiState!=null) nativeUiState.Capture(5);}
         public void ValidateInactiveCanvases(string stage)
         {
             foreach(CanvasState state in inactiveCanvases)
@@ -552,6 +562,7 @@ namespace Ugevr
                     .Append(",\"restoredEngineUiContext\":").Append(state.Canvas==null?"null":UiContext(state.Canvas)).Append('}');
             }
             text.Append("],\"wallTiming\":").Append(wallTiming==null?"null":wallTiming.DiagnosticJson());
+            text.Append(",\"nativeUiState\":").Append(nativeUiState==null?"null":nativeUiState.DiagnosticJson());
             text.Append(",\"desktopLayoutFlush\":").Append(desktopLayoutFlush==null?"null":desktopLayoutFlush.DiagnosticJson());
             text.Append(",\"layoutInputDiagnostic\":");
             if(layoutInputs==null) text.Append("null");

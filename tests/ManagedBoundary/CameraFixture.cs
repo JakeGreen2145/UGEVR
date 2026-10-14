@@ -100,7 +100,13 @@ namespace UnityEngine
     public struct Matrix4x4 { public float Marker; public float this[int i] { get { return i==0?Marker:0; } } }
     public struct Rect { public float x,y,width,height; }
     public struct Color { public float r,g,b,a;public static Color clear {get {return new Color();}} }
-    public class RenderTexture { }
+    public class RenderTexture : Object
+    {
+        static RenderTexture savedActive;
+        public static int ActiveQueries;
+        public static bool ThrowActive;
+        public static RenderTexture active {get {++ActiveQueries;if(ThrowActive) throw new System.InvalidOperationException();return savedActive;} set {savedActive=value;}}
+    }
     public enum CameraClearFlags { Skybox=1, Color=2, Depth=3, Nothing=4 }
     public class Transform : Component
     {
@@ -133,7 +139,16 @@ namespace UnityEngine
         public enum Axis {Horizontal,Vertical}
         public void SetSizeWithCurrentAnchors(Axis axis,float value) {if(axis==Axis.Horizontal) sizeDelta.x=value;else sizeDelta.y=value;}
     }
-    public class CanvasRenderer : Component { }
+    public class CanvasRenderer : Component
+    {
+        public bool CullValue,ClipValue,ThrowCull,ThrowInherited;
+        public float AlphaValue=1,InheritedAlphaValue=1;
+        public int NativeQueries;
+        public bool cull {get {++NativeQueries;if(ThrowCull) throw new System.InvalidOperationException();return CullValue;}}
+        public bool hasRectClipping {get {++NativeQueries;return ClipValue;}}
+        public float GetAlpha() {++NativeQueries;return AlphaValue;}
+        public float GetInheritedAlpha() {++NativeQueries;if(ThrowInherited) throw new System.InvalidOperationException();return InheritedAlphaValue;}
+    }
     public enum RenderMode {ScreenSpaceOverlay,ScreenSpaceCamera,WorldSpace}
     public enum AdditionalCanvasShaderChannels {None=0,TexCoord1=1,Normal=2}
     public class Canvas : Component
@@ -160,6 +175,9 @@ namespace UnityEngine
     }
     public class Camera : Component
     {
+        static Camera savedCurrent;
+        public static int CurrentQueries;
+        public static Camera current {get {++CurrentQueries;return savedCurrent;} set {savedCurrent=value;}}
         public Transform transform=new Transform();
         public RenderTexture targetTexture;
         Matrix4x4 projection,view;

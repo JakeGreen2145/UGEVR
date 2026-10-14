@@ -54,6 +54,7 @@ public class Injector : BaseUnityPlugin
     int overlayIsolationLayer=-1,layerFailureCaptures;
     int overlaySceneScanLimit=OverlayLayerInventory.DefaultScanLimit;
     bool captureLayoutInputs;
+    bool captureNativeUiState;
     bool compareHierarchyInventory;
     bool flushDesktopLayoutBeforeBorrow;
     string layoutInputRootRectIds;
@@ -78,6 +79,7 @@ public class Injector : BaseUnityPlugin
             unitsPerMeter=Config.Bind("Tracking","UnitsPerMeter",1f,"Game world units per physical meter.").Value;
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
+            captureNativeUiState=Config.Bind("Diagnostics","CaptureNativeUiState",false,"Opt-in cached CanvasRenderer cull/clipping/alpha and render-context observations only for capture requests admitted before the eye pair. No native UI state is restored; requires CaptureImages.").Value && capturesEnabled;
             compareHierarchyInventory=Config.Bind("Diagnostics","CompareHierarchyInventory",false,"Diagnostic only: permit at most two explicitly requested sequential Resources-versus-scene hierarchy comparisons before an eye pair. Requires CaptureImages and controller session identity; does not replace layer guards.").Value && capturesEnabled;
             allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
             captureLayoutInputs=Config.Bind("Diagnostics","CaptureLayoutInputs",false,"Opt-in bounded cached text/layout input snapshots for UI restoration mismatches. Requires CaptureImages; no preferred-size, generator or game getters are queried.").Value && capturesEnabled;
@@ -318,7 +320,9 @@ public class Injector : BaseUnityPlugin
         RigidPose anchor=new RigidPose(Position(basePosition),Rotation(baseRotation));
         var actualEyes=new RigidPose[2];
         var beforeRenderProjection=new Matrix4x4[2];
-        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds):null;
+        string request=Path.Combine(evidenceDir,"capture-request");
+        bool nativeUiRequested=NativeUiStateDiagnostics.ShouldCapture(captureNativeUiState,capturesEnabled,captureNativeUiState && capturesEnabled && File.Exists(request));
+        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,nativeUiRequested):null;
         if(overlays!=null && capturesEnabled) overlays.EnableWallTiming();
         if(overlays!=null) overlays.SetDesktopLayoutFlush(desktopFlush);
         if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
@@ -372,6 +376,7 @@ public class Injector : BaseUnityPlugin
         {
             if(overlayCamera!=null) overlayCamera.targetTexture=null;
             if(overlays!=null) overlays.RebuildRestoredGeometry();
+            if(overlays!=null) overlays.CaptureNativeUiAfterRestoration();
             if(overlays!=null)
                 try {overlays.ValidateInactiveCanvases("after desktop restoration");}
                 catch(InvalidOperationException inactiveError) {Logger.LogError(inactiveError.Message);}
@@ -387,7 +392,6 @@ public class Injector : BaseUnityPlugin
         SetEyeTextures(eyes[0].GetNativeTexturePtr(),eyes[1].GetNativeTexturePtr());
         GL.IssuePluginEvent(renderEvent,1);
         phase=2; phaseStarted=Time.realtimeSinceStartup; ++rendered;
-        string request=Path.Combine(evidenceDir,"capture-request");
         if (capturesEnabled && File.Exists(request))
         {
             File.Delete(request);
