@@ -78,6 +78,8 @@ internal static class Program
             {
                 Cancellation.Token.ThrowIfCancellationRequested();
                 var session = ReadSession(directory); var view = View(directory);
+                if (view.GetValueOrDefault("failure_kind") == "initialization")
+                { view["operation_result"] = "initialization_failed"; FlatYaml.Print(view); return 3; }
                 if (session["state"] is "failed" or "stopped") { FlatYaml.Print(view); return 3; }
                 if (view["runtime_ready"] == "true" && view["engine_ready"] == "true") { FlatYaml.Print(view); return 0; }
                 await Task.Delay(100, Cancellation.Token);
@@ -154,7 +156,12 @@ internal static class Program
                 if (session["state"] != "stopping")
                 {
                     var view = View(directory);
-                    session["state"] = view["runtime_ready"] == "true" && view["engine_ready"] == "true" ? "active" : "waiting_for_injector";
+                    if (view.GetValueOrDefault("failure_kind") == "initialization")
+                    {
+                        session["state"] = "failed"; session["failure_kind"] = "initialization";
+                        session["initialization_error"] = view["initialization_error"]; session["last_error"] = view["initialization_error"];
+                    }
+                    else session["state"] = view["runtime_ready"] == "true" && view["engine_ready"] == "true" ? "active" : "waiting_for_injector";
                 }
                 FlatYaml.Write(SessionPath(directory), session);
                 await Task.Delay(200);
@@ -271,6 +278,14 @@ internal static class Program
             if (producer.GetValueOrDefault("runtime") != "openvr") throw new FormatException("Unsupported runtime in this protocol version.");
             foreach (var field in new[] { "unity_version", "engine_ready", "runtime", "runtime_ready", "rendering_active", "submitted_pairs", "acknowledged_revision" }) view[field] = producer.GetValueOrDefault(field, "");
             view["injector_error"] = producer.GetValueOrDefault("last_error", ""); view["injector_status"] = "fresh";
+            var initializationError = producer.GetValueOrDefault("initialization_error", "");
+            view["initialization_error"] = initializationError;
+            if (initializationError.Length > 0)
+            {
+                view["state"] = "failed"; view["failure_kind"] = "initialization";
+                view["last_error"] = initializationError;
+                view["runtime_ready"] = "false"; view["rendering_active"] = "false";
+            }
         }
         catch (Exception e) when (e is IOException or FormatException or JsonException)
         { view["injector_status"] = "invalid"; view["injector_error"] = e.Message; }

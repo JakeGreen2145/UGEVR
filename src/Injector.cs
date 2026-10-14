@@ -74,7 +74,7 @@ public class Injector : BaseUnityPlugin
             Publish(true);
             StartCoroutine(Run());
         }
-        catch (Exception ex) { Fail(ex); }
+        catch (Exception ex) { Fail(ex,true); }
     }
 
     IEnumerator Run()
@@ -104,7 +104,7 @@ public class Injector : BaseUnityPlugin
             Logger.LogInfo("VR_READY resolution="+eyes[0].width+"x"+eyes[0].height+" unitsPerMeter="+unitsPerMeter+" captureImages="+capturesEnabled);
             Publish(true);
         }
-        catch (Exception ex) { Fail(ex); yield break; }
+        catch (Exception ex) { Fail(ex,true); yield break; }
         var end=new WaitForEndOfFrame();
         while (!quitting)
         {
@@ -359,8 +359,16 @@ public class Injector : BaseUnityPlugin
     void RestoreBackground() { if (ownsBackground) { if (Application.runInBackground) Application.runInBackground=oldBackground; ownsBackground=false; } }
     void Fail(Exception error)
     {
+        Fail(error,false);
+    }
+    void Fail(Exception error,bool initialization)
+    {
         Logger.LogError(error);
-        if (session!=null) session.LastError=error.Message;
+        if (session!=null)
+        {
+            session.LastError=error.Message;
+            if (initialization) session.InitializationError=error.Message;
+        }
         active=false; renderingActive=false; RestoreBackground();
         try { BeginDrain(); } catch (Exception drainError) { Logger.LogError("Drain failed: "+drainError.Message); }
         Publish(true);

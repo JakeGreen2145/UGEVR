@@ -8,7 +8,13 @@ if (args.FirstOrDefault() == "child")
     var mode = args.ElementAtOrDefault(1) ?? "good";
     File.WriteAllText(Path.Combine(directory, "child-environment.txt"), (Environment.GetEnvironmentVariable("SteamAppId") ?? "") + "\n" + (Environment.GetEnvironmentVariable("SteamGameId") ?? ""));
     var limit = DateTime.UtcNow.AddSeconds(mode == "natural" ? 3 : 90);
-    var producer = new Ugevr.InjectorSession(mode == "wrong" ? Guid.Empty.ToString() : run, directory, mode == "wrongpid" ? Environment.ProcessId + 1 : Environment.ProcessId);
+    bool initializationFailed = mode.StartsWith("initialization-failure", StringComparison.Ordinal);
+    var producer = new Ugevr.InjectorSession(mode is "wrong" or "initialization-failure-wrong" ? Guid.Empty.ToString() : run, directory, mode == "wrongpid" ? Environment.ProcessId + 1 : Environment.ProcessId);
+    if (initializationFailed) producer.InitializationError = "OpenVR initialization failed: 216";
+    if (mode == "legacy-error") producer.LastError = "OpenVR initialization failed: 216";
+    if (mode == "camera-warning") producer.LastError = "camera: no perspective camera found yet";
+    if (mode == "tracking-warning") producer.LastError = "tracking: HMD pose is temporarily unavailable";
+    if (mode == "command-warning") producer.LastError = "command: recenter requires a valid head sample";
     bool enabled = true;
     while (DateTime.UtcNow < limit)
     {
@@ -20,8 +26,8 @@ if (args.FirstOrDefault() == "child")
         }
         if (mode != "missing")
         {
-            producer.Publish(DateTime.UtcNow, "controlled-child", true, true, enabled, 8, true);
-            if (mode == "stale") File.SetLastWriteTimeUtc(Path.Combine(directory, "injector-status.yaml"), DateTime.UtcNow.AddSeconds(-20));
+            producer.Publish(DateTime.UtcNow, "controlled-child", true, !initializationFailed && mode != "legacy-error", enabled && !initializationFailed && mode != "legacy-error", 8, true);
+            if (mode is "stale" or "initialization-failure-stale") File.SetLastWriteTimeUtc(Path.Combine(directory, "injector-status.yaml"), DateTime.UtcNow.AddSeconds(-20));
         }
         await Task.Delay(50);
     }
@@ -82,6 +88,29 @@ try
     Require(force.Code == 0 && Field(force.Output, "process_alive", "false"), "explicit force terminates the owned child");
     var afterExit = await Cli("status", "--session-dir", good.Directory);
     Require(Field(afterExit.Output, "injector_status", "stale") && Field(afterExit.Output, "runtime_ready", "false"), "exited process invalidates producer readiness");
+    var initializationTimer = Stopwatch.StartNew();
+    var initializationFailure = await Launch("initialization-failure");
+    Require(initializationFailure.Code == 3 && Field(initializationFailure.Output, "operation_result", "initialization_failed") && Field(initializationFailure.Output, "state", "failed") && initializationTimer.Elapsed < TimeSpan.FromSeconds(2), "typed initialization failure reports before launch deadline");
+    Require(Field(initializationFailure.Output, "process_alive", "true") && Field(initializationFailure.Output, "engine_ready", "true"), "initialization failure preserves the owned process and observed engine readiness");
+    var initializationAck = await Cli("disable", "--session-dir", initializationFailure.Directory, "--timeout-seconds", "2");
+    Require(initializationAck.Code == 0 && Field(initializationAck.Output, "injector_error", "") && Field(initializationAck.Output, "initialization_error", "OpenVR initialization failed: 216") && Field(initializationAck.Output, "state", "failed"), "normal acknowledgment cannot erase sticky initialization failure");
+    var failureStop = await Cli("stop", "--session-dir", initializationFailure.Directory, "--force", "true", "--timeout-seconds", "3");
+    Require(failureStop.Code == 0 && Field(failureStop.Output, "cleanup_complete", "true"), "explicit owned stop remains available after initialization failure");
+    foreach (var warning in new[] { "camera-warning", "tracking-warning", "command-warning" })
+    {
+        var warned = await Launch(warning);
+        Require(warned.Code == 0 && !Field(warned.Output, "state", "failed") && !Field(warned.Output, "operation_result", "initialization_failed"), warning + " never implies terminal initialization failure");
+        await Cli("stop", "--session-dir", warned.Directory, "--force", "true", "--timeout-seconds", "3");
+    }
+    var legacy = await Launch("legacy-error");
+    Require(legacy.Code == 4 && Field(legacy.Output, "operation_result", "readiness_timeout") && !Field(legacy.Output, "state", "failed"), "freeform legacy error text is not classified as a terminal failure");
+    await Cli("stop", "--session-dir", legacy.Directory, "--force", "true", "--timeout-seconds", "3");
+    foreach (var rejected in new[] { "initialization-failure-wrong", "initialization-failure-stale" })
+    {
+        var failure = await Launch(rejected);
+        Require(failure.Code == 4 && Field(failure.Output, "injector_status", rejected.EndsWith("wrong") ? "identity_mismatch" : "stale") && !Field(failure.Output, "operation_result", "initialization_failed"), rejected + " cannot classify a terminal failure without valid fresh identity");
+        await Cli("stop", "--session-dir", failure.Directory, "--force", "true", "--timeout-seconds", "3");
+    }
     var brokenMonitor = await Launch("good");
     Require(File.ReadAllText(Path.Combine(brokenMonitor.Directory, "child-environment.txt")) == "65535\n65536", "launch without override preserves explicitly inherited Steam values");
     File.WriteAllText(Path.Combine(brokenMonitor.Directory, "stop-request.yaml"), "invalid-stop-request\n");

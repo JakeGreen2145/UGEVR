@@ -23,6 +23,8 @@ namespace Ugevr
         DateTime nextPoll = DateTime.MinValue, nextStatus = DateTime.MinValue;
         public long AcknowledgedRevision;
         public string LastError = "";
+        // Terminal setup failure survives warning replacement and command acknowledgments.
+        public string InitializationError = "";
         public bool Available { get { return directory != null; } }
         public InjectorSession(string runId, string directory, int processId)
         {
@@ -107,7 +109,8 @@ namespace Ugevr
                 "\nrendering_active: " + renderingActive.ToString().ToLowerInvariant() +
                 "\nsubmitted_pairs: " + submittedPairs.ToString(CultureInfo.InvariantCulture) +
                 "\nacknowledged_revision: " + AcknowledgedRevision.ToString(CultureInfo.InvariantCulture) +
-                "\nlast_error: " + Scalar(LastError) + "\n";
+                "\nlast_error: " + Scalar(LastError) +
+                "\ninitialization_error: " + Scalar(InitializationError) + "\n";
             string destination=Path.Combine(directory,"injector-status.yaml"), temporary=destination+"."+Guid.NewGuid().ToString("N")+".tmp";
             try
             {
