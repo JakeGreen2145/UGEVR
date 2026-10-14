@@ -399,7 +399,8 @@ public class Injector : BaseUnityPlugin
             throw new InvalidOperationException("Camera clip distances must be finite, with 0 < near < far. Use an explicit profile remedy for invalid clipping.");
         float left=0,right=0,top=0,bottom=0;
         system.GetProjectionRaw(eye,ref left,ref right,ref top,ref bottom);
-        return Matrix4x4.Frustum(left*near,right*near,-bottom*near,-top*near,near,far);
+        EyeFrustum bounds=EyeProjection.FromOpenVrRaw(left,right,top,bottom,near,far);
+        return Matrix4x4.Frustum((float)bounds.Left,(float)bounds.Right,(float)bounds.Bottom,(float)bounds.Top,near,far);
     }
     static RigidPose Pose(HmdMatrix34_t m) { return TrackingMath.FromOpenVr(new double[] {m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11}); }
     static Position Position(Vector3 v) { return new Position(v.x,v.y,v.z); }

@@ -23,14 +23,18 @@ try {
     var eyeL = vr.GetEyeToHeadTransform(EVREye.Eye_Left);
     var eyeR = vr.GetEyeToHeadTransform(EVREye.Eye_Right);
     float[] Matrix(HmdMatrix34_t value) => new[]{value.m0,value.m1,value.m2,value.m3,value.m4,value.m5,value.m6,value.m7,value.m8,value.m9,value.m10,value.m11};
+    float[] ProjectionMatrix(HmdMatrix44_t value) => new[]{value.m0,value.m1,value.m2,value.m3,value.m4,value.m5,value.m6,value.m7,value.m8,value.m9,value.m10,value.m11,value.m12,value.m13,value.m14,value.m15};
     object Projection(EVREye eye) {
         float left=0,right=0,top=0,bottom=0;
         vr.GetProjectionRaw(eye,ref left,ref right,ref top,ref bottom);
         // These normalized near-plane bounds match Injector.Projection's Unity
-        // Frustum(left*n,right*n,-bottom*n,-top*n,n,f) call. Actual clipping
+        // Frustum(left*n,right*n,top*n,bottom*n,n,f) call. OpenVR's raw
+        // top/bottom names are reversed; the values already describe -Y/+Y.
+        // Actual clipping
         // and applied matrices are recorded by opt-in injector diagnostics.
         return new {eye=eye.ToString(),left,right,top,bottom,
-            unityFrustumAtUnitNear=new[]{left,right,-bottom,-top},
+            unityFrustumAtUnitNear=new[]{left,right,top,bottom},
+            runtimeMatrixAtNear1Far2500=ProjectionMatrix(vr.GetProjectionMatrix(eye,1,2500)),
             convention="OpenVR tangents; Unity frustum ordered left,right,bottom,top at near=1"};
     }
     var compositor = OpenVR.Compositor;

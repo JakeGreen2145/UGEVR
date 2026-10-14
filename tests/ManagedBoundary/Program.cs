@@ -18,8 +18,39 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); SessionChecks();
+        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
+    }
+    static void ProjectionChecks()
+    {
+        // Independent Steam Frame GetProjectionMatrix observations at near=1,
+        // far=2500. XY coefficients do not depend on depth API conventions.
+        double[][] observations={
+            new[]{-1.667044,1.2121416,-1.7561004,1.157068,.6946409,-.15799691,.68653774,-.20562917},
+            new[]{-1.2105896,1.6695673,-1.7206812,1.177319,.69440657,.15935856,.69013107,-.18749554}
+        };
+        foreach (double[] data in observations)
+        {
+            EyeFrustum f=EyeProjection.FromOpenVrRaw(data[0],data[1],data[2],data[3],1,2500);
+            double sx=2*f.Near/(f.Right-f.Left), ox=(f.Right+f.Left)/(f.Right-f.Left);
+            double sy=2*f.Near/(f.Top-f.Bottom), oy=(f.Top+f.Bottom)/(f.Top-f.Bottom);
+            Assert(Math.Abs(sx-data[4])<1e-7 && Math.Abs(ox-data[5])<1e-7,"Asymmetric horizontal projection matches independent runtime matrix");
+            Assert(Math.Abs(sy-data[6])<1e-7 && Math.Abs(oy-data[7])<1e-7,"Asymmetric vertical projection matches independent runtime matrix");
+            Assert(Math.Abs(-oy+data[7])<1e-7,"Head-forward ray has the runtime's vertical NDC location");
+            Near(sy*f.Bottom/f.Near-oy,-1,"Lower clipping edge maps to NDC -1");
+            Near(sy*f.Top/f.Near-oy,1,"Upper clipping edge maps to NDC +1");
+            EyeFrustum scaled=EyeProjection.FromOpenVrRaw(data[0],data[1],data[2],data[3],.3,100);
+            Near((scaled.Top+scaled.Bottom)/(scaled.Top-scaled.Bottom),oy,"Game near clip preserves vertical asymmetry");
+        }
+        EyeFrustum symmetric=EyeProjection.FromOpenVrRaw(-1,1,-1,1,.5,50);
+        Near(symmetric.Bottom,-.5,"Symmetric headset lower bound is unchanged");
+        Near(symmetric.Top,.5,"Symmetric headset upper bound is unchanged");
+        foreach (double[] bad in new[]{new[]{Double.NaN,1.0,-1,1,.3,100},new[]{-1.0,1,Double.PositiveInfinity,1,.3,100},new[]{1.0,1,-1,1,.3,100},new[]{-1.0,1,1,-1,.3,100},new[]{-1.0,1,-1,1,0,100},new[]{-1.0,1,-1,1,.3,.3},new[]{-1e38,1e38,-1,1,1e38,2e38}})
+        {
+            bool rejected=false;
+            try { EyeProjection.FromOpenVrRaw(bad[0],bad[1],bad[2],bad[3],bad[4],bad[5]); } catch(ArgumentException) { rejected=true; }
+            Assert(rejected,"Invalid projection bounds fail before camera rendering");
+        }
     }
     static void TrackingReacquisitionChecks()
     {
