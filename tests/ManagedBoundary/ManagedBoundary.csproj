@@ -21,6 +21,9 @@
     <Compile Include="../../src/PublicOwnedGamepad.cs" Link="PublicOwnedGamepad.cs" />
     <Compile Include="../../src/OuterGamepadCompatibilityProfile.cs" Link="OuterGamepadCompatibilityProfile.cs" />
     <Compile Include="../../src/OpenVrLegacyRightReader.cs" Link="OpenVrLegacyRightReader.cs" />
+    <Compile Include="../../src/OpenVrRewiredPairReader.cs" Link="OpenVrRewiredPairReader.cs" />
+    <Compile Include="../../src/RewiredFiveInputDiagnostic.cs" Link="RewiredFiveInputDiagnostic.cs" />
+    <Compile Include="../../src/RewiredChannelDescriptor.cs" Link="RewiredChannelDescriptor.cs" />
     <Compile Include="../../src/RewiredInputDiagnostic.cs" Link="RewiredInputDiagnostic.cs" />
     <Compile Include="../../src/RewiredFailureDiagnostics.cs" Link="RewiredFailureDiagnostics.cs" />
     <Compile Include="../../src/RewiredActionReadback.cs" Link="RewiredActionReadback.cs" />

@@ -13,13 +13,16 @@ using UnityEngine;
 namespace Ugevr
 {
     // Experimental profile for one observed build. All target members invoked here are public.
-    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics,IRewiredRuntimeMonitor,IRewiredActionReadback
+    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics,IRewiredRuntimeMonitor,IRewiredActionReadback,IOwnedFiveRewiredInput
     {
         public const string Profile="firewatch-2017-rewired-right-stick-trigger-v1";
         public const string ObservedTriggerProfile="firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1";
-        public static bool SupportsProfile(string profile) {return profile==Profile || profile==ObservedTriggerProfile;}
+        public const string FiveChannelProfile="firewatch-2017-rewired-dual-sticks-observed-trigger-axis1-v1";
+        public static bool SupportsProfile(string profile) {return profile==Profile || profile==ObservedTriggerProfile || profile==FiveChannelProfile;}
         const string CoreHash="15508ee97bbf97731f20be14e40b36d208507ad475b97c896866d39c13aef87b";
         const string GameHash="145b56aebe921c0fdc660a4e64008272e09a283332146958ce2f356c7490522a";
+        readonly RewiredChannelDescriptor channels;
+        double[] desired;
         readonly Func<double> clock;
         readonly Func<bool> focused;
         readonly string tag="UGEVR-Rewired-"+Guid.NewGuid().ToString("N");
@@ -35,7 +38,7 @@ namespace Ugevr
         Action handler;
         RewiredOwnershipSnapshot definitionExpected,channelExpected,runtimeChannelExpected,expected;
         bool mutationAttempted,subscribed,deviceRemoved,definitionRemoved,ambiguous;
-        double x,y,trigger,expires,lastFeedAt;
+        double expires,lastFeedAt;
         double heartbeatStart,lastCallbackAt,lastMonitorAt,nextFullMonitor;
         bool callbackObserved,contextLost;
         public const double CallbackGraceSeconds=.5;
@@ -48,9 +51,13 @@ namespace Ugevr
         bool? preflightReady;
         int? preflightDefinitions,preflightCustomDevices,preflightJoysticks;
         public bool NeedsCleanup {get {return mutationAttempted && (!definitionRemoved || !deviceRemoved || subscribed || ambiguous);}}
-        PublicOwnedRewiredInput(string reason) {UnavailableReason=reason;FaultReason="";CleanupStatus="not_created";}
+        PublicOwnedRewiredInput(string reason) {channels=RewiredChannelDescriptor.Legacy;desired=new double[3];UnavailableReason=reason;FaultReason="";CleanupStatus="not_created";}
         internal PublicOwnedRewiredInput(Assembly assembly,object manager,Func<double> clock,Func<bool> focused,bool pinned=true)
+            :this(assembly,manager,clock,focused,pinned,RewiredChannelDescriptor.Legacy) {}
+        internal PublicOwnedRewiredInput(Assembly assembly,object manager,Func<double> clock,Func<bool> focused,bool pinned,RewiredChannelDescriptor channels)
         {
+            if(channels!=RewiredChannelDescriptor.Legacy && channels!=RewiredChannelDescriptor.Five) throw new ArgumentException("Compiled channel descriptor required.");
+            this.channels=channels;desired=new double[channels.Count];
             this.manager=manager;this.clock=clock;this.focused=focused;this.pinned=pinned;UnavailableReason="";FaultReason="";CleanupStatus="not_created";
             hub=assembly.GetType("Rewired.ReInput",true);dataType=assembly.GetType("Rewired.Data.UserData",true);
             definitionType=assembly.GetType("Rewired.Data.CustomController_Editor",true);editorMapType=assembly.GetType("Rewired.Data.Mapping.ControllerMap_Editor",true);
@@ -94,7 +101,9 @@ namespace Ugevr
             ConstructorInfo entry=entryType.GetConstructor(new[]{typeof(int),elementEnum,typeof(int),poleEnum,rangeEnum,typeof(bool)});
             if(entry==null || (pinned && entry.MetadataToken!=0x06001c8c)) throw new InvalidOperationException("Public map entry shape changed.");
         }
-        public static IOwnedRewiredInput Create()
+        public static IOwnedRewiredInput Create() {return CreateBackend(RewiredChannelDescriptor.Legacy);}
+        public static IOwnedFiveRewiredInput CreateFive() {return (IOwnedFiveRewiredInput)CreateBackend(RewiredChannelDescriptor.Five);}
+        static IOwnedRewiredInput CreateBackend(RewiredChannelDescriptor channels)
         {
             try
             {
@@ -111,7 +120,7 @@ namespace Ugevr
                     if(manager!=null) return new PublicOwnedRewiredInput("manager_ambiguous");manager=candidate;
                 }
                 if(manager==null) return new PublicOwnedRewiredInput("manager_not_active");
-                return new PublicOwnedRewiredInput(core,manager,delegate {return Stopwatch.GetTimestamp()/(double)Stopwatch.Frequency;},delegate {return Application.isFocused;});
+                return new PublicOwnedRewiredInput(core,manager,delegate {return Stopwatch.GetTimestamp()/(double)Stopwatch.Frequency;},delegate {return Application.isFocused;},true,channels);
             }
             catch(Exception error) {return new PublicOwnedRewiredInput("public_api_profile_unavailable") {LastFailure=RewiredFailureInfo.Capture(error,"factory_public_profile","public_api_exception")};}
         }
@@ -201,8 +210,7 @@ namespace Ugevr
             addStage="preflight_definitions";preflightDefinitions=DefinitionIds().Length;if(preflightDefinitions!=0) throw new RewiredOperationException(addStage,"existing_definition_conflict");
             addStage="preflight_custom_devices";preflightCustomDevices=CustomDevices().Length;if(preflightCustomDevices!=0) throw new RewiredOperationException(addStage,"existing_custom_device_conflict");
             addStage="preflight_joysticks";preflightJoysticks=Bounded(PublicValue(global,"Joysticks"),64).Length;if(preflightJoysticks!=0) throw new RewiredOperationException(addStage,"existing_joystick_conflict");
-            int[] actionIds={31,32,36};string[] actionNames={"LookXAxis_Stick","LookYAxis_Stick","DialogDownButton"};
-            addStage="preflight_action_names";for(int i=0;i<3;++i) if((string)Call(data,"GetActionNameById",0x0600148f,typeof(string),new[]{typeof(int)},actionIds[i])!=actionNames[i]) throw new RewiredOperationException(addStage,"action_profile_mismatch");
+            addStage="preflight_action_names";for(int i=0;i<channels.Count;++i) if((string)Call(data,"GetActionNameById",0x0600148f,typeof(string),new[]{typeof(int)},channels.ActionId(i))!=channels.ActionName(i)) throw new RewiredOperationException(addStage,"action_profile_mismatch");
             addStage="preflight_categories";if(!ContainsId((int[])Call(data,"GetMapCategoryIds",0x060014c4,typeof(int[]),Type.EmptyTypes),0)) throw new RewiredOperationException(addStage,"category_zero_unavailable");
             addStage="preflight_layouts";if(!ContainsId((int[])Call(data,"GetCustomControllerLayoutIds",0x06001506,typeof(int[]),Type.EmptyTypes),0)) throw new RewiredOperationException(addStage,"layout_zero_unavailable");
             addStage="create_definition";
@@ -221,9 +229,10 @@ namespace Ugevr
             addStage="snapshot_definition";
             definitionExpected=DefinitionSnapshot();
             addStage="create_definition_axes";
-            for(int i=0;i<3;++i) {Call(definition,"AddAxis",0x06000d06,typeof(void),Type.EmptyTypes);definitionExpected=DefinitionSnapshot();}
+            for(int i=0;i<channels.Count;++i) {Call(definition,"AddAxis",0x06000d06,typeof(void),Type.EmptyTypes);definitionExpected=DefinitionSnapshot();}
             axes=(int[])Call(definition,"GetAxisElementIdentifierIds",0x06000d00,typeof(int[]),Type.EmptyTypes);
-            if(axes.Length!=3 || axes[0]==axes[1] || axes[0]==axes[2] || axes[1]==axes[2]) throw new InvalidOperationException("Owned axis shape changed.");
+            if(axes.Length!=channels.Count) throw new InvalidOperationException("Owned axis shape changed.");
+            for(int i=0;i<axes.Length;++i) for(int j=0;j<i;++j) if(axes[i]==axes[j]) throw new InvalidOperationException("Owned axis IDs duplicated.");
             channelExpected=DefinitionSnapshot(false);
             addStage="create_definition_map";
             if(MapCount()!=0) throw new RewiredOperationException(addStage,"existing_definition_map_preserved");
@@ -237,11 +246,11 @@ namespace Ugevr
             if(editorMap.GetType()!=editorMapType || Convert.ToInt32(PublicValue(editorMap,"categoryId"))!=0 || Convert.ToInt32(PublicValue(editorMap,"layoutId"))!=0 || Convert.ToInt32(PublicValue(editorMap,"customControllerUid"))!=definitionId)
                 throw new RewiredOperationException(addStage,"map_identity_unexpected_preserved");
             IList list=PublicValue(editorMap,"actionElementMaps") as IList;if(list==null || list.Count!=0) throw new RewiredOperationException(addStage,"map_initial_content_unexpected_preserved");
-            definitionExpected=DefinitionSnapshot();editorEntries=new object[3];
+            definitionExpected=DefinitionSnapshot();editorEntries=new object[channels.Count];
             addStage="create_map_entries";
             ConstructorInfo constructor=entryType.GetConstructor(new[]{typeof(int),elementEnum,typeof(int),poleEnum,rangeEnum,typeof(bool)});
-            for(int i=0;i<3;++i)
-            {editorEntries[i]=constructor.Invoke(new object[]{actionIds[i],Enum.Parse(elementEnum,"Axis"),axes[i],Enum.Parse(poleEnum,"Positive"),Enum.Parse(rangeEnum,"Full"),false});list.Add(editorEntries[i]);definitionExpected=DefinitionSnapshot();}
+            for(int i=0;i<channels.Count;++i)
+            {editorEntries[i]=constructor.Invoke(new object[]{channels.ActionId(i),Enum.Parse(elementEnum,"Axis"),axes[i],Enum.Parse(poleEnum,"Positive"),Enum.Parse(rangeEnum,"Full"),false});list.Add(editorEntries[i]);definitionExpected=DefinitionSnapshot();}
             definitionExpected=DefinitionSnapshot();
             addStage="create_runtime_controller";
             try {owned=Call(global,"CreateCustomController",0x06002840,controllerType,new[]{typeof(int),typeof(string)},definitionId,tag);}
@@ -343,17 +352,17 @@ namespace Ugevr
         {
             if(!Contains(CustomDevices(),owned) || !DeviceTagged(owned) || Convert.ToInt32(PublicValue(owned,"id"))!=ownedId) throw new InvalidOperationException("Owned runtime device changed.");
             var nodes=new List<object>();var text=new StringBuilder();nodes.Add(owned);Value(text,PublicValue(owned,"enabled"));
-            if(Convert.ToInt32(PublicValue(owned,"axisCount"))!=3) throw new InvalidOperationException("Runtime axis count changed.");
-            object collection=PublicValue(owned,"Axes");object[] runtimeAxes=Bounded(collection,3);if(runtimeAxes.Length!=3) throw new InvalidOperationException("Runtime axis inventory changed.");nodes.Add(collection);nodes.AddRange(runtimeAxes);
-            object identifierCollection=PublicValue(owned,"AxisElementIdentifiers");object[] identifiers=Bounded(identifierCollection,3);if(identifiers.Length!=3) throw new InvalidOperationException("Runtime identifier inventory changed.");nodes.Add(identifierCollection);nodes.AddRange(identifiers);
-            for(int i=0;i<3;++i)
+            if(Convert.ToInt32(PublicValue(owned,"axisCount"))!=channels.Count) throw new InvalidOperationException("Runtime axis count changed.");
+            object collection=PublicValue(owned,"Axes");object[] runtimeAxes=Bounded(collection,channels.Count);if(runtimeAxes.Length!=channels.Count) throw new InvalidOperationException("Runtime axis inventory changed.");nodes.Add(collection);nodes.AddRange(runtimeAxes);
+            object identifierCollection=PublicValue(owned,"AxisElementIdentifiers");object[] identifiers=Bounded(identifierCollection,channels.Count);if(identifiers.Length!=channels.Count) throw new InvalidOperationException("Runtime identifier inventory changed.");nodes.Add(identifierCollection);nodes.AddRange(identifiers);
+            for(int i=0;i<channels.Count;++i)
             {
                 if((int)M(runtimeAxesType,"GetAxisIndexById",0x06000836,typeof(int),typeof(int)).Invoke(owned,new object[]{axes[i]})!=i || Convert.ToInt32(PublicValue(runtimeAxes[i],"id"))!=axes[i] || !System.Object.ReferenceEquals(PublicValue(runtimeAxes[i],"elementIdentifier"),identifiers[i])) throw new InvalidOperationException("Runtime channel index/identifier changed.");
                 foreach(string member in new[]{"id","name","type","pollingDeadZone"}) Value(text,PublicValue(runtimeAxes[i],member));
                 foreach(string member in new[]{"id","name","positiveName","negativeName","elementType","compoundElementType"}) Value(text,PublicValue(identifiers[i],member));
             }
-            object calibration=PublicValue(owned,"calibrationMap");if(calibration==null || calibration.GetType()!=calibrationType || Convert.ToInt32(PublicValue(calibration,"axisCount"))!=3) throw new InvalidOperationException("Runtime calibration changed.");nodes.Add(calibration);
-            object calibrationCollection=PublicValue(calibration,"Axes");object[] calibrated=Bounded(calibrationCollection,3);if(calibrated.Length!=3) throw new InvalidOperationException("Calibration axis inventory changed.");nodes.Add(calibrationCollection);nodes.AddRange(calibrated);
+            object calibration=PublicValue(owned,"calibrationMap");if(calibration==null || calibration.GetType()!=calibrationType || Convert.ToInt32(PublicValue(calibration,"axisCount"))!=channels.Count) throw new InvalidOperationException("Runtime calibration changed.");nodes.Add(calibration);
+            object calibrationCollection=PublicValue(calibration,"Axes");object[] calibrated=Bounded(calibrationCollection,channels.Count);if(calibrated.Length!=channels.Count) throw new InvalidOperationException("Calibration axis inventory changed.");nodes.Add(calibrationCollection);nodes.AddRange(calibrated);
             foreach(object axis in calibrated)
             {
                 foreach(string member in new[]{"enabled","deadZone","calibratedZero","calibratedMin","calibratedMax","invert","sensitivityType","sensitivity","applyRangeCalibration"}) Value(text,PublicValue(axis,member));
@@ -378,10 +387,10 @@ namespace Ugevr
         {
             if(runtimeMap.GetType()!=hub.Assembly.GetType("Rewired.CustomControllerMap",true) || Convert.ToInt32(PublicValue(runtimeMap,"controllerType"))!=20 || Convert.ToInt32(PublicValue(runtimeMap,"controllerId"))!=ownedId || Convert.ToInt32(PublicValue(runtimeMap,"categoryId"))!=0 || Convert.ToInt32(PublicValue(runtimeMap,"layoutId"))!=0 || Convert.ToInt32(PublicValue(runtimeMap,"sourceMapId"))!=Convert.ToInt32(PublicValue(editorMap,"id")))
                 throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_identity_unexpected_preserved");
-            var entries=Bounded(PublicValue(runtimeMap,"AllMaps"),16);if(entries.Length!=3) throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_entries_unexpected_preserved");
-            int[] actions={31,32,36};
-            for(int i=0;i<3;++i)
-                if(Convert.ToInt32(PublicValue(entries[i],"actionId"))!=actions[i] || Convert.ToInt32(PublicValue(entries[i],"elementIdentifierId"))!=axes[i] || Convert.ToInt32(PublicValue(entries[i],"elementType"))!=0 || Convert.ToInt32(PublicValue(entries[i],"axisRange"))!=0 || Convert.ToInt32(PublicValue(entries[i],"axisContribution"))!=0 || (bool)PublicValue(entries[i],"invert"))
+            var entries=Bounded(PublicValue(runtimeMap,"AllMaps"),16);if(entries.Length!=channels.Count) throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_entries_unexpected_preserved");
+
+            for(int i=0;i<channels.Count;++i)
+                if(Convert.ToInt32(PublicValue(entries[i],"actionId"))!=channels.ActionId(i) || Convert.ToInt32(PublicValue(entries[i],"elementIdentifierId"))!=axes[i] || Convert.ToInt32(PublicValue(entries[i],"elementType"))!=0 || Convert.ToInt32(PublicValue(entries[i],"axisRange"))!=0 || Convert.ToInt32(PublicValue(entries[i],"axisContribution"))!=0 || (bool)PublicValue(entries[i],"invert"))
                     throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_entry_profile_unexpected_preserved");
         }
         static string MapXmlWithoutEnabled(string xml,bool enabled)
@@ -428,21 +437,35 @@ namespace Ugevr
                 if(assigned!=1 || maps.Length!=1 || (runtimeMap!=null && !System.Object.ReferenceEquals(maps[0],runtimeMap))) throw new InvalidOperationException("Owned assignment/map changed.");
                 nodes.Add(candidate);nodes.Add(maps[0]);MethodInfo serialize=maps[0].GetType().GetMethod("ToXmlString",Type.EmptyTypes);
                 if(serialize==null || !serialize.IsPublic || serialize.ReturnType!=typeof(string) || (pinned && serialize.MetadataToken!=0x06001ec0)) throw new InvalidOperationException("Public map serialization unavailable.");string xml=(string)serialize.Invoke(maps[0],null);if(String.IsNullOrEmpty(xml)) throw new InvalidOperationException("Runtime map serialization failed or unavailable.");Value(text,excludeMapEnabled?MapXmlWithoutEnabled(xml,MapEnabled()):xml);
-                object runtimeEntriesCollection=PublicValue(maps[0],"AllMaps");object[] runtimeEntries=Bounded(runtimeEntriesCollection,16);if(runtimeEntries.Length!=3) throw new InvalidOperationException("Runtime map entries changed.");nodes.Add(runtimeEntriesCollection);nodes.AddRange(runtimeEntries);
+                object runtimeEntriesCollection=PublicValue(maps[0],"AllMaps");object[] runtimeEntries=Bounded(runtimeEntriesCollection,16);if(runtimeEntries.Length!=channels.Count) throw new InvalidOperationException("Runtime map entries changed.");nodes.Add(runtimeEntriesCollection);nodes.AddRange(runtimeEntries);
             }
             return new RewiredOwnershipSnapshot {Nodes=nodes.ToArray(),Values=text.ToString()};
         }
         public void SetDesired(double x,double y,double trigger,double expires)
-        {CheckThread();this.x=x;this.y=y;this.trigger=trigger;this.expires=expires;}
+        {
+            if(channels!=RewiredChannelDescriptor.Legacy) throw new InvalidOperationException("Use the typed five-channel contract.");
+            SetDesiredValues(new[]{x,y,trigger},expires);
+        }
+        public void SetDesired(RewiredFiveValues values,double expires)
+        {
+            if(channels!=RewiredChannelDescriptor.Five || !values.Valid) throw new ArgumentException("Valid typed five-channel state required.");
+            SetDesiredValues(new[]{values.MoveX,values.MoveY,values.LookX,values.LookY,values.Trigger},expires);
+        }
+        void SetDesiredValues(double[] values,double expires)
+        {
+            CheckThread();if(Double.IsNaN(expires) || Double.IsInfinity(expires) || values.Length!=channels.Count) throw new ArgumentException("Invalid complete desired state.");
+            for(int i=0;i<values.Length;++i) if(Double.IsNaN(values[i]) || Double.IsInfinity(values[i]) || Math.Abs(values[i])>1 || i==values.Length-1 && values[i]<0) throw new ArgumentException("Invalid raw desired channel.");
+            desired=(double[])values.Clone();this.expires=expires;
+        }
         bool? ReadbackBool(RewiredActionReadback result,int bit,Func<bool> read)
         {try {return read();}catch {result.FailedFields|=1u<<bit;return null;}}
         double? ReadbackAxis(RewiredActionReadback result,int bit,Func<float> read)
         {try {float value=read();if(Single.IsNaN(value) || Single.IsInfinity(value)) {result.FailedFields|=1u<<bit;result.NonfiniteFields|=1u<<bit;return null;}return value;}catch {result.FailedFields|=1u<<bit;return null;}}
         public RewiredActionReadback CaptureReadback()
         {
-            var result=new RewiredActionReadback();
+            var result=new RewiredActionReadback {ChannelCount=channels.Count};
             try {CheckThread();CheckCurrentContext();if(owned==null || deviceRemoved || runtimeMap==null) throw new InvalidOperationException();}
-            catch {result.FailedFields=511;return result;}
+            catch {result.FailedFields=channels.Count==5?8191u:511u;return result;}
             result.MapEnabled=ReadbackBool(result,0,MapEnabled);result.ControllerEnabled=ReadbackBool(result,1,OwnedEnabled);
             result.OwnedAxis0=ReadbackAxis(result,2,delegate {return (float)M(runtimeAxesType,"GetAxisRaw",0x06000839,typeof(float),typeof(int)).Invoke(owned,new object[]{0});});
             result.OwnedAxis1=ReadbackAxis(result,3,delegate {return (float)M(runtimeAxesType,"GetAxisRaw",0x06000839,typeof(float),typeof(int)).Invoke(owned,new object[]{1});});
@@ -450,6 +473,13 @@ namespace Ugevr
             result.PlayerAction31=ReadbackAxis(result,5,delegate {return (float)M(player.GetType(),"GetAxisRaw",0x060021f9,typeof(float),typeof(int)).Invoke(player,new object[]{31});});
             result.PlayerAction32=ReadbackAxis(result,6,delegate {return (float)M(player.GetType(),"GetAxisRaw",0x060021f9,typeof(float),typeof(int)).Invoke(player,new object[]{32});});
             result.PlayerAction36=ReadbackAxis(result,7,delegate {return (float)M(player.GetType(),"GetAxisRaw",0x060021f9,typeof(float),typeof(int)).Invoke(player,new object[]{36});});
+            if(channels.Count==5)
+            {
+                result.OwnedAxis3=ReadbackAxis(result,9,delegate {return (float)M(runtimeAxesType,"GetAxisRaw",0x06000839,typeof(float),typeof(int)).Invoke(owned,new object[]{3});});
+                result.OwnedAxis4=ReadbackAxis(result,10,delegate {return (float)M(runtimeAxesType,"GetAxisRaw",0x06000839,typeof(float),typeof(int)).Invoke(owned,new object[]{4});});
+                result.PlayerAction29=ReadbackAxis(result,11,delegate {return (float)M(player.GetType(),"GetAxisRaw",0x060021f9,typeof(float),typeof(int)).Invoke(player,new object[]{29});});
+                result.PlayerAction30=ReadbackAxis(result,12,delegate {return (float)M(player.GetType(),"GetAxisRaw",0x060021f9,typeof(float),typeof(int)).Invoke(player,new object[]{30});});
+            }
             result.LastActiveMatchesOwned=ReadbackBool(result,8,delegate {return System.Object.ReferenceEquals(owned,M(global.GetType(),"GetLastActiveController",0x06002847,controllerBase).Invoke(global,null));});
             return result;
         }
@@ -504,16 +534,14 @@ namespace Ugevr
                 throw;
             }
         }
-        void Apply(double x,double y,double trigger)
+        void Apply(double[] values)
         {
             if(owned==null || deviceRemoved) return;
             CheckCurrentContext();
             if(!OwnedEnabled()) throw new RewiredOperationException("write_owned_axes","owned_controller_disabled");
             if(!RewiredOwnershipSnapshot.Same(channelExpected,DefinitionSnapshot(false)) || !RewiredOwnershipSnapshot.Same(runtimeChannelExpected,RuntimeChannelSnapshot()))
                 throw new InvalidOperationException("Original owned channel identity/configuration changed; no values written.");
-            Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},0,(float)x);
-            Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},1,(float)y);
-            Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},2,(float)trigger);
+            for(int i=0;i<channels.Count;++i) Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},i,(float)values[i]);
         }
         void OnInputUpdate()
         {
@@ -527,18 +555,18 @@ namespace Ugevr
                 }
                 callbackObserved=true;lastCallbackAt=now;
                 bool focus=focused();
-                if(!FeedAllowed(focus,!String.IsNullOrEmpty(FaultReason),now,lastFeedAt,expires)) {Apply(0,0,0);if(String.IsNullOrEmpty(FaultReason)) FaultReason=!focus?"focus_lost":"source_expired_or_clock_invalid";return;}lastFeedAt=now;
+                if(!FeedAllowed(focus,!String.IsNullOrEmpty(FaultReason),now,lastFeedAt,expires)) {Apply(new double[channels.Count]);if(String.IsNullOrEmpty(FaultReason)) FaultReason=!focus?"focus_lost":"source_expired_or_clock_invalid";return;}lastFeedAt=now;
                 if(!RewiredOwnershipSnapshot.Same(expected,Snapshot())) throw new InvalidOperationException("Owned content changed.");
-                Apply(x,y,trigger);++AppliedUpdates;
+                Apply(desired);++AppliedUpdates;
             }
-            catch {if(String.IsNullOrEmpty(FaultReason)) FaultReason="owned_content_or_public_feed_changed";if(ownerThread==System.Threading.Thread.CurrentThread.ManagedThreadId) try {Apply(0,0,0);} catch { }}
+            catch {if(String.IsNullOrEmpty(FaultReason)) FaultReason="owned_content_or_public_feed_changed";if(ownerThread==System.Threading.Thread.CurrentThread.ManagedThreadId) try {Apply(new double[channels.Count]);} catch { }}
         }
         public void Remove()
         {
             CheckThread();
             CleanupStatus="cleanup_unconfirmed";
             if(subscribed) {inputUpdate.RemoveEventHandler(null,handler);subscribed=false;}
-            try {Apply(0,0,0);} catch {CleanupStatus="neutral_release_unconfirmed";return;}
+            try {Apply(new double[channels.Count]);} catch {CleanupStatus="neutral_release_unconfirmed";return;}
             if(ambiguous) {CleanupStatus="creation_outcome_unknown_preserved";return;}
             if(!deviceRemoved)
             {

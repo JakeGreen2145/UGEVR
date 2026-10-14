@@ -31,6 +31,7 @@ class Program
         GamepadBindingChecks.Run(Assert);
         LegacyControllerChecks.Run(Assert);
         RewiredInputChecks.Run(Assert);
+        RewiredFiveChecks.Run(Assert);
         RewiredFailureChecks.Run(Assert);
         RewiredMapFactoryChecks.Run(Assert);
         RewiredRuntimeChecks.Run(Assert);

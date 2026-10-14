@@ -41,6 +41,7 @@ public class Injector : BaseUnityPlugin
     GamepadDiagnosticBinding gamepadBinding;
     string gamepadDiagnosticProfile;
     RewiredInputDiagnostic rewiredDiagnostic;
+    RewiredFiveInputDiagnostic rewiredFiveDiagnostic;
     string rewiredDiagnosticProfile;
     double nextRewiredReport;
     RewiredSourceObservation rewiredSourceObservation;
@@ -112,7 +113,7 @@ public class Injector : BaseUnityPlugin
             captureRewiredPairSourceDetails=Config.Bind("Input","CaptureRewiredPairSourceDetails",false,"Private passive two-hand SDK observation only. A fresh rewired-pair-source-request in the controller-owned UnityVR-evidence requests 15 seconds, at most 300 paired records at 20Hz and three windows per launch. Records preserve independent before/after identity and raw SDK results; no input is authorized.").Value;
             int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Single-hand profiles require 1..10 consecutive valid neutral reads; the dual-hand profile requires exactly 3 stable neutral pair reads before creating the first owned device.").Value;
             bool allowRewired=Config.Bind("Input","AllowRewiredInputDiagnostic",false,"Explicit code activation for one bounded owned public Rewired custom-controller window. Requires CaptureImages, a controller session and exact Firewatch profile; no private game callback is invoked.").Value;
-            string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 for a uniquely declared trigger, or firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1 for the inspected Oculus application view and observed finger-trigger axis1. Both explicitly feed normal game actions31/32/36.").Value;
+            string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 for a uniquely declared trigger, or firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1 for the inspected Oculus application view and observed finger-trigger axis1. Select firewatch-2017-rewired-dual-sticks-observed-trigger-axis1-v1, which additionally feeds normal Move actions29/30 from the independently observed left hand. Existing right profiles feed actions31/32/36.").Value;
             string rewiredConflict=Config.Bind("Input","RewiredConflictPolicy","refuse","Only refuse is supported. Existing custom definitions/devices or physical Rewired joysticks reject this prototype; game additions to owned content are preserved.").Value;
             float rewiredSeconds=Config.Bind("Input","RewiredDurationSeconds",15f,"Explicit bounded 5..300 seconds after fresh neutral admission. Source expires after 500ms without a refreshed valid sample.").Value;
             float rewiredDeadzone=Config.Bind("Input","RewiredStickDeadzone",0.2f,"Explicit radial stick deadzone .1...8. The trigger remains an analog axis for the game's ordinary threshold logic.").Value;
@@ -124,7 +125,8 @@ public class Injector : BaseUnityPlugin
                     if(!capturesEnabled || !session.Available || allowGamepad || allowEngineInputExperiment || !PublicOwnedRewiredInput.SupportsProfile(rewiredProfile))
                         throw new InvalidOperationException("Rewired diagnostic requires images/session/profile and no simultaneous gamepad or E experiment.");
                     rewiredDiagnosticProfile=rewiredProfile;
-                    rewiredDiagnostic=new RewiredInputDiagnostic(PublicOwnedRewiredInput.Create,rewiredSeconds,rewiredDeadzone,rewiredConflict,rewiredReadback);
+                    if(rewiredProfile==PublicOwnedRewiredInput.FiveChannelProfile) rewiredFiveDiagnostic=new RewiredFiveInputDiagnostic(PublicOwnedRewiredInput.CreateFive,rewiredSeconds,rewiredDeadzone,rewiredConflict,rewiredReadback);
+                    else rewiredDiagnostic=new RewiredInputDiagnostic(PublicOwnedRewiredInput.Create,rewiredSeconds,rewiredDeadzone,rewiredConflict,rewiredReadback);
                     Logger.LogWarning("EXPLICIT_REWIRED_DIAGNOSTIC profile="+rewiredProfile+" duration="+rewiredSeconds+" conflict="+rewiredConflict+"; normal game action consumption remains unobserved.");
                 }
                 catch(Exception error) {Logger.LogWarning("REWIRED_DIAGNOSTIC unavailable: "+error.Message);}
@@ -292,6 +294,7 @@ public class Injector : BaseUnityPlugin
     }
     void TickRewiredDiagnostic()
     {
+        if(rewiredFiveDiagnostic!=null) {TickRewiredFiveDiagnostic();return;}
         if(rewiredDiagnostic==null) return;
         double now=InputClock();bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
         var source=new RewiredRightSample();if(enabled && Application.isFocused && !rewiredDiagnostic.Complete) try {source=OpenVrRewiredRightReader.Read(system,rewiredDiagnosticProfile);} catch { }
@@ -303,8 +306,25 @@ public class Injector : BaseUnityPlugin
             if(rewiredDiagnostic.Readback!=null) Logger.LogInfo("REWIRED_READBACK samples="+rewiredDiagnostic.ReadbackSamples+" sampleAgeSeconds="+(now-rewiredDiagnostic.ReadbackAtSeconds).ToString("R",System.Globalization.CultureInfo.InvariantCulture)+" "+rewiredDiagnostic.Readback.ToLog()+" gameConsumption=unknown");
         }
     }
+    void TickRewiredFiveDiagnostic()
+    {
+        bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
+        var source=new RewiredPairSample();ulong sourceGeneration=generation;
+        if(enabled && Application.isFocused && !rewiredFiveDiagnostic.Complete)
+        {
+            source=OpenVrRewiredPairReader.ReadSafely(system,InputClock);
+            if(sourceGeneration!=generation) {source.Available=false;source.UnavailableReason="runtime_generation_changed_during_pair_read";}
+        }
+        double now=InputClock();rewiredFiveDiagnostic.Tick(enabled,Application.isFocused,generation,source,now);
+        if(now<nextRewiredReport) return;nextRewiredReport=now+1;
+        Logger.LogInfo("REWIRED_DIAGNOSTIC profile="+rewiredDiagnosticProfile+" channelCount=5 status="+rewiredFiveDiagnostic.Status+" reason="+rewiredFiveDiagnostic.Reason+" neutralReads="+rewiredFiveDiagnostic.NeutralReads+" requiredNeutralReads=3 addAttempts="+rewiredFiveDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredFiveDiagnostic.AppliedUpdates+" removeAttempts="+rewiredFiveDiagnostic.RemoveAttempts+" cleanup="+rewiredFiveDiagnostic.CleanupStatus+" "+(rewiredFiveDiagnostic.Failure==null?"failureStage=none":rewiredFiveDiagnostic.Failure.ToLog())+" gameConsumption=unknown");
+        if(rewiredFiveDiagnostic.Readback!=null) Logger.LogInfo("REWIRED_READBACK samples="+rewiredFiveDiagnostic.ReadbackSamples+" sampleAgeSeconds="+(now-rewiredFiveDiagnostic.ReadbackAtSeconds).ToString("R",System.Globalization.CultureInfo.InvariantCulture)+" "+rewiredFiveDiagnostic.Readback.ToLog()+" gameConsumption=unknown");
+    }
     void CancelRewiredDiagnostic(string reason)
-    {if(rewiredDiagnostic!=null) {rewiredDiagnostic.Cancel(reason,InputClock());nextRewiredReport=0;TickRewiredDiagnostic();}}
+    {
+        if(rewiredFiveDiagnostic!=null) {rewiredFiveDiagnostic.Cancel(reason,InputClock());nextRewiredReport=0;TickRewiredDiagnostic();}
+        else if(rewiredDiagnostic!=null) {rewiredDiagnostic.Cancel(reason,InputClock());nextRewiredReport=0;TickRewiredDiagnostic();}
+    }
 
     void TickRewiredSourceObservation()
     {

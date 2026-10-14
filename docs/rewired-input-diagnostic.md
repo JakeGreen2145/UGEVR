@@ -1,6 +1,6 @@
 # Owned Rewired input prototype
 
-This default-off prototype maps one right controller to Firewatch's normal stick-look and trigger actions. It uses public Rewired definitions, maps, assignments and input-update callbacks. It invokes no private game method, changes no interaction requirement, and installs no native hook or global device driver. It has not been validated in a running game.
+This default-off prototype offers explicit right-hand look/trigger profiles and a separate five-channel profile for both sticks and the observed right finger trigger. It uses public Rewired definitions, maps, assignments and input-update callbacks. It invokes no private game method, changes no interaction requirement, and installs no native hook or global device driver. The right-hand route has private public-axis and original-camera response evidence. The new five-channel consumer route remains physically unvalidated.
 
 Select the profile explicitly in a controller-managed launch:
 
@@ -18,6 +18,30 @@ RewiredDurationSeconds = 15
 RewiredStickDeadzone = 0.2
 CaptureRewiredActionReadback = false
 ```
+
+## Explicit five-channel route
+
+`RewiredDiagnosticProfile = firewatch-2017-rewired-dual-sticks-observed-trigger-axis1-v1` selects one separate compiled profile. Keep the same explicit activation, controller-owned session, CaptureImages requirement, refuse conflict policy, bounded duration and optional readback settings. Selecting a failed pair never falls back to a single hand or starts another window.
+
+| Owned axis | Ordinary Rewired action | Source |
+| --- | --- | --- |
+| 0 | MoveXAxis 29 | Left axis0 X |
+| 1 | MoveYAxis 30 | Left axis0 Y |
+| 2 | LookXAxis_Stick 31 | Right axis0 X |
+| 3 | LookYAxis_Stick 32 | Right axis0 Y |
+| 4 | DialogDownButton 36 | Right axis1 X |
+
+The compiled source cell requires exact models `Oculus Quest2 (Left Controller)` and `Oculus Quest2 (Right Controller)`, with successful axis signatures `[2,3,3,0,0]` for both. Its passive evidence contains 706 records with stable distinct hand identities and successful independent pre/post model and serial queries. Isolated right look, left positive diagonal and right trigger requests reached the declared raw channels. Another 675 records exercised left negative X, negative Y and positive X independently. These points support the selected hand/channel signs; they do not prove a full range, other controllers or original movement/Use consumption. Real serials are neither hardcoded nor logged.
+
+Each active read independently brackets both valid connected finite joint state/poses with bounded public model/serial and metadata queries, then repeats the pair's properties and contexts. It requires distinct LeftHand/RightHand indices and identities, correct Controller class/roles, exact successful models/signatures, finite raw sticks within [-1,1] and right trigger within [0,1]. No unknown-property fallback or duplicate-trigger inference is used. A valid-role poll may prime initially unavailable application properties, but that read remains unavailable. A later read must establish its own complete brackets. The complete query interval must be monotonic and at most 250ms. Sequential SDK calls are not an atomic snapshot or a hardware-age measurement.
+
+Three newly completed neutral pair reads in successive ordinary Updates admit the backend. Both radial sticks must map to zero under the configured deadzone, right trigger must be exactly zero and neither hand may have a pressed button. Replayed query intervals do not refresh admission or an active source. Runtime generation, hand identity/context, independent packet regression, clock/query freshness, focus and session/lifecycle faults terminate the single window. The two signed sticks use independent radial mapping; the trigger retains its raw analog value. Desired input expires after 500ms through the existing public input-update callback and heartbeat monitor.
+
+The backend uses immutable compiled three- or five-channel descriptors. Both routes retain exact public method/assembly pins, definition/map/controller/assignment refusal and ownership checks, the existing XML enabled-child activation proof, channel/calibration/curve inventories and original collection limits. Every channel participates in release ownership proof. The caller's complete desired state is copied on the owner thread. If a channel identity/configuration changes, the adapter preserves the uncertain resource and reports cleanup_unconfirmed instead of writing into a replaced channel or deleting game content. Mapping-only changes can release intact original channels while preserving the changed map. Individual public setter calls are sequential, not atomic engine consumption.
+
+`CaptureRewiredActionReadback = true` adds the fixed owned axes 0..4 and System-player actions 29/30/31/32/36 to the existing enabled and last-active-reference observations, at most once per second. Disabled readbacks add no action queries. Null/failed/nonfinite observations remain unavailable. `channelCount=5` identifies the owned axis order above; cached terminal observations retain their age. Aggregation is separate from normal game consumption.
+
+The original game's saved southpaw, trigger-swap and disabled-controller settings remain authoritative. In particular, southpaw can change which stick the normal consumer reads for look versus movement. This route invokes no game settings getter/setter, private callback, body transform, movement owner or collision bypass. Source-only tests and both shipped reference builds do not pass the physical gameplay gate. Test all five owned and System action readbacks, neutral release and original walking/look/contextual interaction before claiming that gate. Avoid synchronous PNG captures during a control pulse, since a main-thread stall can exceed source expiry.
 
 ## Passive channel observation
 
@@ -76,7 +100,7 @@ The source profile is based on the root operator's cleaned private `firewatch-re
 
 The passive collector did not provide a fresh initial serial: its initial serial was null, and its post-serial fields shared one observation object. Serial stability across records is not a bracket around a read. The active profile therefore requires its own fresh initial and post serial/model calls and does not accept passive output as an Available input sample. Physical source admission and original look/Use still require runtime validation.
 
-The public backend refuses any existing custom definition/device or physical Rewired joystick. It requires the existing category0/custom-layout0 and exact action names/IDs. It creates one definition with three axes, one definition map, one runtime custom controller, and one map/assignment on the system player. The map connects axes0/1 to `LookXAxis_Stick`31 and `LookYAxis_Stick`32, and axis2 to `DialogDownButton`36. The inspected default game context routes the latter through `DialogSelectionDownOrUse` and its normal dialog/radio/target checks. A is not mapped to Use. Locomotion and other controller buttons are outside this prototype.
+The public backend refuses any existing custom definition/device or physical Rewired joystick. It requires the existing category0/custom-layout0 and exact action names/IDs. It creates one definition with three axes, one definition map, one runtime custom controller, and one map/assignment on the system player. The map connects axes0/1 to `LookXAxis_Stick`31 and `LookYAxis_Stick`32, and axis2 to `DialogDownButton`36. The inspected default game context routes the latter through `DialogSelectionDownOrUse` and its normal dialog/radio/target checks. A is not mapped to Use. Locomotion is outside the right-hand routes. The separate five-channel route below adds normal movement actions; other controller buttons remain outside this prototype.
 
 ## Owned map activation and public action readback
 

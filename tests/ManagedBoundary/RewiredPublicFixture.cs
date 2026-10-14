@@ -37,7 +37,7 @@ namespace Rewired
     {
         public int sourceControllerId;
         public float[] Values=new float[3];
-        public CustomController(int id,int source):base(id) {sourceControllerId=source;type=ControllerType.Custom;for(int i=0;i<3;++i){var identifier=new ControllerElementIdentifier {id=i,name="Axis"+i,positiveName="Axis"+i+"+",negativeName="Axis"+i+"-"};AxisElementIdentifiers.Add(identifier);Axes.Add(new Axis {id=i,name=identifier.name,elementIdentifier=identifier});}}
+        public CustomController(int id,int source,int count=3):base(id) {Values=new float[count];calibrationMap.Axes=new List<AxisCalibration>();for(int i=0;i<count;++i)calibrationMap.Axes.Add(new AxisCalibration());sourceControllerId=source;type=ControllerType.Custom;for(int i=0;i<count;++i){var identifier=new ControllerElementIdentifier {id=i,name="Axis"+i,positiveName="Axis"+i+"+",negativeName="Axis"+i+"-"};AxisElementIdentifiers.Add(identifier);Axes.Add(new Axis {id=i,name=identifier.name,elementIdentifier=identifier});}}
         public void SetAxisValue(int index,float value) {Values[index]=value;}
     }
     public class ActionElementMap
@@ -137,7 +137,7 @@ namespace Rewired
             public Action DestroyAction;
             public ControllerHelper() {CustomControllers=new List<CustomController>();Joysticks=new List<Controller>();}
             public CustomController CreateCustomController(int definitionId,string tag)
-            {if(Data.GetCustomControllerById(definitionId)==null)return null;var controller=new CustomController(40,definitionId){tag=ForeignCreateNull||ForeignCreateThrow?"game-owned":tag,enabled=!CreateDisabled};CustomControllers.Add(controller);if(ThrowCreateAfter||ForeignCreateThrow)throw new Exception("Creation after mutation");return ForeignCreateNull?null:controller;}
+            {if(Data.GetCustomControllerById(definitionId)==null)return null;var controller=new CustomController(40,definitionId,Data.GetCustomControllerById(definitionId).axisCount){tag=ForeignCreateNull||ForeignCreateThrow?"game-owned":tag,enabled=!CreateDisabled};CustomControllers.Add(controller);if(ThrowCreateAfter||ForeignCreateThrow)throw new Exception("Creation after mutation");return ForeignCreateNull?null:controller;}
             public Controller LastActive;
             public Controller GetLastActiveController() {return LastActive;}
             public T GetLastActiveController<T>() where T:Controller {throw new InvalidOperationException("Generic overload must never be called");}
@@ -186,7 +186,7 @@ namespace Rewired.Data
         public CustomController_Editor GetCustomControllerById(int id) {return Definitions.Find(d=>d.id==id);}
         public int GetCustomControllerIndex(int id) {return Definitions.FindIndex(d=>d.id==id);}
         public void DeleteCustomController(int index) {++Deletes;int id=Definitions[index].id;Maps.RemoveAll(m=>m.customControllerUid==id);Definitions.RemoveAt(index);}
-        public string GetActionNameById(int id) {return BadAction?"changed":id==31?"LookXAxis_Stick":id==32?"LookYAxis_Stick":id==36?"DialogDownButton":"other";}
+        public string GetActionNameById(int id) {return BadAction?"changed":id==29?"MoveXAxis":id==30?"MoveYAxis":id==31?"LookXAxis_Stick":id==32?"LookYAxis_Stick":id==36?"DialogDownButton":"other";}
         public int[] GetMapCategoryIds() {return MissingCategory?new int[0]:new[]{0};}
         public int[] GetCustomControllerLayoutIds() {return MissingLayout?new int[0]:new[]{0};}
         public bool CreateCustomControllerMap(int categoryId,int controllerUid,int layoutId)
