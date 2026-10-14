@@ -83,10 +83,10 @@ namespace Ugevr
             public Quaternion LocalRotation;
         }
 
-        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null,bool captureNativeUiState=false)
+        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null,bool captureNativeUiState=false,int nativeUiRendererLimit=NativeUiStateDiagnostics.DefaultRendererLimit)
         {
             if(captureLayoutInputs) layoutInputs=new UiLayoutDiagnostics(layoutInputRootRectIds);
-            if(captureNativeUiState) nativeUiState=new NativeUiStateDiagnostics(camera);
+            if(captureNativeUiState) nativeUiState=new NativeUiStateDiagnostics(camera,nativeUiRendererLimit);
             this.camera=camera; this.includeLayers=includeLayers;
             this.unitsPerMeter=unitsPerMeter;this.panelWidthMeters=panelWidthMeters;
             OriginalMask=camera.cullingMask; AppliedMask=OriginalMask;

@@ -55,6 +55,7 @@ public class Injector : BaseUnityPlugin
     int overlaySceneScanLimit=OverlayLayerInventory.DefaultScanLimit;
     bool captureLayoutInputs;
     bool captureNativeUiState;
+    int nativeUiRendererLimit=NativeUiStateDiagnostics.DefaultRendererLimit;
     bool compareHierarchyInventory;
     bool flushDesktopLayoutBeforeBorrow;
     string layoutInputRootRectIds;
@@ -80,6 +81,8 @@ public class Injector : BaseUnityPlugin
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
             captureNativeUiState=Config.Bind("Diagnostics","CaptureNativeUiState",false,"Opt-in cached CanvasRenderer cull/clipping/alpha and render-context observations only for capture requests admitted before the eye pair. No native UI state is restored; requires CaptureImages.").Value && capturesEnabled;
+            nativeUiRendererLimit=Config.Bind("Diagnostics","NativeUiRendererLimit",NativeUiStateDiagnostics.DefaultRendererLimit,"Explicit native UI diagnostic renderer bound 1024..8192; default 1024. Identity-query occurrences are bounded to eight times this limit. Validated only when CaptureNativeUiState and CaptureImages are enabled.").Value;
+            nativeUiRendererLimit=NativeUiStateDiagnostics.ResolveRendererLimit(captureNativeUiState,capturesEnabled,nativeUiRendererLimit);
             compareHierarchyInventory=Config.Bind("Diagnostics","CompareHierarchyInventory",false,"Diagnostic only: permit at most two explicitly requested sequential Resources-versus-scene hierarchy comparisons before an eye pair. Requires CaptureImages and controller session identity; does not replace layer guards.").Value && capturesEnabled;
             allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
             captureLayoutInputs=Config.Bind("Diagnostics","CaptureLayoutInputs",false,"Opt-in bounded cached text/layout input snapshots for UI restoration mismatches. Requires CaptureImages; no preferred-size, generator or game getters are queried.").Value && capturesEnabled;
@@ -321,8 +324,8 @@ public class Injector : BaseUnityPlugin
         var actualEyes=new RigidPose[2];
         var beforeRenderProjection=new Matrix4x4[2];
         string request=Path.Combine(evidenceDir,"capture-request");
-        bool nativeUiRequested=NativeUiStateDiagnostics.ShouldCapture(captureNativeUiState,capturesEnabled,captureNativeUiState && capturesEnabled && File.Exists(request));
-        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,nativeUiRequested):null;
+        CaptureRequestAdmission captureAdmission=CaptureRequestAdmission.BeforePair(captureNativeUiState,capturesEnabled,captureOverlayCanvases,request);
+        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureAdmission.CaptureNativeUiState,nativeUiRendererLimit):null;
         if(overlays!=null && capturesEnabled) overlays.EnableWallTiming();
         if(overlays!=null) overlays.SetDesktopLayoutFlush(desktopFlush);
         if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
@@ -392,9 +395,8 @@ public class Injector : BaseUnityPlugin
         SetEyeTextures(eyes[0].GetNativeTexturePtr(),eyes[1].GetNativeTexturePtr());
         GL.IssuePluginEvent(renderEvent,1);
         phase=2; phaseStarted=Time.realtimeSinceStartup; ++rendered;
-        if (capturesEnabled && File.Exists(request))
+        if (captureAdmission.TryConsume(request))
         {
-            File.Delete(request);
             CaptureEye(0); CaptureEye(1);
             WriteCapture(head,anchor,actualEyes,camera.transform.position==basePosition && camera.transform.rotation==baseRotation);
             try { CameraDiagnostics.Write(evidenceDir,rendered,system,camera,beforeRenderProjection,overlays==null?null:overlays.DiagnosticJson()); }

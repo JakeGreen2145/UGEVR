@@ -10,7 +10,7 @@ namespace Ugevr
     // Observations only: no cull/clip/alpha setter and no additional canvas or scene query.
     public sealed class NativeUiStateDiagnostics
     {
-        public const int RendererLimit=1024,AdmissionOccurrenceLimit=8192,PhaseCount=6;
+        public const int DefaultRendererLimit=1024,MaximumRendererLimit=8192,PhaseCount=6;
         static readonly string[] PhaseNames={"before-borrow","after-game-left","after-ui-left","after-game-right","after-ui-right","after-restoration"};
         sealed class Entry {public CanvasRenderer Renderer;public int Id,RootId;public string Name;public readonly Sample[] Samples=new Sample[PhaseCount];}
         struct Sample {public bool Captured,Destroyed;public bool? Cull,RectClipping;public float? LocalAlpha,InheritedAlpha;public int Errors,Nonfinite;}
@@ -19,12 +19,21 @@ namespace Ugevr
         readonly HashSet<int> seen=new HashSet<int>();
         readonly Context[] contexts=new Context[PhaseCount];
         readonly Camera camera;
+        readonly int rendererLimit,admissionOccurrenceLimit;
         readonly MethodInfo inheritedAlpha;
         readonly bool alphaLookupFailed;
         int encountered,dropped,duplicates,admissionErrors,rendererQueries,contextQueries;
         public static bool ShouldCapture(bool configured,bool imagesEnabled,bool requestPresentBeforePair) {return configured && imagesEnabled && requestPresentBeforePair;}
-        public NativeUiStateDiagnostics(Camera camera)
+        public static int ResolveRendererLimit(bool configured,bool imagesEnabled,int requestedLimit)
         {
+            if(!configured || !imagesEnabled) return DefaultRendererLimit;
+            if(requestedLimit<DefaultRendererLimit || requestedLimit>MaximumRendererLimit) throw new ArgumentOutOfRangeException("NativeUiRendererLimit","Use 1024..8192 for the explicit native UI diagnostic.");
+            return requestedLimit;
+        }
+        public NativeUiStateDiagnostics(Camera camera,int rendererLimit=DefaultRendererLimit)
+        {
+            this.rendererLimit=ResolveRendererLimit(true,true,rendererLimit);
+            admissionOccurrenceLimit=this.rendererLimit*8;
             this.camera=camera;
             try {inheritedAlpha=FindCachedFloatMethod(typeof(CanvasRenderer),"GetInheritedAlpha");}
             catch {alphaLookupFailed=true;}
@@ -38,7 +47,7 @@ namespace Ugevr
         {
             ++encountered;
             // Stop admission getters at the bound. Later occurrences include possible duplicates.
-            if(encountered>AdmissionOccurrenceLimit || entries.Count==RendererLimit) {++dropped;return;}
+            if(encountered>admissionOccurrenceLimit || entries.Count==rendererLimit) {++dropped;return;}
             try
             {
                 if(renderer==null) {++admissionErrors;return;}
@@ -97,8 +106,8 @@ namespace Ugevr
             int errors=admissionErrors,nonfinite=0,destroyedSamples=0,capturedPhases=0;
             foreach(Context context in contexts) {errors+=context.Errors;if(context.Captured) ++capturedPhases;}
             foreach(Entry entry in entries) foreach(Sample sample in entry.Samples) {errors+=sample.Errors;nonfinite+=sample.Nonfinite;if(sample.Destroyed) ++destroyedSamples;}
-            var text=new StringBuilder("{\"scope\":\"cached native UI fields on initially admitted selected-root renderers; not complete batch state\",\"rendererLimit\":").Append(RendererLimit)
-                .Append(",\"admissionOccurrenceLimit\":").Append(AdmissionOccurrenceLimit)
+            var text=new StringBuilder("{\"scope\":\"cached native UI fields on initially admitted selected-root renderers; not complete batch state\",\"rendererLimit\":").Append(rendererLimit)
+                .Append(",\"admissionOccurrenceLimit\":").Append(admissionOccurrenceLimit)
                 .Append(",\"encounteredOccurrences\":").Append(encountered).Append(",\"admittedRenderers\":").Append(entries.Count)
                 .Append(",\"droppedOccurrences\":").Append(dropped).Append(",\"duplicateAdmittedOccurrences\":").Append(duplicates).Append(",\"admissionErrors\":").Append(admissionErrors)
                 .Append(",\"queryErrors\":").Append(errors-admissionErrors).Append(",\"nonfiniteValues\":").Append(nonfinite).Append(",\"destroyedSamples\":").Append(destroyedSamples)
