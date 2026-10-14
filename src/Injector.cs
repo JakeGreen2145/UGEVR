@@ -38,6 +38,8 @@ public class Injector : BaseUnityPlugin
     KeyboardEProbe inputProbe;
     HierarchyInventoryProbe hierarchyProbe;
     EngineEInputExperiment engineInputExperiment;
+    OpenVrGamepadDiagnostic gamepadDiagnostic;
+    double nextInputReport;
     SessionCommand pending;
     MethodInfo getKeyDown;
     IntPtr renderEvent;
@@ -85,6 +87,22 @@ public class Injector : BaseUnityPlugin
             nativeUiRendererLimit=NativeUiStateDiagnostics.ResolveRendererLimit(captureNativeUiState,capturesEnabled,nativeUiRendererLimit);
             compareHierarchyInventory=Config.Bind("Diagnostics","CompareHierarchyInventory",false,"Diagnostic only: permit at most two explicitly requested sequential Resources-versus-scene hierarchy comparisons before an eye pair. Requires CaptureImages and controller session identity; does not replace layer guards.").Value && capturesEnabled;
             allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
+            bool allowGamepad=Config.Bind("Input","AllowOpenVrGamepadDiagnostic",false,"Explicit code activation for one bounded owned InputSystem gamepad experiment per launch. Never changes physical keyboard state; game consumption requires observation.").Value;
+            string inputProfile=Config.Bind("Input","DiagnosticProfile","none","Select outer-1.4.1-right-a-south-axis0-leftstick-v1 explicitly. This is a test profile, not general game bindings.").Value;
+            string inputConflict=Config.Bind("Input","CurrentGamepadConflictPolicy","refuse","refuse leaves an existing current gamepad untouched. prefer-owned explicitly permits the owned diagnostic pad to become current, with conditional restoration.").Value;
+            float inputSeconds=Config.Bind("Input","DiagnosticDurationSeconds",15f,"Bounded 5..300 second diagnostic window, starting only with a neutral valid right controller and focused active VR.").Value;
+            float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
+            if(allowGamepad)
+            {
+                try
+                {
+                    if(!session.Available || allowEngineInputExperiment || inputProfile!=OuterGamepadCompatibilityProfile.Name)
+                        throw new InvalidOperationException("Select a valid session, the explicit diagnostic profile and disable the separate E experiment.");
+                    gamepadDiagnostic=new OpenVrGamepadDiagnostic(OuterGamepadCompatibilityProfile.Create,inputSeconds,inputDeadzone,inputConflict);
+                    Logger.LogWarning("EXPLICIT_INPUT_DIAGNOSTIC profile="+inputProfile+" currentConflict="+inputConflict+" duration="+inputSeconds+"; synthetic owned gamepad, game consumption unknown.");
+                }
+                catch(Exception inputError) {Logger.LogWarning("INPUT_DIAGNOSTIC unavailable: "+inputError.Message);}
+            }
             captureLayoutInputs=Config.Bind("Diagnostics","CaptureLayoutInputs",false,"Opt-in bounded cached text/layout input snapshots for UI restoration mismatches. Requires CaptureImages; no preferred-size, generator or game getters are queried.").Value && capturesEnabled;
             layoutInputRootRectIds=Config.Bind("Diagnostics","LayoutInputRootRectIds","","Optional comma-separated runtime RectTransform IDs selecting diagnostic subtrees plus up to eight ancestors. Empty retains full coverage. Runtime IDs require observed name/parent validation each launch.").Value;
             disableOcclusionCulling=Config.Bind("Rendering","DisableOcclusionCulling",false,"Explicit fidelity remedy: disable the selected camera's occlusion culling only during eye rendering.").Value;
@@ -177,7 +195,30 @@ public class Injector : BaseUnityPlugin
         CheckDrain();
         if (KeyPressed("f8")) SetEnabled(!active);
         if (KeyPressed("f9")) pendingRecenter="true";
+        TickGamepadDiagnostic();
         Publish(false);
+    }
+
+    double InputClock() {return Stopwatch.GetTimestamp()/(double)Stopwatch.Frequency;}
+    void TickGamepadDiagnostic()
+    {
+        if(gamepadDiagnostic==null) return;
+        double now=InputClock();bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
+        var input=new LegacyRightSample();
+        if(enabled && Application.isFocused && !gamepadDiagnostic.Complete)
+            try {input=OpenVrLegacyRightReader.Read(system);} catch { }
+        gamepadDiagnostic.Tick(enabled,Application.isFocused,generation,input,now);
+        if(now>=nextInputReport)
+        {
+            nextInputReport=now+1;
+            Logger.LogInfo("INPUT_DIAGNOSTIC status="+gamepadDiagnostic.Status+" reason="+gamepadDiagnostic.Reason+" addAttempts="+gamepadDiagnostic.AddAttempts+
+                " queues="+gamepadDiagnostic.Queues+" appliedStateSamples="+gamepadDiagnostic.AppliedSamples+" releaseAttempts="+gamepadDiagnostic.ReleaseAttempts+
+                " neutralObserved="+gamepadDiagnostic.ReleaseObserved+" removeAttempts="+gamepadDiagnostic.RemoveAttempts+" cleanup="+gamepadDiagnostic.CleanupStatus+" gameConsumption=unknown");
+        }
+    }
+    void CancelGamepadDiagnostic(string reason)
+    {
+        if(gamepadDiagnostic!=null) {gamepadDiagnostic.Cancel(reason,InputClock());nextInputReport=0;TickGamepadDiagnostic();}
     }
 
     void ApplyCommand()
@@ -210,6 +251,7 @@ public class Injector : BaseUnityPlugin
         }
         else if (active)
         {
+            CancelGamepadDiagnostic("session_disabled");
             active=false; renderingActive=false; pendingRecenter=null;
             RestoreBackground();
             BeginDrain();
@@ -544,6 +586,7 @@ public class Injector : BaseUnityPlugin
             if (initialization) session.InitializationError=error.Message;
         }
         active=false; renderingActive=false; RestoreBackground();
+        CancelGamepadDiagnostic("vr_failure");
         try { BeginDrain(); } catch (Exception drainError) { Logger.LogError("Drain failed: "+drainError.Message); }
         Publish(true);
     }
@@ -554,8 +597,10 @@ public class Injector : BaseUnityPlugin
     }
     void OnApplicationQuit() { quitting=true; StopOwnedWork(); }
     void OnDestroy() { quitting=true; StopOwnedWork(); }
+    void OnDisable() {CancelGamepadDiagnostic("component_disabled");}
     void StopOwnedWork()
     {
+        CancelGamepadDiagnostic("game_lifecycle_end");
         if (inputProbe!=null) { inputProbe.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp()); inputProbe=null; }
         if(hierarchyProbe!=null)
         {

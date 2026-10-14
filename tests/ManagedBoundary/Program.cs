@@ -24,6 +24,8 @@ class Program
         HierarchyInventoryChecks.Run(Assert);
         NativeUiDiagnosticsChecks.Run(Assert);
         EngineInputExperimentChecks.Run(Assert);
+        OwnedGamepadChecks.Run(Assert);
+        LegacyControllerChecks.Run(Assert);
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void ProjectionChecks()
