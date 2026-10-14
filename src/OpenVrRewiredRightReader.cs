@@ -19,6 +19,7 @@ namespace Ugevr
                 ETrackedPropertyError error=ETrackedPropertyError.TrackedProp_Success;
                 int kind=system.GetInt32TrackedDeviceProperty(index,(ETrackedDeviceProperty)((int)ETrackedDeviceProperty.Prop_Axis0Type_Int32+axis),ref error);
                 sample.UnavailableReason="axis_metadata_unavailable";if(error!=ETrackedPropertyError.TrackedProp_Success) return sample;
+                if(kind<(int)EVRControllerAxisType.k_eControllerAxis_None || kind>(int)EVRControllerAxisType.k_eControllerAxis_Trigger) {sample.UnavailableReason="axis_metadata_unsupported";return sample;}
                 if(axis==0 && kind!=(int)EVRControllerAxisType.k_eControllerAxis_Joystick) {sample.UnavailableReason="axis0_not_joystick";return sample;}
                 if(kind==(int)EVRControllerAxisType.k_eControllerAxis_Trigger) {if(trigger!=-1) {sample.UnavailableReason="trigger_axis_ambiguous";return sample;}trigger=axis;}
             }

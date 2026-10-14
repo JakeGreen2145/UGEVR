@@ -21,7 +21,7 @@ namespace Ugevr
         readonly Func<bool> focused;
         readonly string tag="UGEVR-Rewired-"+Guid.NewGuid().ToString("N");
         readonly Dictionary<string,MethodInfo> methods=new Dictionary<string,MethodInfo>();
-        readonly Type hub,dataType,definitionType,axisType,identifierType,editorMapType,controllerType,controllerBase,controllerEnum,elementEnum,poleEnum,rangeEnum,entryType;
+        readonly Type hub,dataType,definitionType,axisType,identifierType,runtimeAxesType,calibrationType,editorMapType,controllerType,controllerBase,controllerEnum,elementEnum,poleEnum,rangeEnum,entryType;
         readonly object data,global,players,player,playerControllers,playerMaps;
         readonly EventInfo inputUpdate;
         readonly bool pinned;
@@ -30,7 +30,7 @@ namespace Ugevr
         int definitionId,ownedId,ownerThread;
         int[] axes;
         Action handler;
-        RewiredOwnershipSnapshot definitionExpected,expected;
+        RewiredOwnershipSnapshot definitionExpected,channelExpected,runtimeChannelExpected,expected;
         bool mutationAttempted,subscribed,deviceRemoved,definitionRemoved,ambiguous;
         double x,y,trigger,expires,lastFeedAt;
         public string UnavailableReason {get;private set;}
@@ -45,6 +45,7 @@ namespace Ugevr
             hub=assembly.GetType("Rewired.ReInput",true);dataType=assembly.GetType("Rewired.Data.UserData",true);
             definitionType=assembly.GetType("Rewired.Data.CustomController_Editor",true);editorMapType=assembly.GetType("Rewired.Data.Mapping.ControllerMap_Editor",true);
             axisType=assembly.GetType("Rewired.Data.CustomController_Editor+Axis",true);identifierType=assembly.GetType("Rewired.ControllerElementIdentifier",true);
+            runtimeAxesType=assembly.GetType("Rewired.ControllerWithAxes",true);calibrationType=assembly.GetType("Rewired.CalibrationMap",true);
             controllerType=assembly.GetType("Rewired.CustomController",true);controllerBase=assembly.GetType("Rewired.Controller",true);
             controllerEnum=assembly.GetType("Rewired.ControllerType",true);elementEnum=assembly.GetType("Rewired.ControllerElementType",true);
             poleEnum=assembly.GetType("Rewired.Pole",true);rangeEnum=assembly.GetType("Rewired.AxisRange",true);entryType=assembly.GetType("Rewired.ActionElementMap",true);
@@ -70,6 +71,7 @@ namespace Ugevr
             M(playerMaps.GetType(),"LoadMap",0x06002386,typeof(void),controllerEnum,typeof(int),typeof(int),typeof(int));
             M(controllerType,"SetAxisValue",0x0600088e,typeof(void),typeof(int),typeof(float));
             M(controllerBase,"get_tag",0x06000728,typeof(string));
+            M(runtimeAxesType,"GetAxisIndexById",0x06000836,typeof(int),typeof(int));M(calibrationType,"ToXmlString",0x06001cb5,typeof(string));
             string[] axisFields={"elementIdentifierId","name","range","invert","deadZone","zero","min","max","doNotCalibrateRange","sensitivityType","sensitivity","sensitivityCurve","axisInfo"};
             int[] axisTokens={0x040007aa,0x040007ab,0x040007ac,0x040007ad,0x040007ae,0x040007af,0x040007b0,0x040007b1,0x040007b2,0x040007b3,0x040007b4,0x040007b5,0x040007b6};
             for(int i=0;i<axisFields.Length;++i) {FieldInfo field=axisType.GetField(axisFields[i],BindingFlags.Public|BindingFlags.Instance);if(field==null || (pinned && field.MetadataToken!=axisTokens[i])) throw new InvalidOperationException("Public axis field profile changed.");}
@@ -176,6 +178,7 @@ namespace Ugevr
             for(int i=0;i<3;++i) {Call(definition,"AddAxis",0x06000d06,typeof(void),Type.EmptyTypes);definitionExpected=DefinitionSnapshot();}
             axes=(int[])Call(definition,"GetAxisElementIdentifierIds",0x06000d00,typeof(int[]),Type.EmptyTypes);
             if(axes.Length!=3 || axes[0]==axes[1] || axes[0]==axes[2] || axes[1]==axes[2]) throw new InvalidOperationException("Owned axis shape changed.");
+            channelExpected=DefinitionSnapshot(false);
             try {if(!(bool)Call(data,"CreateCustomControllerMap",0x0600153c,typeof(bool),new[]{typeof(int),typeof(int),typeof(int)},0,definitionId,0)) throw new InvalidOperationException("Definition map refused.");}
             finally {if(MapCount()==1) editorMap=EditorMap();else if(MapCount()!=0) ambiguous=true;}
             if(editorMap==null || ambiguous) throw new InvalidOperationException("Definition map creation unknown.");
@@ -190,7 +193,7 @@ namespace Ugevr
             {
                 object[] devices=CustomDevices();
                 if(owned==null && devices.Length==1 && DeviceTagged(devices[0])) owned=devices[0];
-                if(owned!=null && devices.Length==1 && System.Object.ReferenceEquals(devices[0],owned) && DeviceTagged(owned)) {deviceRemoved=false;ownedId=Convert.ToInt32(PublicValue(owned,"id"));}
+                if(owned!=null && devices.Length==1 && System.Object.ReferenceEquals(devices[0],owned) && DeviceTagged(owned)) {deviceRemoved=false;ownedId=Convert.ToInt32(PublicValue(owned,"id"));runtimeChannelExpected=RuntimeChannelSnapshot();}
                 else {owned=null;if(devices.Length!=0) ambiguous=true;}
             }
             if(owned==null) throw new InvalidOperationException("Controller creation unavailable.");
@@ -208,7 +211,7 @@ namespace Ugevr
         {
             string item=value is float?((float)value).ToString("R",CultureInfo.InvariantCulture):value is double?((double)value).ToString("R",CultureInfo.InvariantCulture):Convert.ToString(value,CultureInfo.InvariantCulture) ?? "";if(item.Length>65536) throw new InvalidOperationException("Owned content serialization bound exceeded.");text.Append(item.Length).Append(':').Append(item).Append(';');
         }
-        RewiredOwnershipSnapshot DefinitionSnapshot()
+        RewiredOwnershipSnapshot DefinitionSnapshot(bool includeMap=true)
         {
             if(definition==null || !System.Object.ReferenceEquals(DefinitionById(definitionId),definition)) throw new InvalidOperationException("Definition reference changed.");
             var nodes=new List<object>();var text=new StringBuilder();nodes.Add(definition);
@@ -229,14 +232,14 @@ namespace Ugevr
             }
             foreach(int axis in (int[])Call(definition,"GetAxisElementIdentifierIds",0x06000d00,typeof(int[]),Type.EmptyTypes)) Value(text,axis);
             foreach(string name in (string[])Call(definition,"GetAxisNames",0x06000cff,typeof(string[]),Type.EmptyTypes)) Value(text,name);
-            if(editorMap!=null)
+            if(includeMap && editorMap!=null)
             {
                 if(MapCount()!=1 || !System.Object.ReferenceEquals(EditorMap(),editorMap)) throw new InvalidOperationException("Definition map reference/additions changed.");nodes.Add(editorMap);
                 foreach(string name in new[]{"id","categoryId","layoutId","name","hardwareGuidString","customControllerUid"}) Value(text,PublicValue(editorMap,name));
                 object entryCollection=PublicValue(editorMap,"actionElementMaps");object[] entries=Bounded(entryCollection,16);nodes.Add(entryCollection);Value(text,entries.Length);nodes.AddRange(entries);
                 foreach(object entry in entries) foreach(string name in new[]{"actionId","elementIdentifierId","elementType","axisRange","axisContribution","invert","keyboardKeyCode","modifierKey1","modifierKey2","modifierKey3","enabled"}) Value(text,PublicValue(entry,name));
             }
-            else if(MapCount()!=0) throw new InvalidOperationException("Unowned definition map appeared.");
+            else if(includeMap && MapCount()!=0) throw new InvalidOperationException("Unowned definition map appeared.");
             return new RewiredOwnershipSnapshot {Nodes=nodes.ToArray(),Values=text.ToString()};
         }
         void AxisSnapshot(object axis,List<object> nodes,StringBuilder text)
@@ -245,7 +248,11 @@ namespace Ugevr
             foreach(string member in new[]{"elementIdentifierId","name","range","invert","deadZone","zero","min","max","doNotCalibrateRange","sensitivityType","sensitivity"}) Value(text,PublicValue(axis,member));
             object info=PublicValue(axis,"axisInfo");nodes.Add(info);Value(text,info!=null);
             if(info!=null) foreach(string member in new[]{"dataFormat","excludeFromPolling","specialAxisType","pollingDeadZone"}) Value(text,PublicValue(info,member));
-            object curve=PublicValue(axis,"sensitivityCurve");nodes.Add(curve);Value(text,curve!=null);
+            CurveSnapshot(PublicValue(axis,"sensitivityCurve"),nodes,text);
+        }
+        static void CurveSnapshot(object curve,List<object> nodes,StringBuilder text)
+        {
+            nodes.Add(curve);Value(text,curve!=null);
             if(curve==null) return;
             Value(text,PublicValue(curve,"preWrapMode"));Value(text,PublicValue(curve,"postWrapMode"));
             int count=Convert.ToInt32(PublicValue(curve,"length"));if(count<0 || count>64) throw new InvalidOperationException("Curve key inspection bound exceeded.");
@@ -256,6 +263,29 @@ namespace Ugevr
                 foreach(string member in new[]{"inWeight","outWeight","weightedMode"})
                 {PropertyInfo property=key.GetType().GetProperty(member,BindingFlags.Public|BindingFlags.Instance);if(property!=null && property.GetGetMethod(false)!=null) Value(text,property.GetValue(key,null));}
             }
+        }
+        RewiredOwnershipSnapshot RuntimeChannelSnapshot()
+        {
+            if(!Contains(CustomDevices(),owned) || !DeviceTagged(owned) || Convert.ToInt32(PublicValue(owned,"id"))!=ownedId) throw new InvalidOperationException("Owned runtime device changed.");
+            var nodes=new List<object>();var text=new StringBuilder();nodes.Add(owned);Value(text,PublicValue(owned,"enabled"));
+            if(Convert.ToInt32(PublicValue(owned,"axisCount"))!=3) throw new InvalidOperationException("Runtime axis count changed.");
+            object collection=PublicValue(owned,"Axes");object[] runtimeAxes=Bounded(collection,3);if(runtimeAxes.Length!=3) throw new InvalidOperationException("Runtime axis inventory changed.");nodes.Add(collection);nodes.AddRange(runtimeAxes);
+            object identifierCollection=PublicValue(owned,"AxisElementIdentifiers");object[] identifiers=Bounded(identifierCollection,3);if(identifiers.Length!=3) throw new InvalidOperationException("Runtime identifier inventory changed.");nodes.Add(identifierCollection);nodes.AddRange(identifiers);
+            for(int i=0;i<3;++i)
+            {
+                if((int)M(runtimeAxesType,"GetAxisIndexById",0x06000836,typeof(int),typeof(int)).Invoke(owned,new object[]{axes[i]})!=i || Convert.ToInt32(PublicValue(runtimeAxes[i],"id"))!=axes[i] || !System.Object.ReferenceEquals(PublicValue(runtimeAxes[i],"elementIdentifier"),identifiers[i])) throw new InvalidOperationException("Runtime channel index/identifier changed.");
+                foreach(string member in new[]{"id","name","type","pollingDeadZone"}) Value(text,PublicValue(runtimeAxes[i],member));
+                foreach(string member in new[]{"id","name","positiveName","negativeName","elementType","compoundElementType"}) Value(text,PublicValue(identifiers[i],member));
+            }
+            object calibration=PublicValue(owned,"calibrationMap");if(calibration==null || calibration.GetType()!=calibrationType || Convert.ToInt32(PublicValue(calibration,"axisCount"))!=3) throw new InvalidOperationException("Runtime calibration changed.");nodes.Add(calibration);
+            object calibrationCollection=PublicValue(calibration,"Axes");object[] calibrated=Bounded(calibrationCollection,3);if(calibrated.Length!=3) throw new InvalidOperationException("Calibration axis inventory changed.");nodes.Add(calibrationCollection);nodes.AddRange(calibrated);
+            foreach(object axis in calibrated)
+            {
+                foreach(string member in new[]{"enabled","deadZone","calibratedZero","calibratedMin","calibratedMax","invert","sensitivityType","sensitivity","applyRangeCalibration"}) Value(text,PublicValue(axis,member));
+                CurveSnapshot(PublicValue(axis,"sensitivityCurve"),nodes,text);
+            }
+            string calibrationXml=(string)M(calibrationType,"ToXmlString",0x06001cb5,typeof(string)).Invoke(calibration,null);if(String.IsNullOrEmpty(calibrationXml)) throw new InvalidOperationException("Calibration serialization failed or unavailable.");Value(text,calibrationXml);
+            return new RewiredOwnershipSnapshot {Nodes=nodes.ToArray(),Values=text.ToString()};
         }
         object[] AllPlayers()
         {
@@ -271,6 +301,7 @@ namespace Ugevr
         {
             if(Bounded(PublicValue(global,"Joysticks"),64).Length!=0) throw new InvalidOperationException("Physical joystick conflict appeared.");
             RewiredOwnershipSnapshot original=DefinitionSnapshot();var nodes=new List<object>(original.Nodes);var text=new StringBuilder(original.Values);
+            if(!RewiredOwnershipSnapshot.Same(runtimeChannelExpected,RuntimeChannelSnapshot())) throw new InvalidOperationException("Admitted runtime channel/calibration changed.");
             object[] devices=CustomDevices();if(devices.Length!=1 || !System.Object.ReferenceEquals(devices[0],owned) || !DeviceTagged(owned)) throw new InvalidOperationException("Custom-device conflict/reference/tag changed.");nodes.Add(owned);
             foreach(object candidate in AllPlayers())
             {
@@ -278,7 +309,7 @@ namespace Ugevr
                 if(!System.Object.ReferenceEquals(candidate,player)) {if(assigned!=0 || maps.Length!=0) throw new InvalidOperationException("Game added an assignment/map to owned device.");continue;}
                 if(assigned!=1 || maps.Length!=1 || (runtimeMap!=null && !System.Object.ReferenceEquals(maps[0],runtimeMap))) throw new InvalidOperationException("Owned assignment/map changed.");
                 nodes.Add(candidate);nodes.Add(maps[0]);MethodInfo serialize=maps[0].GetType().GetMethod("ToXmlString",Type.EmptyTypes);
-                if(serialize==null || !serialize.IsPublic || serialize.ReturnType!=typeof(string) || (pinned && serialize.MetadataToken!=0x06001ec0)) throw new InvalidOperationException("Public map serialization unavailable.");Value(text,serialize.Invoke(maps[0],null));
+                if(serialize==null || !serialize.IsPublic || serialize.ReturnType!=typeof(string) || (pinned && serialize.MetadataToken!=0x06001ec0)) throw new InvalidOperationException("Public map serialization unavailable.");string xml=(string)serialize.Invoke(maps[0],null);if(String.IsNullOrEmpty(xml)) throw new InvalidOperationException("Runtime map serialization failed or unavailable.");Value(text,xml);
                 object runtimeEntriesCollection=PublicValue(maps[0],"AllMaps");object[] runtimeEntries=Bounded(runtimeEntriesCollection,16);if(runtimeEntries.Length!=3) throw new InvalidOperationException("Runtime map entries changed.");nodes.Add(runtimeEntriesCollection);nodes.AddRange(runtimeEntries);
             }
             return new RewiredOwnershipSnapshot {Nodes=nodes.ToArray(),Values=text.ToString()};
@@ -287,7 +318,9 @@ namespace Ugevr
         {CheckThread();this.x=x;this.y=y;this.trigger=trigger;this.expires=expires;}
         void Apply(double x,double y,double trigger)
         {
-            if(owned==null || deviceRemoved || !Contains(CustomDevices(),owned)) return;
+            if(owned==null || deviceRemoved) return;
+            if(!RewiredOwnershipSnapshot.Same(channelExpected,DefinitionSnapshot(false)) || !RewiredOwnershipSnapshot.Same(runtimeChannelExpected,RuntimeChannelSnapshot()))
+                throw new InvalidOperationException("Original owned channel identity/configuration changed; no values written.");
             Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},0,(float)x);
             Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},1,(float)y);
             Call(owned,"SetAxisValue",0x0600088e,typeof(void),new[]{typeof(int),typeof(float)},2,(float)trigger);

@@ -16,12 +16,27 @@ namespace Rewired
     public enum ControllerElementType {Axis=0,Button=1}
     public enum Pole {Positive=0,Negative=1}
     public enum AxisRange {Full=0,Positive=1,Negative=2}
-    public class Controller {public readonly int id;public ControllerType type;public string tag {get;set;}public bool enabled=true;public Controller(int id) {this.id=id;}}
-    public sealed class CustomController : Controller
+    public class Controller
+    {
+        public readonly int id;public ControllerType type;public string tag {get;set;}public bool enabled=true;public Controller(int id) {this.id=id;}
+        public class Axis {public int id;public string name;public ControllerElementType type;public float pollingDeadZone;public ControllerElementIdentifier elementIdentifier {get;set;}}
+    }
+    public class ControllerWithAxes : Controller
+    {
+        public ControllerWithAxes(int id):base(id) {}
+        public List<Axis> Axes {get;set;}=new List<Axis>();public List<ControllerElementIdentifier> AxisElementIdentifiers {get;set;}=new List<ControllerElementIdentifier>();
+        public int axisCount {get {return Axes.Count;}}public CalibrationMap calibrationMap {get;set;}=new CalibrationMap();
+        public int GetAxisIndexById(int id) {return Axes.FindIndex(a=>a.id==id);}
+    }
+    public class AxisCalibration
+    {public bool enabled {get;set;}=true;public float deadZone {get;set;}public float calibratedZero {get;set;}public float calibratedMin {get;set;}=-1;public float calibratedMax {get;set;}=1;public bool invert {get;set;}public int sensitivityType {get;set;}public float sensitivity {get;set;}=1;public bool applyRangeCalibration {get;set;}public UnityEngine.AnimationCurve sensitivityCurve {get;set;}=new UnityEngine.AnimationCurve();}
+    public sealed class CalibrationMap
+    {public bool EmptyXml;public List<AxisCalibration> Axes {get;set;}=new List<AxisCalibration>{new AxisCalibration(),new AxisCalibration(),new AxisCalibration()};public int axisCount {get {return Axes.Count;}}public string ToXmlString() {return EmptyXml?"":"controlled-calibration";}}
+    public sealed class CustomController : ControllerWithAxes
     {
         public int sourceControllerId;
         public float[] Values=new float[3];
-        public CustomController(int id,int source):base(id) {sourceControllerId=source;type=ControllerType.Custom;}
+        public CustomController(int id,int source):base(id) {sourceControllerId=source;type=ControllerType.Custom;for(int i=0;i<3;++i){var identifier=new ControllerElementIdentifier {id=i,name="Axis"+i,positiveName="Axis"+i+"+",negativeName="Axis"+i+"-"};AxisElementIdentifiers.Add(identifier);Axes.Add(new Axis {id=i,name=identifier.name,elementIdentifier=identifier});}}
         public void SetAxisValue(int index,float value) {Values[index]=value;}
     }
     public class ActionElementMap
@@ -45,8 +60,9 @@ namespace Rewired
         public ControllerType controllerType=ControllerType.Custom;
         public int controllerId;
         public List<ActionElementMap> Entries=new List<ActionElementMap>();
+        public bool EmptyXml;
         public IEnumerable<ActionElementMap> AllMaps {get {return Entries;}}
-        public string ToXmlString() {var text=new StringBuilder();foreach(var entry in Entries) text.Append(entry.actionId).Append('/').Append(entry.elementIdentifierId).Append('/').Append(entry.invert).Append(';');return text.ToString();}
+        public string ToXmlString() {if(EmptyXml)return "";var text=new StringBuilder();foreach(var entry in Entries) text.Append(entry.actionId).Append('/').Append(entry.elementIdentifierId).Append('/').Append(entry.invert).Append(';');return text.ToString();}
     }
     public class Player
     {

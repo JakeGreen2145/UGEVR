@@ -103,9 +103,9 @@ static class RewiredInputChecks
         PublicLifecycleChecks(check);
         var runtime=new Runtime();var read=Read(runtime);check(read.Available && read.TriggerAxis==1 && Math.Abs(read.Trigger-.7)<1e-6 && runtime.MetadataCalls==5 && runtime.StateCalls==1 && runtime.RoleCalls==2,"Vendored OpenVR ABI jointly reads state/pose only after bounded axis metadata and role checks");
         foreach(int axis in new[]{2,3,4}) {runtime=new Runtime {Kinds=new[]{2,0,0,0,0}};runtime.Kinds[axis]=3;read=Read(runtime);check(read.Available && read.TriggerAxis==axis,"Trigger selection follows public metadata rather than assuming a fixed index");}
-        foreach(string reason in new[]{"missing","duplicate","trackpad","metadata","pose","role","analog"})
+        foreach(string reason in new[]{"missing","duplicate","trackpad","metadata","unknown-kind","pose","role","analog"})
         {
-            runtime=new Runtime();if(reason=="missing") runtime.Kinds[1]=0;if(reason=="duplicate")runtime.Kinds[2]=3;if(reason=="trackpad")runtime.Kinds[0]=1;if(reason=="metadata")runtime.MetadataError=true;if(reason=="pose")runtime.Valid=false;if(reason=="role")runtime.RoleChange=true;if(reason=="analog")runtime.Trigger=Single.NaN;
+            runtime=new Runtime();if(reason=="missing") runtime.Kinds[1]=0;if(reason=="duplicate")runtime.Kinds[2]=3;if(reason=="trackpad")runtime.Kinds[0]=1;if(reason=="metadata")runtime.MetadataError=true;if(reason=="unknown-kind")runtime.Kinds[4]=88;if(reason=="pose")runtime.Valid=false;if(reason=="role")runtime.RoleChange=true;if(reason=="analog")runtime.Trigger=Single.NaN;
             read=Read(runtime);check(!read.Available,"Ambiguous, unsupported or invalid controller state is refused: "+reason);
         }
     }
@@ -167,5 +167,24 @@ static class RewiredInputChecks
         }
         Rewired.ReInput.Reset();adapter=Adapter(()=>0);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];adapter.SetDesired(.4,0,.8,1);Rewired.ReInput.controllers.Joysticks.Add(new Rewired.Controller(99));Rewired.ReInput.Pulse();check(adapter.FaultReason!="" && device.Values[0]==0 && device.Values[2]==0,"A new physical-controller conflict stops the public callback and releases owned axes");
         try{adapter.Remove();}catch(Exception){}check(Rewired.ReInput.controllers.Joysticks.Count==1 && Rewired.ReInput.Subscribers==0,"Cleanup never removes a newly arrived physical controller");Rewired.ReInput.Reset();
+        foreach(string change in new[]{"tag","source-id","axis-removed","axis-reordered","identifier-reordered","axis-value","runtime-axis-removed","runtime-axis-reordered","runtime-axis-ID","runtime-identifier-reordered","runtime-polling","runtime-calibration-value","runtime-calibration-reference","runtime-calibration-curve","runtime-calibration-empty"})
+        {
+            Rewired.ReInput.Reset();now=0;adapter=Adapter(()=>now);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];data=Rewired.ReInput.Data;adapter.SetDesired(.4,.3,.8,1);now=.1;Rewired.ReInput.Pulse();
+            if(change=="tag")device.tag="game changed";if(change=="source-id")device.sourceControllerId=99;if(change=="axis-removed")data.Definitions[0].axes.RemoveAt(0);if(change=="axis-reordered")data.Definitions[0].axes.Reverse();if(change=="identifier-reordered")data.Definitions[0].elementIdentifiers.Reverse();if(change=="axis-value")data.Definitions[0].axes[0].invert=true;
+            if(change=="runtime-axis-removed")device.Axes.RemoveAt(0);if(change=="runtime-axis-reordered")device.Axes.Reverse();if(change=="runtime-axis-ID")device.Axes[0].id=99;if(change=="runtime-identifier-reordered")device.AxisElementIdentifiers.Reverse();if(change=="runtime-polling")device.Axes[0].pollingDeadZone=.1f;if(change=="runtime-calibration-value")device.calibrationMap.Axes[0].deadZone=.1f;if(change=="runtime-calibration-reference")device.calibrationMap=new Rewired.CalibrationMap();if(change=="runtime-calibration-curve")device.calibrationMap.Axes[0].sensitivityCurve.postWrapMode=1;if(change=="runtime-calibration-empty")device.calibrationMap.EmptyXml=true;
+            now=1;Rewired.ReInput.Pulse();try{adapter.Remove();}catch(Exception){}
+            check(Math.Abs(device.Values[0]-.4)<1e-6 && Math.Abs(device.Values[1]-.3)<1e-6 && Math.Abs(device.Values[2]-.8)<1e-6 && adapter.NeedsCleanup && adapter.CleanupStatus=="neutral_release_unconfirmed" && Rewired.ReInput.controllers.Destroys==0 && data.Deletes==0,"Expiry/error/removal never writes into changed original channel identity/configuration: "+change);
+        }
+        foreach(bool runtimeChange in new[]{false,true})
+        {
+            Rewired.ReInput.Reset();now=0;adapter=Adapter(()=>now);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];data=Rewired.ReInput.Data;adapter.SetDesired(.4,.3,.8,1);now=.1;Rewired.ReInput.Pulse();
+            if(runtimeChange)Rewired.ReInput.players.SystemPlayer.controllers.maps.Content[0].Entries.Reverse();else data.Maps[0].actionElementMaps.Reverse();
+            now=1;Rewired.ReInput.Pulse();try{adapter.Remove();}catch(Exception){}
+            check(device.Values[0]==0 && device.Values[1]==0 && device.Values[2]==0 && adapter.NeedsCleanup && Rewired.ReInput.controllers.Destroys==0 && data.Deletes==0,"Changed mapping preserves map content but releases only intact admitted original channels");
+        }
+        Rewired.ReInput.Reset();now=0;adapter=Adapter(()=>now);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];adapter.SetDesired(.4,0,.8,1);var otherThread=new System.Threading.Thread(()=>Rewired.ReInput.Pulse());otherThread.Start();otherThread.Join();
+        check(adapter.FaultReason!="" && device.Values[0]==0 && device.Values[2]==0 && adapter.AppliedUpdates==0,"A callback on another thread cannot write values into the owner-thread device");adapter.Remove();check(!adapter.NeedsCleanup && Rewired.ReInput.Subscribers==0,"Owner-thread teardown remains available after a wrong-thread callback");
+        Rewired.ReInput.Reset();now=0;adapter=Adapter(()=>now);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];adapter.SetDesired(.4,0,.8,1);now=.1;Rewired.ReInput.Pulse();now=.05;Rewired.ReInput.Pulse();check(device.Values[0]==0 && device.Values[2]==0 && adapter.FaultReason=="source_expired_or_clock_invalid","Actual public event releases intact original channels on clock regression");adapter.Remove();Rewired.ReInput.Reset();
+        adapter=Adapter(()=>0);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];Rewired.ReInput.players.SystemPlayer.controllers.maps.Content[0].EmptyXml=true;try{adapter.Remove();}catch(Exception){}check(adapter.NeedsCleanup && Rewired.ReInput.controllers.Destroys==0 && Rewired.ReInput.Data.Deletes==0,"An empty returned runtime-map serialization is not an ownership proof");Rewired.ReInput.Reset();
     }
 }
