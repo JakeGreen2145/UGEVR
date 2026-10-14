@@ -19,7 +19,7 @@ Both final runs exceeded 16,000 successful paired eye submissions. Fourteen trac
 
 An additional Steam Frame transport probe streamed Firewatch and Outer Wilds using the same development distribution. Both games reached paired eye submission, Windows SteamVR identified the launched game as its renderer, and headset runtime screenshots showed game scenes. A distinctive synthetic pose applied on the headset reached Windows with matching pose matrices. This validates the wireless runtime path; it does not validate physical sensor tracking, lens output, comfort or sustained gameplay.
 
-Later automated Outer Wilds probes forwarded streamed controller input through an explicitly enabled owned Unity gamepad. The game's original wake action responded, and stick events reached the owned device. A larger, closer UI panel made movement prompts readable in host eye captures. Full gameplay, look controls, headset UI readability and the accepted functional gate remain open. See the [physical probe results](docs/physical-probes.md).
+Later automated probes used explicitly enabled owned public InputSystem and Rewired controllers. Outer Wilds responded to ordinary Wake, movement, look, marshmallow roasting and B/Cancel exit. Firewatch showed player movement and camera turning, with public readbacks matching the owned controller to original game actions. A larger, closer UI panel made movement prompts readable in host eye captures. An intermittent camera-restoration comparison failure remains under investigation. Firewatch contextual interaction, headset UI readability and the accepted three-to-five-minute gameplay gate remain open. No full gameplay run has qualified. See the [physical probe results](docs/physical-probes.md).
 
 ## Current scope
 
