@@ -112,7 +112,9 @@ namespace UnityEngine
         public override int GetHashCode() {return x.GetHashCode()^y.GetHashCode()^z.GetHashCode()^w.GetHashCode();}
     }
     public struct Matrix4x4 { public float Marker;public float[] Elements; public float this[int i] { get { return Elements==null?(i==0?Marker:0):Elements[i]; } } }
-    public struct Rect { public float x,y,width,height; }
+    public struct Rect { public float x,y,width,height;public Rect(float x,float y,float width,float height){this.x=x;this.y=y;this.width=width;this.height=height;} }
+    public class Shader : Object {}
+    public class Material : Object {public Shader shader=new Shader();}
     public struct Color { public float r,g,b,a;public static Color clear {get {return new Color();}} }
     public class RenderTexture : Object
     {
@@ -136,6 +138,8 @@ namespace UnityEngine
         public virtual Vector3 lossyScale {get;set;}=new Vector3(1,1,1);
         public virtual Matrix4x4 localToWorldMatrix {get;set;}
         public virtual Matrix4x4 worldToLocalMatrix {get;set;}
+        public System.Func<Vector3,Vector3> InversePoint;
+        public Vector3 InverseTransformPoint(Vector3 value) {if(InversePoint!=null)return InversePoint(value);return new Vector3(value.x-position.x,value.y-position.y,value.z-position.z);}
     }
     public class RectTransform : Transform
     {
@@ -154,6 +158,8 @@ namespace UnityEngine
         public Rect rect {get {return new Rect {width=sizeDelta.x,height=sizeDelta.y};} }
         public enum Axis {Horizontal,Vertical}
         public void SetSizeWithCurrentAnchors(Axis axis,float value) {if(axis==Axis.Horizontal) sizeDelta.x=value;else sizeDelta.y=value;}
+        public System.Action<Vector3[]> WorldCorners;
+        public void GetWorldCorners(Vector3[] values){if(WorldCorners!=null){WorldCorners(values);return;}values[0]=position;values[1]=new Vector3(position.x,position.y+rect.height,position.z);values[2]=new Vector3(position.x+rect.width,position.y+rect.height,position.z);values[3]=new Vector3(position.x+rect.width,position.y,position.z);}
     }
     public class CanvasRenderer : Component
     {
@@ -164,6 +170,18 @@ namespace UnityEngine
         public bool hasRectClipping {get {++NativeQueries;return ClipValue;}}
         public float GetAlpha() {++NativeQueries;return AlphaValue;}
         public float GetInheritedAlpha() {++NativeQueries;if(ThrowInherited) throw new System.InvalidOperationException();return InheritedAlphaValue;}
+        public Color ColorValue=new Color {r=1,g=1,b=1,a=1};
+        public Material[] Materials=new Material[0],PopMaterials=new Material[0];
+        public bool hasPopInstruction;
+        public int materialCount {get {++NativeQueries;return Materials.Length;}}
+        public int popMaterialCount {get {++NativeQueries;return PopMaterials.Length;}}
+        public Material GetMaterial(int index){++NativeQueries;return Materials[index];}
+        public Material GetPopMaterial(int index){++NativeQueries;return PopMaterials[index];}
+        public Color GetColor(){++NativeQueries;return ColorValue;}
+        public Vector2 clippingSoftness {get;set;}
+        public int ClipEnables,ClipDisables;public Rect LastClip;
+        public void EnableRectClipping(Rect rect){++ClipEnables;LastClip=rect;ClipValue=true;}
+        public void DisableRectClipping(){++ClipDisables;ClipValue=false;}
     }
     public enum RenderMode {ScreenSpaceOverlay,ScreenSpaceCamera,WorldSpace}
     public enum AdditionalCanvasShaderChannels {None=0,TexCoord1=1,Normal=2}
@@ -187,7 +205,8 @@ namespace UnityEngine
         public CanvasRenderer[] Renderers=new CanvasRenderer[0];
         public Canvas[] NestedCanvases;
         public Renderer[] WorldRenderers=new Renderer[0];
-        public T[] GetComponentsInChildren<T>(bool inactive) { return (T[])(object)(typeof(T)==typeof(Canvas)?(System.Array)(NestedCanvases??new[]{this}):typeof(T)==typeof(RectTransform)?(System.Array)Rects:typeof(T)==typeof(Renderer)?(System.Array)WorldRenderers:Renderers); }
+        public Component[] ClipComponents=new Component[0];
+        public T[] GetComponentsInChildren<T>(bool inactive) { return (T[])(object)(typeof(T)==typeof(Component)?(System.Array)ClipComponents:typeof(T)==typeof(Canvas)?(System.Array)(NestedCanvases??new[]{this}):typeof(T)==typeof(RectTransform)?(System.Array)Rects:typeof(T)==typeof(Renderer)?(System.Array)WorldRenderers:Renderers); }
     }
     public class Camera : Component
     {

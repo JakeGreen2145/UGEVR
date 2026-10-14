@@ -41,6 +41,8 @@
     <Compile Include="../../src/CameraRestorationPoseDiagnostics.cs" Link="CameraRestorationPoseDiagnostics.cs" />
     <Compile Include="../../src/CameraCurrentScope.cs" Link="CameraCurrentScope.cs" />
     <Compile Include="../../src/OverlayCanvasScope.cs" Link="OverlayCanvasScope.cs" />
+    <Compile Include="../../src/UiPanelClipScope.cs" Link="UiPanelClipScope.cs" />
+    <Compile Include="../../src/CanonicalUguiPanelClipAccess.cs" Link="CanonicalUguiPanelClipAccess.cs" />
     <Compile Include="../../src/UiLayoutDiagnostics.cs" Link="UiLayoutDiagnostics.cs" />
     <Compile Include="../../src/DesktopLayoutFlush.cs" Link="DesktopLayoutFlush.cs" />
     <Compile Include="../../src/OverlayPanelGeometry.cs" Link="OverlayPanelGeometry.cs" />

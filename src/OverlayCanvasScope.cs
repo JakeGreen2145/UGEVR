@@ -31,6 +31,8 @@ namespace Ugevr
         OverlayLayerLease layerLease;
         OverlayWallTiming wallTiming;
         readonly NativeUiStateDiagnostics nativeUiState;
+        readonly UiPanelClipScope panelClip;
+        int reportedPanelClipConflicts;
         Camera uiCamera;
         readonly double unitsPerMeter;
         readonly double panelWidthMeters;
@@ -56,7 +58,24 @@ namespace Ugevr
         public void RenderGameEye(int eye)
         {try {if(wallTiming==null) camera.Render();else wallTiming.Render(camera,eye,false);} finally {if(nativeUiState!=null) nativeUiState.Capture(eye==0?1:3);}}
         public void RenderUiEye(int eye)
-        {try {if(wallTiming==null) OverlayCameraPass.Render(uiCamera);else wallTiming.Render(uiCamera,eye,true);} finally {if(nativeUiState!=null) nativeUiState.Capture(eye==0?2:4);}}
+        {
+            try
+            {
+                if(panelClip!=null)
+                {
+                    if(layerLease==null||uiCamera==null)throw new InvalidOperationException("panel_clip_requires_isolated_ui_pass");
+                    panelClip.BeginEye(eye);
+                }
+                if(wallTiming==null) OverlayCameraPass.Render(uiCamera);else wallTiming.Render(uiCamera,eye,true);
+            }
+            finally
+            {
+                try {if(panelClip!=null)panelClip.ObserveAfterEye(eye);if(nativeUiState!=null) nativeUiState.Capture(eye==0?2:4);}
+                finally {if(panelClip!=null){panelClip.EndEye(eye);ReportPanelClipConflicts();}}
+            }
+        }
+        void ReportPanelClipConflicts()
+        {if(panelClip!=null)while(reportedPanelClipConflicts<panelClip.Conflicts){++reportedPanelClipConflicts;Conflict(panelClip.LastError);}}
 
         sealed class CanvasState
         {
@@ -84,7 +103,9 @@ namespace Ugevr
             public Quaternion LocalRotation;
         }
 
-        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null,bool captureNativeUiState=false,int nativeUiRendererLimit=NativeUiStateDiagnostics.DefaultRendererLimit)
+        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null,bool captureNativeUiState=false,int nativeUiRendererLimit=NativeUiStateDiagnostics.DefaultRendererLimit,UiPanelClipping panelClipping=UiPanelClipping.None)
+            : this(camera,unitsPerMeter,planeDistanceMeters,includeLayers,panelWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureNativeUiState,nativeUiRendererLimit,panelClipping,null) {}
+        internal OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters,bool captureLayoutInputs,string layoutInputRootRectIds,bool captureNativeUiState,int nativeUiRendererLimit,UiPanelClipping panelClipping,Func<Canvas[],UiPanelClipScope> clipFactory)
         {
             if(captureLayoutInputs) layoutInputs=new UiLayoutDiagnostics(layoutInputRootRectIds);
             if(captureNativeUiState) nativeUiState=new NativeUiStateDiagnostics(camera,nativeUiRendererLimit);
@@ -164,6 +185,12 @@ namespace Ugevr
             if(layoutInputs!=null) layoutInputs.FinishAdmission();
             CaptureLayoutPhase(0);
             if(nativeUiState!=null) nativeUiState.Capture(0);
+            if(panelClipping!=UiPanelClipping.None)
+            {
+                if(panelClipping!=UiPanelClipping.CanonicalUguiDefaultRootV1)throw new ArgumentException("Unknown panel clipping mode.");
+                var roots=new Canvas[canvases.Count];for(int i=0;i<roots.Length;++i)roots[i]=canvases[i].Canvas;
+                panelClip=clipFactory==null?new UiPanelClipScope(roots):clipFactory(roots);
+            }
         }
 
         public void ApplyEye(int eye=0)
@@ -172,6 +199,7 @@ namespace Ugevr
             if (canvases.Count==0) return;
             if (!commonHeadSet) throw new InvalidOperationException("Common UI head pose must be set before rendering either eye.");
             if (!applied) PrepareCommonPanel();
+            if(panelClip!=null)panelClip.RecordPanelPlacement();
             if(eye>=0 && eye<2) CaptureLayoutPhase(eye==0?1:3);
             if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
         }
@@ -257,6 +285,7 @@ namespace Ugevr
         public void Dispose()
         {
             if (disposed) return; disposed=true;
+            if(panelClip!=null){panelClip.Dispose();ReportPanelClipConflicts();}
             if (!applied) return;
             foreach (CanvasState state in canvases)
             {
@@ -393,6 +422,7 @@ namespace Ugevr
                     VerifyRotation(state,Values(state.LocalRotation),Values(state.Rect.localRotation));
                 },"verify final desktop rectangle "+state.Name);
             }
+            if(panelClip!=null){panelClip.ObserveDesktop();ReportPanelClipConflicts();}
         }
         static string Quote(string value)
         {
@@ -565,6 +595,7 @@ namespace Ugevr
             }
             text.Append("],\"wallTiming\":").Append(wallTiming==null?"null":wallTiming.DiagnosticJson());
             text.Append(",\"nativeUiState\":").Append(nativeUiState==null?"null":nativeUiState.DiagnosticJson());
+            if(panelClip!=null)text.Append(",\"panelClipping\":").Append(panelClip.DiagnosticJson());
             text.Append(",\"currentCameraRestoration\":").Append(currentCameraRestoration==null?"null":currentCameraRestoration.DiagnosticJson());
             text.Append(",\"desktopLayoutFlush\":").Append(desktopLayoutFlush==null?"null":desktopLayoutFlush.DiagnosticJson());
             text.Append(",\"layoutInputDiagnostic\":");

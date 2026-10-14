@@ -70,6 +70,7 @@ public class Injector : BaseUnityPlugin
     bool allowEngineInputExperiment;
     bool captureOverlayCanvases,includeOverlayLayers;
     bool overlayAfterImageEffects;
+    UiPanelClipping panelClipping;
     int overlayIsolationLayer=-1,layerFailureCaptures;
     int overlaySceneScanLimit=OverlayLayerInventory.DefaultScanLimit;
     bool captureLayoutInputs;
@@ -156,6 +157,8 @@ public class Injector : BaseUnityPlugin
             overlayPlaneMeters=Config.Bind("UI","OverlayPlaneDistanceMeters",2f,"Experimental overlay camera plane distance in physical meters; bounded by game camera clipping.").Value;
             overlayWidthMeters=Config.Bind("UI","OverlayPanelWidthMeters",1.8f,"Experimental common physical panel width; desktop aspect/layout retained independently of game FOV.").Value;
             overlayAfterImageEffects=Config.Bind("UI","OverlayAfterImageEffects",false,"Experimental opt-in: render selected overlay UI in an isolated no-effect pass after the game eye's effects. Requires explicit overlay capture activation.").Value;
+            panelClipping=UiPanelClipScope.Parse(Config.Bind("UI","PanelClipping","none","Explicit experimental canonical-ugui-default-root-v1 crop, or none. Requires CaptureOverlayCanvases and OverlayAfterImageEffects. Only inspected canonical default-material Image/Text roots without masks, nested/inactive descendants or existing clips are admitted. Cleanup verifies the original false clip flag; foreign rectangle replacement is unobservable.").Value);
+            if(panelClipping!=UiPanelClipping.None&&(!captureOverlayCanvases||!overlayAfterImageEffects))throw new ArgumentException("UI.PanelClipping requires CaptureOverlayCanvases and OverlayAfterImageEffects.");
             overlayIsolationLayer=Config.Bind("UI","OverlayIsolationLayer",-1,"-1 selects an unused unnamed layer. Explicit 8..31 may borrow a named layer only while no loaded scene object, including inactive objects, occupies it.").Value;
             overlaySceneScanLimit=Config.Bind("UI","OverlaySceneScanLimit",OverlayLayerInventory.DefaultScanLimit,"Per-query object inspection bound for UI layer inventory and exclusivity. Explicit range 100000..1000000; incomplete inventories reject borrowing. Unity still allocates each complete query result.").Value;
             if(overlayIsolationLayer!=-1 && (overlayIsolationLayer<8 || overlayIsolationLayer>31)) throw new ArgumentOutOfRangeException("OverlayIsolationLayer","Use -1 or 8 through 31.");
@@ -516,7 +519,7 @@ public class Injector : BaseUnityPlugin
             cameraPoseAdmissionError=poseRequests.LastError;
             if(!String.IsNullOrEmpty(cameraPoseAdmissionError)) Logger.LogWarning("CAMERA_POSE_CAPTURE_ADMISSION "+cameraPoseAdmissionError+"; request retained, image capture deferred.");
         }
-        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureAdmission.CaptureNativeUiState,nativeUiRendererLimit):null;
+        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureAdmission.CaptureNativeUiState,nativeUiRendererLimit,panelClipping):null;
         if(overlays!=null && capturesEnabled) overlays.EnableWallTiming();
         if(overlays!=null) overlays.SetDesktopLayoutFlush(desktopFlush);
         if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
