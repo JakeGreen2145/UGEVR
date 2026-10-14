@@ -11,5 +11,6 @@
     <Compile Include="../../src/InjectorSession.cs" Link="InjectorSession.cs" />
     <Compile Include="../../src/CameraState.cs" Link="CameraState.cs" />
     <Compile Include="../../src/OverlayCanvasScope.cs" Link="OverlayCanvasScope.cs" />
+    <Compile Include="../../src/OverlayPanelGeometry.cs" Link="OverlayPanelGeometry.cs" />
   </ItemGroup>
 </Project>

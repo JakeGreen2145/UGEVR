@@ -47,6 +47,7 @@ public class Injector : BaseUnityPlugin
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
     bool captureOverlayCanvases,includeOverlayLayers;
     double overlayPlaneMeters;
+    double overlayWidthMeters;
     double unitsPerMeter;
     string evidenceDir, pendingRecenter, trackingDiagnostic;
     float phaseStarted, nextReport, lastSubmittedAt;
@@ -69,6 +70,7 @@ public class Injector : BaseUnityPlugin
             captureOverlayCanvases=Config.Bind("UI","CaptureOverlayCanvases",false,"Experimental: borrow active screen overlay canvases during eye rendering and restore desktop state.").Value;
             includeOverlayLayers=Config.Bind("UI","IncludeOverlayLayers",false,"Explicitly include selected overlay canvas renderer layers in the borrowed camera mask; may also reveal other geometry on those layers.").Value;
             overlayPlaneMeters=Config.Bind("UI","OverlayPlaneDistanceMeters",2f,"Experimental overlay camera plane distance in physical meters; bounded by game camera clipping.").Value;
+            overlayWidthMeters=Config.Bind("UI","OverlayPanelWidthMeters",1.8f,"Experimental common physical panel width; desktop aspect/layout retained independently of game FOV.").Value;
             if (Double.IsNaN(unitsPerMeter) || Double.IsInfinity(unitsPerMeter) || unitsPerMeter<=0)
                 throw new ArgumentException("UnitsPerMeter must be finite and greater than zero.");
             if (disableOcclusionCulling) Logger.LogWarning("EXPLICIT_FIDELITY_REMEDY DisableOcclusionCulling=true; game culling is restored after the eye pair.");
@@ -280,7 +282,8 @@ public class Injector : BaseUnityPlugin
         RigidPose anchor=new RigidPose(Position(basePosition),Rotation(baseRotation));
         var actualEyes=new RigidPose[2];
         var beforeRenderProjection=new Matrix4x4[2];
-        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers):null;
+        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters):null;
+        if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
         try
         {
         using (var restore=new CameraState(camera))

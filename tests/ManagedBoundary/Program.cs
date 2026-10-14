@@ -18,7 +18,7 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); SessionChecks();
+        MathChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void TrackingReacquisitionChecks()
@@ -194,18 +194,18 @@ class Program
         var camera=new Camera {cullingMask=~(1<<8)};
         var originalCamera=new Camera(); overlay.worldCamera=originalCamera;
         Canvas.ForceAction=delegate {
-            if (overlay.renderMode==RenderMode.ScreenSpaceCamera)
+            if (overlay.renderMode==RenderMode.WorldSpace)
             {
                 overlay.Rects[0].sizeDelta=new Vector2(1399,1399); overlay.Rects[0].localScale=new Vector3(99,99,99);
                 overlay.scaleFactor=4;overlay.referencePixelsPerUnit=99;overlay.sortingOrder=99;
                 overlay.overridePixelPerfect=false;overlay.additionalShaderChannels=AdditionalCanvasShaderChannels.Normal;
             }
         };
-        var scope=new OverlayCanvasScope(camera,1,2,false);
+        var scope=PanelScope(camera,1,2,false);
         try
         {
             using (scope) { scope.ApplyEye(); Assert(scope.SelectedCount==2,"Only active root overlays on the selected display are borrowed");
-                Assert(overlay.renderMode==RenderMode.ScreenSpaceCamera && overlay.worldCamera==camera,"Overlay camera binding applied");
+                Assert(overlay.renderMode==RenderMode.WorldSpace && overlay.worldCamera==camera,"Overlay common world panel binding applied");
                 Assert(overlay.planeDistance==2,"Physical UI plane distance applied");Assert(camera.cullingMask==~(1<<8),"Excluded UI layers are not implicitly included");
                 Assert(world.renderMode==RenderMode.WorldSpace && cameraUi.renderMode==RenderMode.ScreenSpaceCamera,"World and existing camera UI modes unchanged");
                 throw new InvalidOperationException("Failed second-eye render"); }
@@ -219,22 +219,22 @@ class Program
         Assert(scope.RestorationConflicts==0,"Restoration verifies saved values");
         Assert(scope.DiagnosticJson().Contains("\"excludedOverlayLayers\":256"),"Excluded layer selection recorded");
         Canvas.ForceAction=null;
-        using (var include=new OverlayCanvasScope(camera,1,2,true)) { include.ApplyEye(); Assert(camera.cullingMask==-1,"Explicit layer remedy includes selected renderer layers"); }
+        using (var include=PanelScope(camera,1,2,true)) { include.ApplyEye(); Assert(camera.cullingMask==-1,"Explicit layer remedy includes selected renderer layers"); }
         Assert(camera.cullingMask==~(1<<8),"Explicit layer remedy restores camera mask");
-        using (var clipped=new OverlayCanvasScope(camera,1,.1,false)) {Assert(clipped.PlaneDistance>camera.nearClipPlane && clipped.PlaneDistance<camera.farClipPlane,"UI plane is strictly inside clipping");}
-        var failScope=new OverlayCanvasScope(camera,1,2,false);failScope.ApplyEye();
+        using (var clipped=PanelScope(camera,1,.1,false)) {Assert(clipped.PlaneDistance>camera.nearClipPlane && clipped.PlaneDistance<camera.farClipPlane,"UI plane is strictly inside clipping");}
+        var failScope=PanelScope(camera,1,2,false);failScope.ApplyEye();
         overlay.ModeSetter=delegate(RenderMode value) {if (value==RenderMode.ScreenSpaceOverlay) throw new Exception("Restoration setter failure");};
         failScope.Dispose();
         Assert(failScope.RestorationConflicts>0 && failScope.RestorationError.Contains("setter failure"),"Restoration conflict reported");
         Assert(second.renderMode==RenderMode.ScreenSpaceOverlay && second.planeDistance==100,"One setter failure does not stop other canvas restoration");
         Assert(overlay.worldCamera==originalCamera && overlay.planeDistance==100,"One setter failure does not stop remaining properties");
         overlay.ModeSetter=null;overlay.renderMode=RenderMode.ScreenSpaceOverlay;
-        var destroyed=new OverlayCanvasScope(camera,1,2,false);destroyed.ApplyEye();second.Destroyed=true;second.Rects[0].Destroyed=true;destroyed.Dispose();
+        var destroyed=PanelScope(camera,1,2,false);destroyed.ApplyEye();second.Destroyed=true;second.Rects[0].Destroyed=true;destroyed.Dispose();
         Assert(destroyed.DestroyedObjects==2,"Destroyed native objects skipped and reported");
         Assert(overlay.renderMode==RenderMode.ScreenSpaceOverlay,"Destroyed objects do not prevent surviving state restoration");
         int updates=0;
         Canvas.ForceAction=delegate {if (++updates==1) {overlay.Rects[0].sizeDelta=new Vector2(7,7);throw new Exception("Canvas update callback failed");}};
-        var updateFailure=new OverlayCanvasScope(camera,1,2,false);
+        var updateFailure=PanelScope(camera,1,2,false);
         try {using (updateFailure) updateFailure.ApplyEye();} catch (Exception) { }
         Assert(overlay.renderMode==RenderMode.ScreenSpaceOverlay && overlay.Rects[0].sizeDelta.Equals(new Vector2(3840,2160)),"Canvas update failure still restores mode and layout");
         Assert(updateFailure.RestorationConflicts==0,"Successful restoration after callback failure is distinct from failed rendering");
@@ -245,6 +245,60 @@ class Program
         Assert(limited,"Oversized root selection fails before conversion");
         Assert(Canvas.Instances.TrueForAll(canvas=>canvas.renderMode==RenderMode.ScreenSpaceOverlay),"Limit failure leaves original modes intact");
         Canvas.Instances.Clear();
+    }
+    static OverlayCanvasScope PanelScope(Camera camera,double units,double distance,bool layers)
+    {
+        var scope=new OverlayCanvasScope(camera,units,distance,layers);
+        scope.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));
+        return scope;
+    }
+    static void PanelGeometryChecks()
+    {
+        var center=OverlayPanelGeometry.Place(new RigidPose(new Position(0,0,0),Orientation.Identity),2,1.8,16.0/9,.5,.5);
+        Near(center.Position.X,0,"Common panel center X");Near(center.Position.Y,0,"Common panel center Y");Near(center.Position.Z,2,"Common panel physical distance");
+        Near(OverlayPanelGeometry.PixelScale(1.8,1920,2),.00046875,"Panel scale accounts for logical pixel width and uniform parent");
+        double leftRay=.028803436/2,rightRay=-.028803436/2;
+        double uLeft=(leftRay+1.667044)/(1.21214163+1.667044);
+        double uRight=(rightRay+1.21058965)/(1.66956735+1.21058965);
+        Assert(uLeft>.58 && uRight<.42,"One shared center projects to different normalized pixels with asymmetric frustums");
+        Near((uLeft*(1.21214163+1.667044)-1.667044)*2-.028803436,0,"Left projection reconstructs shared panel center");
+        Near((uRight*(1.66956735+1.21058965)-1.21058965)*2+.028803436,0,"Right projection reconstructs same shared panel center");
+        var offsetPivot=OverlayPanelGeometry.Place(new RigidPose(new Position(10,0,0),Orientation.Yaw(Math.PI/2)),2,1.8,16.0/9,0,0);
+        Near(offsetPivot.Position.X,12,"Head-forward panel follows yaw");Near(offsetPivot.Position.Y,-.50625,"Panel pivot retains desktop aspect");Near(offsetPivot.Position.Z,.9,"Pivot uses head-local horizontal extent");
+        Canvas.Instances.Clear();Canvas.ForceAction=null;
+        var overlay=Overlay("coupled",5);
+        var rect=overlay.Rects[0]; rect.name="SpecialFeaturesMask";rect.AnchorReference=new Vector3(0,24.6f,0);rect.anchoredPosition3D=new Vector3(0,2.3f,0);
+        var canonical=rect.anchoredPosition3D;var local=rect.localPosition;
+        rect.localPosition=local;
+        Assert(rect.anchoredPosition3D.y!=canonical.y,"Fixture reproduces float cancellation when localPosition overwrites anchoredPosition");
+        Near(rect.anchoredPosition3D.y,2.299999237060547,"Fixture reproduces observed Firewatch mismatch");
+        rect.anchoredPosition3D=canonical;
+        var originalWorld=rect.position;
+        var camera=new Camera();var scope=PanelScope(camera,1,2,false);
+        using (scope)
+        {
+            scope.ApplyEye(0);var first=rect.position;var firstSize=rect.sizeDelta;var firstScale=rect.localScale;
+            camera.transform.position=new Vector3(.03f,0,0);scope.ApplyEye(1);
+            Assert(rect.position.Equals(first) && rect.sizeDelta.Equals(firstSize) && rect.localScale.Equals(firstScale),"Both eyes observe identical root geometry");
+            Assert(rect.sizeDelta.x==3840 && rect.sizeDelta.y==2160,"Common panel preserves desktop layout aspect");
+        }
+        Assert(rect.anchoredPosition3D.Equals(canonical),"Canonical anchoredPosition3D restores exact original value");
+        Assert(rect.position.Equals(originalWorld),"Restoring canonical layout also restores root world position");
+        Assert(scope.RestorationConflicts==0,"Coupled-field restoration does not introduce false failure");
+        Canvas.ForceAction=delegate {if(overlay.renderMode==RenderMode.WorldSpace) rect.DerivedLocalReadOffset=new Vector3(0,.000002f,0);};
+        var roundoff=PanelScope(camera,1,2,false);using(roundoff) roundoff.ApplyEye();
+        Assert(roundoff.RestorationConflicts==0 && roundoff.DerivedPositionRoundoff==1,"A representational derived-position ULP is recorded separately");
+        Assert(roundoff.DiagnosticJson().Contains("\"acceptedDerivedRoundoff\":true"),"Accepted derived roundoff retains exact diagnostic values");
+        rect.DerivedLocalReadOffset=new Vector3();
+        Canvas.ForceAction=delegate {if(overlay.renderMode==RenderMode.WorldSpace) rect.DerivedLocalReadOffset=new Vector3(0,1,0);};
+        var changed=PanelScope(camera,1,2,false);using(changed) changed.ApplyEye();
+        Assert(changed.RestorationConflicts>0 && changed.DiagnosticJson().Contains("\"field\":\"localPosition\""),"A real derived layout change beyond ULP tolerance fails with exact field diagnostics");
+        rect.DerivedLocalReadOffset=new Vector3();Canvas.ForceAction=null;
+        rect.parent=new Transform {lossyScale=new Vector3(1,2,1)};
+        bool parentRejected=false;
+        try {PanelScope(camera,1,2,false);} catch (InvalidOperationException) {parentRejected=true;}
+        Assert(parentRejected && overlay.renderMode==RenderMode.ScreenSpaceOverlay,"Nonuniform parent rejects before mutation instead of stretching physical UI");
+        Canvas.Instances.Clear();Canvas.ForceAction=null;
     }
     static void ExternalProducer(string directory,string content)
     {

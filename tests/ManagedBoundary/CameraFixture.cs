@@ -27,13 +27,25 @@ namespace UnityEngine
     public enum CameraClearFlags { Skybox=1, Color=2, Depth=3, Nothing=4 }
     public class Transform : Component
     {
-        public Vector3 position,localPosition,localScale;
-        public Quaternion rotation,localRotation;
+        public Vector3 localScale;
+        public virtual Vector3 position {get {return localPosition;} set {localPosition=value;} }
+        public virtual Vector3 localPosition {get;set;}
+        public Quaternion rotation {get {return localRotation;} set {localRotation=value;} }
+        public Quaternion localRotation;
+        public Transform parent;
+        public Vector3 lossyScale=new Vector3(1,1,1);
     }
     public class RectTransform : Transform
     {
         public Vector2 anchorMin,anchorMax,pivot,sizeDelta;
-        public Vector3 anchoredPosition3D;
+        Vector3 anchored,local;
+        public Vector3 AnchorReference;
+        public Vector3 DerivedLocalReadOffset;
+        public Vector3 anchoredPosition3D {get {return anchored;} set {anchored=value;local=new Vector3(value.x+AnchorReference.x,value.y+AnchorReference.y,value.z+AnchorReference.z);} }
+        public override Vector3 localPosition {get {return new Vector3(local.x+DerivedLocalReadOffset.x,local.y+DerivedLocalReadOffset.y,local.z+DerivedLocalReadOffset.z);} set {local=value;anchored=new Vector3(value.x-AnchorReference.x,value.y-AnchorReference.y,value.z-AnchorReference.z);} }
+        public Rect rect {get {return new Rect {width=sizeDelta.x,height=sizeDelta.y};} }
+        public enum Axis {Horizontal,Vertical}
+        public void SetSizeWithCurrentAnchors(Axis axis,float value) {if(axis==Axis.Horizontal) sizeDelta.x=value;else sizeDelta.y=value;}
     }
     public class CanvasRenderer : Component { }
     public enum RenderMode {ScreenSpaceOverlay,ScreenSpaceCamera,WorldSpace}

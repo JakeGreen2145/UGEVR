@@ -18,6 +18,10 @@ namespace Ugevr
         readonly string[] appliedEyes=new string[2];
         readonly Camera camera;
         readonly bool includeLayers;
+        readonly double unitsPerMeter;
+        readonly double panelWidthMeters;
+        RigidPose commonHead;
+        bool commonHeadSet;
         bool disposed,applied;
         public readonly float PlaneDistance;
         public readonly int OriginalMask;
@@ -25,6 +29,7 @@ namespace Ugevr
         public int OverlayLayerMask { get; private set; }
         public int DestroyedObjects { get; private set; }
         public int RestorationConflicts { get; private set; }
+        public int DerivedPositionRoundoff { get; private set; }
         public int SelectedCount { get { return canvases.Count; } }
         public string RestorationError { get { return String.Join("; ",errors.ToArray()); } }
 
@@ -39,6 +44,9 @@ namespace Ugevr
             public int SortingOrder,SortingLayer,TargetDisplay;
             public bool OverrideSorting,PixelPerfect,OverridePixelPerfect;
             public AdditionalCanvasShaderChannels ShaderChannels;
+            public RectTransform Root;
+            public float Width,Height,ParentScale;
+            public Vector2 Pivot;
         }
         sealed class RectState
         {
@@ -50,24 +58,38 @@ namespace Ugevr
             public Quaternion LocalRotation;
         }
 
-        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers)
+        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8)
         {
             this.camera=camera; this.includeLayers=includeLayers;
+            this.unitsPerMeter=unitsPerMeter;this.panelWidthMeters=panelWidthMeters;
             OriginalMask=camera.cullingMask; AppliedMask=OriginalMask;
             double near=camera.nearClipPlane,far=camera.farClipPlane;
             if (Double.IsNaN(planeDistanceMeters) || Double.IsInfinity(planeDistanceMeters) || planeDistanceMeters<=0 || far<=near)
                 throw new ArgumentException("UI plane distance needs a finite positive distance and valid camera clipping.");
             double margin=Math.Min((far-near)*.1,Math.Max(.0001,unitsPerMeter*.01));
             PlaneDistance=(float)Math.Max(near+margin,Math.Min(far-margin,planeDistanceMeters*unitsPerMeter));
+            OverlayPanelGeometry.PixelScale(panelWidthMeters,1,1);
             var seen=new HashSet<int>();
             foreach (Canvas canvas in UnityEngine.Object.FindObjectsOfType(typeof(Canvas)))
             {
                 if (canvas==null || !canvas.isActiveAndEnabled || !canvas.isRootCanvas || canvas.renderMode!=RenderMode.ScreenSpaceOverlay || canvas.targetDisplay!=camera.targetDisplay) continue;
                 if (canvases.Count==RootLimit) throw new InvalidOperationException("Overlay UI exceeds 64 active roots; an explicit profile selection is required.");
+                RectTransform root=canvas.transform as RectTransform;
+                if (root==null || root.rect.width<=0 || root.rect.height<=0) throw new InvalidOperationException("Overlay "+canvas.name+" has no usable desktop rectangle.");
+                float parentScale=1;
+                if (root.parent!=null)
+                {
+                    Vector3 scale=root.parent.lossyScale;
+                    float tolerance=Math.Max(.000001f,Math.Abs(scale.x)*.00001f);
+                    if (scale.x<=0 || Math.Abs(scale.x-scale.y)>tolerance || Math.Abs(scale.x-scale.z)>tolerance)
+                        throw new InvalidOperationException("Overlay "+canvas.name+" needs an explicit parent adapter: only positive uniform parent scale is supported by the common panel.");
+                    parentScale=scale.x;
+                }
                 canvases.Add(new CanvasState {Canvas=canvas,Name=canvas.name,Id=canvas.GetInstanceID(),Mode=canvas.renderMode,
                     WorldCamera=canvas.worldCamera,Distance=canvas.planeDistance,ScaleFactor=canvas.scaleFactor,ReferencePixels=canvas.referencePixelsPerUnit,
                     SortingOrder=canvas.sortingOrder,SortingLayer=canvas.sortingLayerID,TargetDisplay=canvas.targetDisplay,
-                    OverrideSorting=canvas.overrideSorting,PixelPerfect=canvas.pixelPerfect,OverridePixelPerfect=canvas.overridePixelPerfect,ShaderChannels=canvas.additionalShaderChannels});
+                    OverrideSorting=canvas.overrideSorting,PixelPerfect=canvas.pixelPerfect,OverridePixelPerfect=canvas.overridePixelPerfect,ShaderChannels=canvas.additionalShaderChannels,
+                    Root=root,Width=root.rect.width,Height=root.rect.height,Pivot=root.pivot,ParentScale=parentScale});
                 OverlayLayerMask|=1<<canvas.gameObject.layer;
                 foreach (CanvasRenderer renderer in canvas.GetComponentsInChildren<CanvasRenderer>(true))
                     if (renderer!=null) OverlayLayerMask|=1<<renderer.gameObject.layer;
@@ -85,18 +107,38 @@ namespace Ugevr
         {
             if (disposed) throw new ObjectDisposedException("OverlayCanvasScope");
             if (canvases.Count==0) return;
+            if (!commonHeadSet) throw new InvalidOperationException("Common UI head pose must be set before rendering either eye.");
+            if (!applied) PrepareCommonPanel();
+            if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
+        }
+        public void SetCommonHead(RigidPose head) {if (applied) throw new InvalidOperationException("Common panel pose cannot change between eyes.");commonHead=head;commonHeadSet=true;}
+        void PrepareCommonPanel()
+        {
             applied=true;
             AppliedMask=includeLayers?OriginalMask | OverlayLayerMask:OriginalMask;
             camera.cullingMask=AppliedMask;
             foreach (CanvasState state in canvases)
             {
                 if (state.Canvas==null) continue;
-                state.Canvas.renderMode=RenderMode.ScreenSpaceCamera;
+                state.Canvas.renderMode=RenderMode.WorldSpace;
                 state.Canvas.worldCamera=camera;
                 state.Canvas.planeDistance=PlaneDistance;
             }
             Canvas.ForceUpdateCanvases();
-            if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
+            foreach (CanvasState state in canvases)
+            {
+                if (state.Canvas==null || state.Root==null) continue;
+                // Keep the desktop's logical aspect and dimensions. No eye viewport
+                // participates in layout or physical placement.
+                state.Root.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal,state.Width);
+                state.Root.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical,state.Height);
+                double width=panelWidthMeters*unitsPerMeter;
+                RigidPose panel=OverlayPanelGeometry.Place(commonHead,PlaneDistance,width,state.Width/state.Height,state.Pivot.x,state.Pivot.y);
+                state.Root.position=new Vector3((float)panel.Position.X,(float)panel.Position.Y,(float)panel.Position.Z);
+                state.Root.rotation=new Quaternion((float)panel.Rotation.X,(float)panel.Rotation.Y,(float)panel.Rotation.Z,(float)panel.Rotation.W);
+                float scale=(float)OverlayPanelGeometry.PixelScale(width,state.Width,state.ParentScale);
+                state.Root.localScale=new Vector3(scale,scale,scale);
+            }
         }
 
         void Attempt(Action action,string name)
@@ -139,17 +181,19 @@ namespace Ugevr
                 Attempt(delegate {rect.anchorMax=state.AnchorMax;},"rect anchor max");
                 Attempt(delegate {rect.pivot=state.Pivot;},"rect pivot");
                 Attempt(delegate {rect.sizeDelta=state.Size;},"rect size");
-                Attempt(delegate {rect.anchoredPosition3D=state.AnchoredPosition;},"rect anchored position");
                 Attempt(delegate {rect.localRotation=state.LocalRotation;},"rect rotation");
                 Attempt(delegate {rect.localScale=state.LocalScale;},"rect scale");
-                Attempt(delegate {rect.localPosition=state.LocalPosition;},"rect local position");
+                // Anchored and local position are coupled. Assigning local XY after
+                // anchored XY subtracts the anchor reference again and loses bits.
+                // Restore the authoritative anchored value once, including Z.
+                Attempt(delegate {rect.anchoredPosition3D=state.AnchoredPosition;},"rect anchored position");
                 Attempt(delegate {
                     Verify(state,"anchorMin",Values(state.AnchorMin),Values(rect.anchorMin));
                     Verify(state,"anchorMax",Values(state.AnchorMax),Values(rect.anchorMax));
                     Verify(state,"pivot",Values(state.Pivot),Values(rect.pivot));
                     Verify(state,"sizeDelta",Values(state.Size),Values(rect.sizeDelta));
                     Verify(state,"anchoredPosition3D",Values(state.AnchoredPosition),Values(rect.anchoredPosition3D));
-                    Verify(state,"localPosition",Values(state.LocalPosition),Values(rect.localPosition));
+                    Verify(state,"localPosition",Values(state.LocalPosition),Values(rect.localPosition),true);
                     Verify(state,"localScale",Values(state.LocalScale),Values(rect.localScale));
                     Verify(state,"localRotation",Values(state.LocalRotation),Values(rect.localRotation));
                 },"verify rect restoration "+state.Name);
@@ -191,22 +235,33 @@ namespace Ugevr
             for (int i=0;i<values.Length;++i) {if (i>0) text.Append(',');text.Append(Number(values[i]));}
             return text.Append(']').ToString();
         }
-        void Verify(RectState state,string field,float[] expected,float[] observed)
+        static double Ulp(float value)
         {
-            bool mismatch=false,finite=true;double maximum=0;
+            int bits=BitConverter.ToInt32(BitConverter.GetBytes(Math.Abs(value)),0);
+            int exponent=(bits>>23)&255;
+            return exponent==0?Math.Pow(2,-149):Math.Pow(2,exponent-127-23);
+        }
+        void Verify(RectState state,string field,float[] expected,float[] observed,bool derivedPosition=false)
+        {
+            bool mismatch=false,finite=true,accepted=true;double maximum=0,tolerance=0;
             for (int i=0;i<expected.Length;++i)
             {
                 mismatch|=expected[i]!=observed[i];
                 finite&=!Single.IsNaN(expected[i]) && !Single.IsInfinity(expected[i]) && !Single.IsNaN(observed[i]) && !Single.IsInfinity(observed[i]);
-                maximum=Math.Max(maximum,Math.Abs((double)expected[i]-observed[i]));
+                double componentDelta=Math.Abs((double)expected[i]-observed[i]);
+                double componentTolerance=derivedPosition?4*Math.Max(Ulp(expected[i]),Ulp(observed[i])):0;
+                maximum=Math.Max(maximum,componentDelta);tolerance=Math.Max(tolerance,componentTolerance);
+                accepted&=componentDelta<=componentTolerance;
             }
             if (!mismatch) return;
             string delta=finite?maximum.ToString("R",CultureInfo.InvariantCulture):"null";
             string name=state.Name==null?"":state.Name.Substring(0,Math.Min(64,state.Name.Length));
-            Conflict("Rect "+name+" id="+state.Id+" "+field+" expected="+Numbers(expected)+" observed="+Numbers(observed)+" maxDelta="+delta);
+            accepted&=finite;
+            if (accepted) ++DerivedPositionRoundoff;
+            else Conflict("Rect "+name+" id="+state.Id+" "+field+" expected="+Numbers(expected)+" observed="+Numbers(observed)+" maxDelta="+delta);
             if (rectMismatches.Count<64) rectMismatches.Add("{\"name\":"+Quote(name)+",\"instanceId\":"+state.Id+",\"field\":"+Quote(field)+
                 ",\"expected\":"+Numbers(expected)+",\"observed\":"+Numbers(observed)+",\"finite\":"+(finite?"true":"false")+
-                ",\"maxAbsoluteDelta\":"+delta+",\"acceptedTolerance\":0}");
+                ",\"maxAbsoluteDelta\":"+delta+",\"acceptedTolerance\":"+tolerance.ToString("R",CultureInfo.InvariantCulture)+",\"acceptedDerivedRoundoff\":"+(accepted?"true":"false")+"}");
         }
         static string Vector(Vector3 v) { return "["+Number(v.x)+","+Number(v.y)+","+Number(v.z)+"]"; }
         string AppliedCanvasJson()
@@ -224,19 +279,24 @@ namespace Ugevr
                     .Append(Number(canvas.pixelRect.width)).Append(',').Append(Number(canvas.pixelRect.height)).Append(']');
                 if (root!=null) text.Append(",\"rootPosition\":").Append(Vector(root.position)).Append(",\"rootRotation\":[")
                     .Append(Number(root.rotation.x)).Append(',').Append(Number(root.rotation.y)).Append(',').Append(Number(root.rotation.z)).Append(',').Append(Number(root.rotation.w))
-                    .Append("],\"rootLocalScale\":").Append(Vector(root.localScale)).Append(",\"rootSize\":[").Append(Number(root.sizeDelta.x)).Append(',').Append(Number(root.sizeDelta.y)).Append(']');
+                    .Append("],\"rootLocalScale\":").Append(Vector(root.localScale)).Append(",\"rootWorldScale\":").Append(Vector(root.lossyScale))
+                    .Append(",\"rootSize\":[").Append(Number(root.sizeDelta.x)).Append(',').Append(Number(root.sizeDelta.y)).Append(']')
+                    .Append(",\"rootRectSize\":[").Append(Number(root.rect.width)).Append(',').Append(Number(root.rect.height)).Append(']');
                 text.Append('}');
             }
             return text.Append(']').ToString();
         }
         public string DiagnosticJson()
         {
-            var text=new StringBuilder("{\"adapter\":\"experimental-overlay-camera\",\"planeDistance\":").Append(PlaneDistance.ToString("R",CultureInfo.InvariantCulture))
+            var text=new StringBuilder("{\"adapter\":\"experimental-overlay-common-panel\",\"panelWidthMeters\":").Append(panelWidthMeters.ToString("R",CultureInfo.InvariantCulture))
+                .Append(",\"planeDistance\":").Append(PlaneDistance.ToString("R",CultureInfo.InvariantCulture))
+                .Append(",\"commonHeadPosition\":").Append(Vector(new Vector3((float)commonHead.Position.X,(float)commonHead.Position.Y,(float)commonHead.Position.Z)))
+                .Append(",\"layout\":\"original desktop logical dimensions and aspect\"")
                 .Append(",\"originalMask\":").Append(OriginalMask).Append(",\"appliedMask\":").Append(AppliedMask)
                 .Append(",\"overlayLayerMask\":").Append(OverlayLayerMask).Append(",\"excludedOverlayLayers\":").Append(OverlayLayerMask & ~AppliedMask)
                 .Append(",\"includeOverlayLayers\":").Append(includeLayers?"true":"false").Append(",\"selectedCount\":").Append(canvases.Count)
                 .Append(",\"rectCount\":").Append(rects.Count).Append(",\"destroyedObjects\":").Append(DestroyedObjects)
-                .Append(",\"restorationConflicts\":").Append(RestorationConflicts).Append(",\"errors\":[");
+                .Append(",\"restorationConflicts\":").Append(RestorationConflicts).Append(",\"derivedPositionRoundoff\":").Append(DerivedPositionRoundoff).Append(",\"errors\":[");
             for (int i=0;i<errors.Count;++i) { if (i>0) text.Append(','); text.Append(Quote(errors[i])); }
             text.Append("],\"rectMismatches\":[").Append(String.Join(",",rectMismatches.ToArray())).Append("],\"selectedRoots\":[");
             for (int i=0;i<canvases.Count;++i)
