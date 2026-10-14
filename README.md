@@ -42,6 +42,8 @@ The [decomposition](docs/wayfinder/decomposition.md) groups the target into subs
 
 The first S1 wave adds a [standalone session controller](docs/session-controller.md), [reversible deployment](docs/session-deployment.md), a [checked native frame contract](docs/native-frame-contract.md) and [managed tracking/session state](docs/injector-session-protocol.md). These changes have controlled tests and clean builds against Firewatch and Outer Wilds assemblies. The updated code has not yet passed same-binary physical gameplay in those games.
 
+The [root-panel clipping experiment](docs/ui-panel-clipping-experiment.md) adds explicit clipping around an isolated UI render for inspected standard Unity UI components. It is disabled by default. Managed admission and cleanup checks pass, but native cropping, retained HUD content and restored desktop pixels remain unvalidated.
+
 [Development distribution packaging](docs/development-distribution.md) builds one injector and native bridge with the controller, deployment scripts and YAML provenance. Frame Testbench remains separate; its [Add separate UGEVR session client and bounded streamed-test orchestration](https://github.com/JakeGreen2145/frame-testbench/pull/1) draft contains the external test client and an experimental Steam CEF connection provider. Owned stream connection, dashboard dismissal and disconnection have been exercised on the physical headset. Gameplay input and the full physical gate remain incomplete.
 
 ## Build
