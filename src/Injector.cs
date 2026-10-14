@@ -38,7 +38,7 @@ public class Injector : BaseUnityPlugin
     KeyboardEProbe inputProbe;
     HierarchyInventoryProbe hierarchyProbe;
     EngineEInputExperiment engineInputExperiment;
-    OpenVrGamepadDiagnostic gamepadDiagnostic;
+    GamepadDiagnosticBinding gamepadBinding;
     string gamepadDiagnosticProfile;
     RewiredInputDiagnostic rewiredDiagnostic;
     double nextRewiredReport;
@@ -97,13 +97,13 @@ public class Injector : BaseUnityPlugin
             compareHierarchyInventory=Config.Bind("Diagnostics","CompareHierarchyInventory",false,"Diagnostic only: permit at most two explicitly requested sequential Resources-versus-scene hierarchy comparisons before an eye pair. Requires CaptureImages and controller session identity; does not replace layer guards.").Value && capturesEnabled;
             allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
             bool allowGamepad=Config.Bind("Input","AllowOpenVrGamepadDiagnostic",false,"Explicit code activation for one bounded owned InputSystem gamepad experiment per launch. Never changes physical keyboard state; game consumption requires observation.").Value;
-            string inputProfile=Config.Bind("Input","DiagnosticProfile","none","Select outer-1.4.1-right-a-west-axis0-leftstick-v1 for original wake/interact or outer-1.4.1-right-a-south-axis0-leftstick-v1 for menu confirm/jump explicitly. The restricted outer-1.4.1-deckardmp-right-a-west-button-only-v1 maps no axes. Restricted raw axis mapping requires outer-1.4.1-deckardmp-right-a-west-observed-axis0-leftstick-v1. These are test profiles, not general game bindings.").Value;
+            string inputProfile=Config.Bind("Input","DiagnosticProfile","none","Select outer-1.4.1-dual-hand-a-west-sticks-v1 for left movement/right look/right A to West, requiring exactly 3 neutral pair reads. Select outer-1.4.1-right-a-west-axis0-leftstick-v1 for single-hand original wake/interact or outer-1.4.1-right-a-south-axis0-leftstick-v1 for menu confirm/jump. The restricted outer-1.4.1-deckardmp-right-a-west-button-only-v1 maps no axes; restricted raw axis mapping requires outer-1.4.1-deckardmp-right-a-west-observed-axis0-leftstick-v1. Explicit test profiles, not general game bindings.").Value;
             string inputConflict=Config.Bind("Input","CurrentGamepadConflictPolicy","refuse","refuse leaves an existing current gamepad untouched. prefer-owned explicitly permits the owned diagnostic pad to become current, with conditional restoration.").Value;
             float inputSeconds=Config.Bind("Input","DiagnosticDurationSeconds",15f,"Bounded 5..300 second diagnostic window, starting only with a neutral valid right controller and focused active VR.").Value;
             float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
             captureInputIdentityDetails=Config.Bind("Input","CaptureIdentityDetails",false,"Explicit private diagnostic: capture bounded raw controller serial/model SDK results in this controller-owned session evidence directory. Never include raw IDs in public reports.").Value;
             captureRewiredSourceDetails=Config.Bind("Input","CaptureRewiredSourceDetails",false,"Private passive OpenVR observation only, independent of Rewired input admission. A fresh run-id/request-id file in controller-owned UnityVR-evidence requests 15 seconds, at most 300 samples at 20Hz and three windows per launch. Raw identities stay private; no input is authorized.").Value;
-            int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Require 1..10 consecutive valid neutral reads with stable controller, runtime generation and metadata before creating the first owned device. Default 3.").Value;
+            int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Single-hand profiles require 1..10 consecutive valid neutral reads; the dual-hand profile requires exactly 3 stable neutral pair reads before creating the first owned device.").Value;
             bool allowRewired=Config.Bind("Input","AllowRewiredInputDiagnostic",false,"Explicit code activation for one bounded owned public Rewired custom-controller window. Requires CaptureImages, a controller session and exact Firewatch profile; no private game callback is invoked.").Value;
             string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 explicitly; right axis0 stick and uniquely identified Trigger axis feed normal game actions31/32/36.").Value;
             string rewiredConflict=Config.Bind("Input","RewiredConflictPolicy","refuse","Only refuse is supported. Existing custom definitions/devices or physical Rewired joysticks reject this prototype; game additions to owned content are preserved.").Value;
@@ -124,10 +124,9 @@ public class Injector : BaseUnityPlugin
             {
                 try
                 {
-                    if(!session.Available || allowRewired || allowEngineInputExperiment || !OuterGamepadCompatibilityProfile.Supports(inputProfile))
-                        throw new InvalidOperationException("Select a valid session, the explicit diagnostic profile and disable the separate E experiment.");
+                    gamepadBinding=GamepadDiagnosticBinding.Create(allowGamepad,session.Available,allowRewired,allowEngineInputExperiment,inputProfile,inputSeconds,inputDeadzone,inputConflict,inputNeutralReads,delegate {return system;});
                     gamepadDiagnosticProfile=inputProfile;
-                    gamepadDiagnostic=new OpenVrGamepadDiagnostic(delegate {return OuterGamepadCompatibilityProfile.Create(inputProfile);},inputSeconds,inputDeadzone,inputConflict,inputNeutralReads);
+                    if(captureInputIdentityDetails && !gamepadBinding.SupportsIdentityCapture) Logger.LogWarning("INPUT_DIAGNOSTIC CaptureIdentityDetails is unsupported for the dual-hand profile. The separate opt-in passive Rewired source observer remains available.");
                     Logger.LogWarning("EXPLICIT_INPUT_DIAGNOSTIC profile="+inputProfile+" currentConflict="+inputConflict+" duration="+inputSeconds+"; synthetic owned gamepad, game consumption unknown.");
                 }
                 catch(Exception inputError) {Logger.LogWarning("INPUT_DIAGNOSTIC unavailable: "+inputError.Message);}
@@ -155,7 +154,7 @@ public class Injector : BaseUnityPlugin
             string directory=Environment.GetEnvironmentVariable("UGEVR_SESSION_DIRECTORY");
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
-            if(captureInputIdentityDetails && gamepadDiagnostic!=null && session.Available) inputIdentityCapture=new ControllerIdentityCapture(evidenceDir);
+            if(captureInputIdentityDetails && gamepadBinding!=null && gamepadBinding.SupportsIdentityCapture && session.Available) inputIdentityCapture=new ControllerIdentityCapture(evidenceDir);
             if(captureRewiredSourceDetails && session.Available)
             {
                 try {rewiredSourceObservation=new RewiredSourceObservation(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,delegate {return RewiredSourceReader.Read(system);});}
@@ -241,12 +240,17 @@ public class Injector : BaseUnityPlugin
     double InputClock() {return Stopwatch.GetTimestamp()/(double)Stopwatch.Frequency;}
     void TickGamepadDiagnostic()
     {
-        if(gamepadDiagnostic==null) return;
+        if(gamepadBinding==null) return;
         double now=InputClock();bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
-        var input=new LegacyRightSample();
-        if(enabled && Application.isFocused && !gamepadDiagnostic.Complete)
-            input=OuterGamepadCompatibilityProfile.ReadSafely(system,gamepadDiagnosticProfile);
-        gamepadDiagnostic.Tick(enabled,Application.isFocused,generation,input,now);
+        gamepadBinding.Tick(enabled,Application.isFocused,generation,now);
+        if(gamepadBinding.Dual!=null)
+        {
+            if(now<nextInputReport) return;nextInputReport=now+1;var dual=gamepadBinding.Dual;
+            Logger.LogInfo("INPUT_DIAGNOSTIC profile="+gamepadDiagnosticProfile+" sourceAxes="+(gamepadBinding.LastPair.Available?"declared_dual_joysticks":"unavailable")+" status="+dual.Status+" reason="+dual.Reason+" pairReason="+(gamepadBinding.LastPair.UnavailableReason ?? "not_read")+" neutralReads="+dual.NeutralReads+" requiredNeutralReads="+OpenVrDualGamepadDiagnostic.RequiredNeutralReads+" addAttempts="+dual.AddAttempts+" queues="+dual.Queues+" appliedStateSamples="+dual.AppliedSamples+" releaseAttempts="+dual.ReleaseAttempts+" neutralObserved="+dual.ReleaseObserved+" removeAttempts="+dual.RemoveAttempts+" cleanup="+dual.CleanupStatus+" bindingError="+gamepadBinding.LastError+" identityCapture=unsupported gameConsumption=unknown");
+            return;
+        }
+        var gamepadDiagnostic=gamepadBinding.Single;var input=gamepadBinding.LastSingle;
+        if(gamepadDiagnostic==null) return;
         if(inputIdentityCapture!=null)
         {
             if(input.Available && !inputIdentityCapture.FirstSuccessAttempted) inputIdentityCapture.Capture(input.IdentityDiagnostics,true,false,system);
@@ -264,9 +268,9 @@ public class Injector : BaseUnityPlugin
     }
     void CancelGamepadDiagnostic(string reason,bool reversiblePause=false)
     {
-        if(gamepadDiagnostic!=null)
+        if(gamepadBinding!=null)
         {
-            if(reversiblePause) gamepadDiagnostic.Pause(reason,InputClock());else gamepadDiagnostic.Cancel(reason,InputClock());
+            if(reversiblePause) gamepadBinding.Pause(reason,InputClock());else gamepadBinding.Cancel(reason,InputClock());
             nextInputReport=0;TickGamepadDiagnostic();
         }
     }

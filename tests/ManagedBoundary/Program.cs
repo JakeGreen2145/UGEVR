@@ -27,6 +27,7 @@ class Program
         EngineInputExperimentChecks.Run(Assert);
         OwnedGamepadChecks.Run(Assert);
         DualGamepadChecks.Run(Assert);
+        GamepadBindingChecks.Run(Assert);
         LegacyControllerChecks.Run(Assert);
         RewiredInputChecks.Run(Assert);
         RewiredSourceObservationChecks.Run(Assert);
