@@ -33,6 +33,7 @@ public class Injector : BaseUnityPlugin
     readonly TrackedDevicePose_t[] poses=new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
     readonly TrackedDevicePose_t[] gamePoses=new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
     readonly TrackingOrigin origin=new TrackingOrigin();
+    readonly TrackingReacquisition tracking=new TrackingReacquisition(5);
     InjectorSession session;
     SessionCommand pending;
     MethodInfo getKeyDown;
@@ -44,7 +45,7 @@ public class Injector : BaseUnityPlugin
     bool ownsBackground, oldBackground;
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
     double unitsPerMeter;
-    string evidenceDir, pendingRecenter;
+    string evidenceDir, pendingRecenter, trackingDiagnostic;
     float phaseStarted, nextReport, lastSubmittedAt;
     Camera lastCamera;
     ulong submittedPairs;
@@ -119,7 +120,13 @@ public class Injector : BaseUnityPlugin
         if (session!=null)
         {
             SessionCommand command=session.Poll(DateTime.UtcNow);
-            if (command!=null && (pending==null || command.Revision>pending.Revision)) { pending=command; pendingRecenter=null; }
+            if (command!=null && (pending==null || command.Revision>pending.Revision))
+            {
+                pending=command; pendingRecenter=null;
+                // A new explicit command can retry a paused tracking window.
+                // Reprocessing the old pending recenter must not restart it.
+                tracking.Reset(); ClearTrackingDiagnostic();
+            }
             ApplyCommand();
         }
         CheckDrain();
@@ -131,6 +138,7 @@ public class Injector : BaseUnityPlugin
     void ApplyCommand()
     {
         if (pending==null) return;
+        if (pending.Enabled && tracking.Paused) return;
         if (!pending.Enabled && pending.Recenter!=null)
         {
             session.LastError="command: recenter requires enabled VR and a valid tracked head sample.";
@@ -153,7 +161,7 @@ public class Injector : BaseUnityPlugin
         if (value)
         {
             if (draining || !runtimeReady) return;
-            if (!active) { ++generation; frameId=0; phase=0; active=true; AcquireBackground(); }
+            if (!active) { ++generation; frameId=0; phase=0; active=true; tracking.Reset(); ClearTrackingDiagnostic(); AcquireBackground(); }
         }
         else if (active)
         {
@@ -206,6 +214,10 @@ public class Injector : BaseUnityPlugin
         }
         if (phase==0)
         {
+            if (tracking.Observe(false,0,NativePoseCallbackStatus.Success,Time.realtimeSinceStartup)==PoseCallbackDisposition.PauseTracking)
+            {
+                HandleTrackingInterruption(PoseCallbackDisposition.PauseTracking); return;
+            }
             ++frameId;
             SetFrameState(generation,frameId);
             SetEyeTextures(eyes[0].GetNativeTexturePtr(),eyes[1].GetNativeTexturePtr());
@@ -213,10 +225,16 @@ public class Injector : BaseUnityPlugin
             phase=1; phaseStarted=Time.realtimeSinceStartup;
             return;
         }
-        if (GetCompletedPoseGeneration()!=generation || GetCompletedPoseFrame()!=frameId) { CheckPhaseTimeout(); return; }
-        int waitError=GetPoseWaitError();
-        int poseBridgeStatus=GetBridgeStatus();
-        if (waitError!=0 || poseBridgeStatus!=0)
+        bool poseAcknowledged=GetCompletedPoseGeneration()==generation && GetCompletedPoseFrame()==frameId;
+        int waitError=poseAcknowledged?GetPoseWaitError():0;
+        int poseBridgeStatus=poseAcknowledged?GetBridgeStatus():0;
+        var disposition=tracking.Observe(poseAcknowledged,waitError,(NativePoseCallbackStatus)poseBridgeStatus,Time.realtimeSinceStartup);
+        if (disposition==PoseCallbackDisposition.AwaitCallback) { CheckPhaseTimeout(); return; }
+        if (disposition==PoseCallbackDisposition.RetryPose || disposition==PoseCallbackDisposition.PauseTracking)
+        {
+            HandleTrackingInterruption(disposition); return;
+        }
+        if (disposition==PoseCallbackDisposition.Fail)
             throw new InvalidOperationException("Native pose callback failed: bridgeStatus="+poseBridgeStatus+", poseWaitError="+waitError+
                 ". A rejected callback may not have called OpenVR WaitGetPoses.");
         var poseResult=compositor.GetLastPoses(poses,gamePoses);
@@ -224,12 +242,10 @@ public class Injector : BaseUnityPlugin
         var hmd=poses[OpenVR.k_unTrackedDeviceIndex_Hmd];
         if (!hmd.bPoseIsValid || !hmd.bDeviceIsConnected)
         {
-            renderingActive=false; phase=0;
-            if (session!=null) session.LastError="tracking: HMD pose is invalid or disconnected; resume tracking before requesting recenter.";
-            Report("POSE_INVALID "+poseResult); return;
+            HandleTrackingInterruption(tracking.Observe(true,0,NativePoseCallbackStatus.InvalidPose,Time.realtimeSinceStartup)); return;
         }
-        if (session!=null && session.LastError.StartsWith("tracking: ")) session.LastError="";
         RigidPose head=Pose(hmd.mDeviceToAbsoluteTracking);
+        tracking.ConfirmValidPose(); ClearTrackingDiagnostic();
         if (!origin.Initialized) { origin.RecenterPosition(head.Position); origin.RecenterYaw(head.Rotation); }
         if (pendingRecenter!=null)
         {
@@ -293,6 +309,30 @@ public class Injector : BaseUnityPlugin
         Report("VR_FRAME rendered="+rendered+" submitted="+submittedPairs+" frame="+frameId+" generation="+generation);
     }
 
+    void HandleTrackingInterruption(PoseCallbackDisposition disposition)
+    {
+        bool firstReport=trackingDiagnostic==null;
+        renderingActive=false; phase=0;
+        if (disposition==PoseCallbackDisposition.PauseTracking)
+        {
+            SetEnabled(false);
+            trackingDiagnostic="tracking: VR paused after five seconds without a valid HMD pose. Wake/reconnect the headset, then explicitly enable VR with F8 or the session controller. Pending recenter was not applied; native drain may still be pending.";
+            Logger.LogWarning("TRACKING_PAUSED "+trackingDiagnostic);
+        }
+        else
+        {
+            trackingDiagnostic="tracking: HMD pose is invalid or disconnected; reacquiring for up to five seconds. Eye rendering, submission and recenter are suspended.";
+            Report("TRACKING_REACQUIRING generation="+generation+" frame="+frameId);
+        }
+        if (session!=null) session.LastError=trackingDiagnostic;
+        Publish(firstReport || disposition==PoseCallbackDisposition.PauseTracking);
+    }
+    void ClearTrackingDiagnostic()
+    {
+        // Clear only this owned diagnostic, not a newer command/status failure.
+        if (session!=null && trackingDiagnostic!=null && session.LastError==trackingDiagnostic) session.LastError="";
+        trackingDiagnostic=null;
+    }
     void CheckPhaseTimeout()
     {
         if (Time.realtimeSinceStartup-phaseStarted>5) throw new TimeoutException("Native render callback did not acknowledge frame "+frameId+"; restart the game if drain cannot complete.");

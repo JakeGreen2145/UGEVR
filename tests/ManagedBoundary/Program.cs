@@ -18,8 +18,45 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); RestoreChecks(); SessionChecks();
+        MathChecks(); RestoreChecks(); TrackingReacquisitionChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
+    }
+    static void TrackingReacquisitionChecks()
+    {
+        var tracking=new TrackingReacquisition(5);
+        Assert(tracking.Observe(false,101,NativePoseCallbackStatus.InvalidPose,0)==PoseCallbackDisposition.AwaitCallback,"Errors from an unacknowledged old frame are not classified as the current pose");
+        Assert(tracking.Observe(true,0,NativePoseCallbackStatus.InvalidPose,10)==PoseCallbackDisposition.RetryPose,"Successful wait with invalid HMD starts fresh-pose reacquisition");
+        Assert(tracking.Recovering && !tracking.Paused,"Reacquisition retains the runtime and remains distinct from pause");
+        Assert(tracking.Observe(true,0,NativePoseCallbackStatus.InvalidPose,12)==PoseCallbackDisposition.RetryPose,"Repeated invalid poses permit fresh frames within one deadline");
+        Assert(tracking.Observe(true,0,NativePoseCallbackStatus.Success,14)==PoseCallbackDisposition.ReadPose,"A native valid result permits reading before the deadline");
+        Assert(tracking.Recovering,"Native validity alone does not reset recovery before managed pose validation");
+        Assert(tracking.Observe(true,0,NativePoseCallbackStatus.InvalidPose,14.9)==PoseCallbackDisposition.RetryPose,"Managed invalid flags after a valid native wait keep the original deadline");
+        Assert(tracking.Observe(false,0,NativePoseCallbackStatus.Success,15)==PoseCallbackDisposition.PauseTracking,"Recovery deadline pauses even while a callback is still pending");
+        Assert(tracking.Paused && tracking.Observe(true,0,NativePoseCallbackStatus.Success,15.1)==PoseCallbackDisposition.PauseTracking,"Late valid poses cannot restart a paused window without explicit retry");
+        bool prematureConfirmation=false;
+        try { tracking.ConfirmValidPose(); } catch (InvalidOperationException) { prematureConfirmation=true; }
+        Assert(prematureConfirmation,"Paused state cannot promote a sample into rendering or recentering");
+        tracking.Reset();
+        Assert(!tracking.Paused && !tracking.Recovering,"An explicit retry opens a fresh tracking window");
+        Assert(tracking.Observe(true,0,NativePoseCallbackStatus.Success,20)==PoseCallbackDisposition.ReadPose,"Explicit retry can accept restored tracking");
+        tracking.ConfirmValidPose();
+        Assert(!tracking.Recovering,"Both valid samples complete recovery");
+        tracking.Observe(true,0,NativePoseCallbackStatus.InvalidPose,30);
+        tracking.Observe(true,0,NativePoseCallbackStatus.Success,31); tracking.ConfirmValidPose();
+        Assert(tracking.Observe(true,0,NativePoseCallbackStatus.InvalidPose,40)==PoseCallbackDisposition.RetryPose,"A later independent interruption starts its own deadline");
+        Assert(tracking.Observe(true,0,NativePoseCallbackStatus.Success,45)==PoseCallbackDisposition.PauseTracking,"A valid callback arriving at the bounded deadline requires manual retry");
+        foreach(int error in new[] {-1,-2,-10,-11,-12,-14,-15,-16,-17,101})
+        {
+            tracking.Reset();
+            Assert(tracking.Observe(true,0,(NativePoseCallbackStatus)error,0)==PoseCallbackDisposition.Fail,"Non-pose bridge error retains rejection: "+error);
+        }
+        tracking.Reset();
+        Assert(tracking.Observe(true,101,NativePoseCallbackStatus.InvalidPose,0)==PoseCallbackDisposition.Fail,"Invalid-pose status cannot hide an actual OpenVR wait error");
+        Assert(tracking.Observe(true,-1,NativePoseCallbackStatus.InvalidPose,0)==PoseCallbackDisposition.Fail,"Invalid-pose status cannot hide a wait that was not performed");
+        Assert(!tracking.Recovering,"Rejected runtime errors do not enter reacquisition");
+        bool invalidTimeout=false;
+        try { new TrackingReacquisition(Double.NaN); } catch (ArgumentOutOfRangeException) { invalidTimeout=true; }
+        Assert(invalidTimeout,"Tracking deadline requires a finite positive interval");
     }
     static void MathChecks()
     {

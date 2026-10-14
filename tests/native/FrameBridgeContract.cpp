@@ -76,8 +76,23 @@ int main(int argc,char** argv) {
         diagnostics(&diag,sizeof(diag)); Check(diag.completedPoseGeneration==7 && diag.completedPoseFrame==1,"completed wait keeps original identity");
         left->Release(); right->Release(); event(3); diagnostics(&diag,sizeof(diag)); Check(diag.completedDrainGeneration==8,"updated generation drain acknowledged");
         uint64_t before=calls(1); event(1); Check(calls(1)==before,"queued submit after drain rejected"); event(3);
+        // Startup/standby recovery keeps the same runtime, generation and owned
+        // textures. Only a fresh, acknowledged valid pose can reach submission.
+        left=Texture(device); right=Texture(device); set(left,right);
+        configure(1,0,0,0,0); frame(9,1); event(0); diagnostics(&diag,sizeof(diag));
+        Check(diag.status==BridgeInvalidPose && diag.poseWaitError==0 && diag.completedPoseGeneration==9 && diag.completedPoseFrame==1,"recoverable invalid pose has an exact successful wait acknowledgment");
+        event(1); Check(calls(1)==before,"first invalid recovery sample cannot submit");
+        frame(9,2); event(0); diagnostics(&diag,sizeof(diag));
+        Check(diag.status==BridgeInvalidPose && diag.completedPoseFrame==2,"fresh invalid pose acknowledgment advances without resetting runtime or textures");
+        event(1); Check(calls(1)==before,"repeated invalid recovery sample cannot submit");
+        const uint64_t pairsBeforeRecovery=diag.submittedPairs;
+        configure(1,0,1,0,0); frame(9,3); event(0); diagnostics(&diag,sizeof(diag));
+        Check(diag.status==BridgeOk && diag.poseWaitError==0 && diag.completedPoseFrame==3,"fresh valid pose reacquired within the same generation");
+        event(1); diagnostics(&diag,sizeof(diag));
+        Check(calls(1)==before+2 && diag.submittedPairs==pairsBeforeRecovery+1 && diag.completedSubmitGeneration==9 && diag.completedSubmitFrame==3,"only the valid reacquired sample submits one complete pair");
+        left->Release(); right->Release(); event(3);
         std::thread wrongThread([&] { event(0); }); wrongThread.join(); Check(status()==BridgeWrongRenderThread,"wrong render thread rejected");
         context->ClearState(); context->Flush(); context->Release(); device->Release();
-        FreeLibrary(dll); std::puts("PASS native external ABI: pose errors, invalid/null/replaced textures, generation/frame association, duplicate/partial pairs, concurrent update, COM ownership, empty/repeated drain, render thread, versioned diagnostics"); return 0;
+        FreeLibrary(dll); std::puts("PASS native external ABI: pose errors, invalid-to-valid reacquisition, invalid/null/replaced textures, generation/frame association, duplicate/partial pairs, concurrent update, COM ownership, empty/repeated drain, render thread, versioned diagnostics"); return 0;
     } catch(const std::exception& error) { std::fprintf(stderr,"FAIL: %s\n",error.what()); return 1; }
 }
