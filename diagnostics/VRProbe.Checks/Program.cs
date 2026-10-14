@@ -58,11 +58,19 @@ Check(right.Pressed == "18446744073709551615" && right.Touched == "9223372036854
 Check(right.Axes.Length == 5 && right.Axes[0][0] == 0.35f && right.Axes[4][1] == -0.25f, "all five axes");
 Check(right.Connected && right.PoseValid && right.Transform.Length == 12 && right.Transform[3] == 0.13f, "pose and transform");
 Check(right.Model.Value == "model" && right.Serial.Value == "serial", "device identity");
+Check(right.Axis0Type.Value == (int)EVRControllerAxisType.k_eControllerAxis_Joystick && right.Axis0Type.Error == "TrackedProp_Success", "raw axis zero joystick property");
+Check(right.Axis1Type.Value == 3 && right.Axis2Type.Value == 0 && right.Axis3Type.Value == 1 && right.Axis4Type.Value == 0, "all five declared axis type properties");
+Check(source.IntProperties.Count == 10 && source.IntProperties.GetRange(0, 5).ToArray().AsSpan().SequenceEqual(new[] {
+    ETrackedDeviceProperty.Prop_Axis0Type_Int32, ETrackedDeviceProperty.Prop_Axis1Type_Int32,
+    ETrackedDeviceProperty.Prop_Axis2Type_Int32, ETrackedDeviceProperty.Prop_Axis3Type_Int32,
+    ETrackedDeviceProperty.Prop_Axis4Type_Int32 }), "one bounded property read per axis per controller");
 var unavailable = observed.Controllers[1];
 Check(!unavailable.StateAvailable && unavailable.Packet == null && unavailable.Pressed == null && unavailable.Touched == null && unavailable.Axes == null, "failed state does not fabricate neutral");
+Check(unavailable.Axis0Type.Value == 2, "property type does not fabricate unavailable axis values");
 Check(observed.ProcessIdentity == "not_verified_pid_only" && observed.InputReceipt == "unknown", "no game identity or input receipt claim");
 string json = JsonSerializer.Serialize(observed, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 Check(json.Contains("\"pressed\":\"18446744073709551615\""), "JSON mask remains string");
+Check(json.Contains("\"axis0Type\":{\"value\":2,\"error\":\"TrackedProp_Success\"}"), "JSON raw axis type and property error");
 var changed = new FakeReadback(123, 456);
 var changedSnapshot = ControllerProbe.Capture(changed, 123);
 Check(changedSnapshot.Status == "scene_focus_changed" && changedSnapshot.Controllers.Length == 0 && changed.ReadCalls > 0, "changed focus discards samples");
@@ -72,6 +80,13 @@ Check(noInputSnapshot.InputAvailable == false, "input availability false is obse
 Check(noInputSnapshot.Controllers[0].Axes[0][0] == null && JsonSerializer.Serialize(noInputSnapshot).Length > 0, "nonfinite axis remains unknown serializable");
 var missingIdentity = ControllerProbe.Capture(new FakeReadback(123, 123) { IdentityError = true }, 123);
 Check(missingIdentity.Controllers[0].Serial.Value == null && missingIdentity.Controllers[0].Serial.Error == "TrackedProp_UnknownProperty", "identity failure remains explicit");
+var unavailableType = ControllerProbe.Capture(new FakeReadback(123, 123) { AxisTypeError = true }, 123).Controllers[0];
+Check(unavailableType.Axis0Type.Value == null && unavailableType.Axis0Type.Error == "TrackedProp_UnknownProperty" && unavailableType.Axes[0][0] == .35f, "property failure does not guess joystick from nonzero axis state");
+Check(unavailableType.Axis4Type.Value == null && unavailableType.Axis4Type.Error == "TrackedProp_UnknownProperty", "property failure preserved for all axes");
+var futureType = ControllerProbe.Capture(new FakeReadback(123, 123) { UnknownAxisType = true }, 123).Controllers[0];
+Check(futureType.Axis0Type.Value == 987654321 && futureType.Axis0Type.Error == "TrackedProp_Success", "unknown future raw axis type preserved");
+Check(futureType.Axis4Type.Value == -17, "signed raw enum value preserved without coercion");
+Check(mismatch.IntProperties.Count == 0 && missing.IntProperties.Count == 0, "focus rejection performs zero property reads");
 
 var windowOptions = ProbeOptions.Parse(new[] { "--controller-window", "--expected-scene-pid", "123", "--expected-process-start-utc-ticks", "639275456966499101" });
 Check(windowOptions.ControllerWindow && !windowOptions.Controllers && windowOptions.ExpectedProcessStartUtcTicks == 639275456966499101L, "window exact process ticks");
@@ -154,8 +169,11 @@ sealed class FakeReadback(uint? before, uint? after) : IControllerReadback
     public bool Input = true;
     public bool NonFinite;
     public bool IdentityError;
+    public bool AxisTypeError;
+    public bool UnknownAxisType;
     public List<uint> Indices = new();
     public List<uint> Sizes = new();
+    public List<ETrackedDeviceProperty> IntProperties = new();
     public uint? SceneFocusProcess() => focusReads++ < FocusChangeAfterReads ? before : after;
     public bool IsInputAvailable() { ReadCalls++; return Input; }
     public TrackedDevicePose_t[] Poses() {
@@ -177,4 +195,17 @@ sealed class FakeReadback(uint? before, uint? after) : IControllerReadback
     public StringProperty Property(uint index, ETrackedDeviceProperty property) => IdentityError
         ? new(null, "TrackedProp_UnknownProperty")
         : new(property == ETrackedDeviceProperty.Prop_ModelNumber_String ? "model" : "serial", "TrackedProp_Success");
+    public Int32Property IntProperty(uint index, ETrackedDeviceProperty property) {
+        IntProperties.Add(property);
+        if (AxisTypeError) return new(null, "TrackedProp_UnknownProperty");
+        int value = property switch {
+            ETrackedDeviceProperty.Prop_Axis0Type_Int32 => UnknownAxisType ? 987654321 : 2,
+            ETrackedDeviceProperty.Prop_Axis1Type_Int32 => 3,
+            ETrackedDeviceProperty.Prop_Axis2Type_Int32 => 0,
+            ETrackedDeviceProperty.Prop_Axis3Type_Int32 => 1,
+            ETrackedDeviceProperty.Prop_Axis4Type_Int32 => UnknownAxisType ? -17 : 0,
+            _ => throw new Exception("Unexpected property")
+        };
+        return new(value, "TrackedProp_Success");
+    }
 }

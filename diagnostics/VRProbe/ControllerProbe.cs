@@ -44,6 +44,7 @@ internal sealed record ProbeOptions(bool Controllers, uint? ExpectedScenePid, bo
 }
 
 internal sealed record StringProperty(string Value, string Error);
+internal sealed record Int32Property(int? Value, string Error);
 internal interface IControllerReadback
 {
     uint? SceneFocusProcess();
@@ -53,6 +54,7 @@ internal interface IControllerReadback
     ETrackedControllerRole Role(uint index);
     bool ControllerState(uint index, ref VRControllerState_t state, uint size);
     StringProperty Property(uint index, ETrackedDeviceProperty property);
+    Int32Property IntProperty(uint index, ETrackedDeviceProperty property);
 }
 
 internal sealed class OpenVrControllerReadback(CVRSystem system, CVRCompositor compositor) : IControllerReadback
@@ -68,6 +70,13 @@ internal sealed class OpenVrControllerReadback(CVRSystem system, CVRCompositor c
     public ETrackedDeviceClass DeviceClass(uint index) => system.GetTrackedDeviceClass(index);
     public ETrackedControllerRole Role(uint index) => system.GetControllerRoleForTrackedDeviceIndex(index);
     public bool ControllerState(uint index, ref VRControllerState_t state, uint size) => system.GetControllerState(index, ref state, size);
+    public Int32Property IntProperty(uint index, ETrackedDeviceProperty property)
+    {
+        var error = ETrackedPropertyError.TrackedProp_Success;
+        int value = system.GetInt32TrackedDeviceProperty(index, property, ref error);
+        // Preserve raw successful values, including future or unknown enum integers.
+        return new Int32Property(error == ETrackedPropertyError.TrackedProp_Success ? value : null, error.ToString());
+    }
     public StringProperty Property(uint index, ETrackedDeviceProperty property)
     {
         const uint capacity = 256;
@@ -84,7 +93,8 @@ internal sealed class OpenVrControllerReadback(CVRSystem system, CVRCompositor c
 internal sealed record ControllerSample(uint DeviceIndex, string DeviceClass, string Role,
     StringProperty Model, StringProperty Serial, bool StateAvailable, uint? Packet,
     string Pressed, string Touched, float?[][] Axes, bool Connected, bool PoseValid,
-    string TrackingResult, float?[] Transform);
+    string TrackingResult, float?[] Transform, Int32Property Axis0Type, Int32Property Axis1Type,
+    Int32Property Axis2Type, Int32Property Axis3Type, Int32Property Axis4Type);
 internal sealed record ControllerSnapshot(DateTime Timestamp, string Status, uint ExpectedScenePid,
     uint? FocusProcessBefore, uint? FocusProcessAfter, bool? InputAvailable, uint ControllerStateSize,
     int DeviceLimit, string ProcessIdentity, string InputReceipt, ControllerSample[] Controllers);
@@ -119,7 +129,12 @@ internal static class ControllerProbe
                 available ? state.ulButtonPressed.ToString(CultureInfo.InvariantCulture) : null,
                 available ? state.ulButtonTouched.ToString(CultureInfo.InvariantCulture) : null,
                 available ? new[] { Axis(state.rAxis0), Axis(state.rAxis1), Axis(state.rAxis2), Axis(state.rAxis3), Axis(state.rAxis4) } : null,
-                pose.bDeviceIsConnected, pose.bPoseIsValid, pose.eTrackingResult.ToString(), Matrix(pose.mDeviceToAbsoluteTracking)));
+                pose.bDeviceIsConnected, pose.bPoseIsValid, pose.eTrackingResult.ToString(), Matrix(pose.mDeviceToAbsoluteTracking),
+                source.IntProperty(index, ETrackedDeviceProperty.Prop_Axis0Type_Int32),
+                source.IntProperty(index, ETrackedDeviceProperty.Prop_Axis1Type_Int32),
+                source.IntProperty(index, ETrackedDeviceProperty.Prop_Axis2Type_Int32),
+                source.IntProperty(index, ETrackedDeviceProperty.Prop_Axis3Type_Int32),
+                source.IntProperty(index, ETrackedDeviceProperty.Prop_Axis4Type_Int32)));
         }
         uint? after = source.SceneFocusProcess();
         // Discard potentially mixed-consumer samples if scene focus changed during the read.
