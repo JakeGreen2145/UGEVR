@@ -63,13 +63,14 @@ namespace Rewired
         public int categoryId,layoutId,sourceMapId;
         bool enabledValue;
         public static Action<ControllerMap> EnableAction;
+        public static Func<string,string> XmlTransform;
         public static bool IgnoreEnable,ThrowEnableBefore,ThrowEnableAfter;
         public static int EnableCalls;
         public bool enabled {get {return enabledValue;}set {++EnableCalls;if(ThrowEnableBefore)throw new InvalidOperationException("before");if(!IgnoreEnable)enabledValue=value;if(EnableAction!=null)EnableAction(this);if(ThrowEnableAfter)throw new InvalidOperationException("after");}}
         public List<ActionElementMap> Entries=new List<ActionElementMap>();
         public bool EmptyXml;
         public IEnumerable<ActionElementMap> AllMaps {get {return Entries;}}
-        public string ToXmlString() {if(EmptyXml)return "";var text=new StringBuilder("<CustomControllerMap enabled=\"").Append(enabledValue).Append("\" categoryId=\"").Append(categoryId).Append("\" layoutId=\"").Append(layoutId).Append("\" sourceMapId=\"").Append(sourceMapId).Append("\">");foreach(var entry in Entries) text.Append("<entry action=\"").Append(entry.actionId).Append("\" element=\"").Append(entry.elementIdentifierId).Append("\" invert=\"").Append(entry.invert).Append("\"/>");return text.Append("</CustomControllerMap>").ToString();}
+        public string ToXmlString() {if(EmptyXml)return "";var text=new StringBuilder("<CustomControllerMap xmlns=\"http://guavaman.com/rewired\" dataVersion=\"2\" categoryId=\"").Append(categoryId).Append("\" layoutId=\"").Append(layoutId).Append("\" sourceMapId=\"").Append(sourceMapId).Append("\"><enabled>").Append(enabledValue?"true":"false").Append("</enabled>");foreach(var entry in Entries) text.Append("<entry action=\"").Append(entry.actionId).Append("\" element=\"").Append(entry.elementIdentifierId).Append("\" invert=\"").Append(entry.invert).Append("\"/>");string xml=text.Append("</CustomControllerMap>").ToString();return XmlTransform==null?xml:XmlTransform(xml);}
     }
     public sealed class CustomControllerMap : ControllerMap {}
     public class Player
@@ -117,7 +118,7 @@ namespace Rewired
         public static ControllerHelper controllers {get;private set;}
         public static PlayerHelper players {get;private set;}
         public static event Action InputSourceUpdateEvent;
-        public static void Reset() {Data=new Data.UserData();controllers=new ControllerHelper();players=new PlayerHelper();isReady=true;InputSourceUpdateEvent=null;ControllerMap.EnableAction=null;ControllerMap.IgnoreEnable=ControllerMap.ThrowEnableBefore=ControllerMap.ThrowEnableAfter=false;ControllerMap.EnableCalls=0;Player.ThrowActionRead=Player.NonfiniteActionRead=false;Player.ActionReads=0;Player.ControllerHelper.MapHelper.AfterLoad=null;}
+        public static void Reset() {Data=new Data.UserData();controllers=new ControllerHelper();players=new PlayerHelper();isReady=true;InputSourceUpdateEvent=null;ControllerMap.EnableAction=null;ControllerMap.XmlTransform=null;ControllerMap.IgnoreEnable=ControllerMap.ThrowEnableBefore=ControllerMap.ThrowEnableAfter=false;ControllerMap.EnableCalls=0;Player.ThrowActionRead=Player.NonfiniteActionRead=false;Player.ActionReads=0;Player.ControllerHelper.MapHelper.AfterLoad=null;}
         public static void Pulse() {if(InputSourceUpdateEvent!=null) InputSourceUpdateEvent();}
         public static void ClearInputSourceCallbacks() {InputSourceUpdateEvent=null;}
         public static int Subscribers {get {return InputSourceUpdateEvent==null?0:InputSourceUpdateEvent.GetInvocationList().Length;}}

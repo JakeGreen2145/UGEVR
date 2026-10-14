@@ -12,6 +12,28 @@ static class RewiredMapActivationChecks
         backend.SetDesired(.4,-.6,.7,1);now=.1;Rewired.ReInput.Pulse();
         check(Rewired.ReInput.players.SystemPlayer.GetAxisRaw(31)==.4f && Rewired.ReInput.players.SystemPlayer.GetAxisRaw(32)==-.6f && Rewired.ReInput.players.SystemPlayer.GetAxisRaw(36)==.7f,"Enabled owned fixture map aggregates the three normal system-player actions through public readback");
         backend.Remove();check(!backend.NeedsCleanup && Rewired.ReInput.Data.Definitions.Count==0 && Rewired.ReInput.Subscribers==0,"Verified owned enabled-map snapshot supports ordinary neutral/removal cleanup");
+        foreach(string malformed in new[]{"missing","duplicate","numeric-zero","uppercase","whitespace","nested-only","nested-content","root-attribute","field-attribute","wrong-namespace","wrong-root","broken","doctype"})
+        {
+            Rewired.ReInput.Reset();now=0;backend=Backend(()=>now);
+            Rewired.ControllerMap.XmlTransform=xml=> {
+                if(malformed=="missing")return xml.Replace("<enabled>false</enabled>","");
+                if(malformed=="duplicate")return xml.Replace("<enabled>false</enabled>","<enabled>false</enabled><enabled>false</enabled>");
+                if(malformed=="numeric-zero")return xml.Replace("<enabled>false</enabled>","<enabled>0</enabled>");
+                if(malformed=="uppercase")return xml.Replace("<enabled>false</enabled>","<enabled>False</enabled>");
+                if(malformed=="whitespace")return xml.Replace("<enabled>false</enabled>","<enabled> false </enabled>");
+                if(malformed=="nested-only")return xml.Replace("<enabled>false</enabled>","<other><enabled>false</enabled></other>");
+                if(malformed=="nested-content")return xml.Replace("<enabled>false</enabled>","<enabled><value>false</value></enabled>");
+                if(malformed=="root-attribute")return xml.Replace("<enabled>false</enabled>","").Replace(" dataVersion=", " enabled=\"false\" dataVersion=");
+                if(malformed=="field-attribute")return xml.Replace("<enabled>false</enabled>","<enabled unexpected=\"1\">false</enabled>");
+                if(malformed=="wrong-namespace")return xml.Replace("<enabled>false</enabled>","<enabled xmlns=\"\">false</enabled>");
+                if(malformed=="wrong-root")return xml.Replace("CustomControllerMap","ForeignMap");
+                if(malformed=="broken")return xml+"<";
+                return "<!DOCTYPE CustomControllerMap [<!ENTITY value 'false'>]>"+xml.Replace("<enabled>false</enabled>","<enabled>&value;</enabled>");
+            };
+            var refused=new RewiredInputDiagnostic(()=>backend,15,.2,"refuse");refused.Tick(true,true,1,Sample(),0);
+            check(refused.Complete && refused.Reason=="public_creation_failed" && refused.AppliedUpdates==0 && Rewired.ControllerMap.EnableCalls==0 && Rewired.ReInput.Subscribers==0,"Strict shipped enabled-element shape refuses unavailable or altered serialization before setter/feed: "+malformed);
+            check(backend.NeedsCleanup && Rewired.ReInput.Data.Deletes==0 && Rewired.ReInput.controllers.Destroys==0,"Unknown enabled serialization does not adopt or destroy the assigned map: "+malformed);
+        }
         foreach(string altered in new[]{"source-map","entry-mapping","added-map"})
         {
             Rewired.ReInput.Reset();now=0;backend=Backend(()=>now);
@@ -19,6 +41,19 @@ static class RewiredMapActivationChecks
             var refused=new RewiredInputDiagnostic(()=>backend,15,.2,"refuse");refused.Tick(true,true,1,Sample(),0);
             check(refused.Complete && refused.AppliedUpdates==0 && Rewired.ControllerMap.EnableCalls==0 && Rewired.ReInput.Subscribers==0,"Assignment returning changed or extra runtime map content is refused before any enable setter: "+altered);
             check(backend.NeedsCleanup && Rewired.ReInput.Data.Deletes==0 && Rewired.ReInput.controllers.Destroys==0,"Unproved initial runtime map content is preserved rather than adopted as an owned baseline: "+altered);
+        }
+        foreach(string after in new[]{"numeric-one","missing","duplicate","nested-value-changed"})
+        {
+            Rewired.ReInput.Reset();now=0;backend=Backend(()=>now);
+            Rewired.ControllerMap.XmlTransform=xml=> {
+                bool enabled=xml.Contains("<enabled>true</enabled>");
+                if(after=="nested-value-changed")return xml.Replace("</CustomControllerMap>","<other><enabled>"+(enabled?"true":"false")+"</enabled></other></CustomControllerMap>");
+                if(!enabled)return xml;
+                return xml.Replace("<enabled>true</enabled>",after=="numeric-one"?"<enabled>1</enabled>":after=="missing"?"":"<enabled>true</enabled><enabled>true</enabled>");
+            };
+            var refused=new RewiredInputDiagnostic(()=>backend,15,.2,"refuse");refused.Tick(true,true,1,Sample(),0);
+            check(refused.Complete && refused.AppliedUpdates==0 && Rewired.ControllerMap.EnableCalls==1 && Rewired.ReInput.Subscribers==0,"Unexpected post-setter XML cannot become the activated expected snapshot: "+after);
+            check(backend.NeedsCleanup && Rewired.ReInput.Data.Deletes==0 && Rewired.ReInput.controllers.Destroys==0,"Post-setter XML disagreement preserves the previous proof and uncertain map resources: "+after);
         }
         foreach(string fault in new[]{"ignored","throw-before","throw-after","changed-entry","changed-definition","foreign-map","foreign-device","disabled-controller"})
         {

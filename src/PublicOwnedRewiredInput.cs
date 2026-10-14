@@ -395,9 +395,25 @@ namespace Ugevr
             settings.ProhibitDtd=true; // net35 has no DtdProcessing property.
 #endif
             using(var reader=XmlReader.Create(new StringReader(xml),settings)) document.Load(reader);
-            var attribute=document.DocumentElement==null?null:document.DocumentElement.GetAttributeNode("enabled");bool serialized;
-            if(attribute==null || !Boolean.TryParse(attribute.Value,out serialized) || serialized!=enabled) throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_xml_enabled_disagreement");
-            attribute.Value="owned_enabled_transition";return document.OuterXml;
+            var root=document.DocumentElement;
+            const string mapNamespace="http://guavaman.com/rewired";
+            if(root==null || root.LocalName!="CustomControllerMap" || root.NamespaceURI!=mapNamespace || root.Prefix.Length!=0)
+                throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_xml_root_unexpected");
+            foreach(XmlAttribute attribute in root.Attributes) if(attribute.LocalName=="enabled")
+                throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_xml_enabled_shape_unexpected");
+            XmlElement field=null;
+            foreach(XmlNode node in root.ChildNodes)
+            {
+                var element=node as XmlElement;if(element==null || element.LocalName!="enabled") continue;
+                if(field!=null || element.NamespaceURI!=mapNamespace || element.Prefix.Length!=0 || element.Attributes.Count!=0 || element.ChildNodes.Count!=1 || element.FirstChild.NodeType!=XmlNodeType.Text)
+                    throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_xml_enabled_shape_unexpected");
+                field=element;
+            }
+            // Shipped SerializedObject.Add<bool> writes a direct field element.
+            // System.Xml's Boolean writer emits lowercase true/false, never numeric forms.
+            if(field==null || field.InnerText!=(enabled?"true":"false"))
+                throw new RewiredOperationException("activate_owned_runtime_map","runtime_map_xml_enabled_disagreement");
+            field.InnerText="owned_enabled_transition";return document.OuterXml;
         }
         RewiredOwnershipSnapshot Snapshot(bool excludeMapEnabled=false)
         {
