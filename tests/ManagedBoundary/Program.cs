@@ -440,9 +440,10 @@ class Program
         try {var noLayer=PanelScope(scene,1,2,false);noLayer.UseAfterEffectsCamera(ui);} catch(InvalidOperationException) {unavailable=true;}
         Assert(unavailable && overlay.gameObject.layer==5,"No eligible layer fails before mutating game objects");
         overlay.NestedCanvases=new[]{overlay,originalWorld};
-        bool mixedRejected=false;
-        try {PanelScope(scene,1,2,false);} catch(InvalidOperationException) {mixedRejected=true;}
+        bool mixedRejected=false;string mixedError="";
+        try {PanelScope(scene,1,2,false);} catch(InvalidOperationException error) {mixedRejected=true;mixedError=error.Message;}
         Assert(mixedRejected && originalWorld.gameObject.layer==7 && originalWorld.renderMode==RenderMode.WorldSpace,"Independent world-space canvas inside a selected hierarchy requires an adapter before any mutation");
+        Assert(mixedError.Contains("independent canvas world") && mixedError.Contains("mode=WorldSpace active=True display=0"),"Nested canvas guard names the offending engine object and bounded mode/activity/display context");
         overlay.NestedCanvases=null;
         Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;
     }

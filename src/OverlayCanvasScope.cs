@@ -110,7 +110,9 @@ namespace Ugevr
                 {
                     if(nested==null) continue;
                     if(nested!=canvas && nested.isRootCanvas)
-                        throw new InvalidOperationException("Overlay "+canvas.name+" contains an independently rooted canvas; an explicit UI adapter is required before borrowing its hierarchy.");
+                        throw new InvalidOperationException("Overlay "+BoundedName(canvas.name)+" contains independent canvas "+BoundedName(nested.name)+
+                            " id="+nested.GetInstanceID()+" mode="+nested.renderMode+" active="+nested.isActiveAndEnabled+" display="+nested.targetDisplay+
+                            "; an explicit UI adapter is required before borrowing its hierarchy.");
                     isolatedObjects.Add(nested.gameObject);
                 }
                 foreach (RectTransform rect in canvas.GetComponentsInChildren<RectTransform>(true))
@@ -305,6 +307,7 @@ namespace Ugevr
             }
             return text.Append('"').ToString();
         }
+        static string BoundedName(string value) {return value==null?"<unnamed>":value.Substring(0,Math.Min(64,value.Length));}
         static string Number(float value) { return Single.IsNaN(value) || Single.IsInfinity(value)?"null":value.ToString("R",CultureInfo.InvariantCulture); }
         static string UiContext(Canvas canvas)
         {
