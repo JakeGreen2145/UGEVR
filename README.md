@@ -15,7 +15,9 @@ The same plugin binary rendered the 3D title scenes of two originally non-VR gam
 
 Both final runs exceeded 16,000 successful paired eye submissions. Fourteen tracking checks passed across the two games, covering translation, yaw, pitch, roll and reset. The checks compared an independent OpenVR client's pose matrices against the injected eye transforms, verified 64 mm eye separation, and checked that the game camera was restored after rendering. Outer Wilds' title camera also moved independently while the injected views followed it.
 
-**These tests used a simulated SteamVR headset.** Physical-headset playback, comfort, motion prediction and full gameplay remain unverified. The results establish a working software path and promise for generalization, not universal compatibility. [Validation metrics](docs/validation.json) contain the recorded checks. Raw captures and machine-specific evidence are kept outside the public repository.
+**These tests used a simulated SteamVR headset.** They establish a working software path and promise for generalization, not universal compatibility. [Validation metrics](docs/validation.json) contain the recorded checks. Raw captures and machine-specific evidence are kept outside the public repository.
+
+An additional Steam Frame transport probe streamed Firewatch and Outer Wilds using the same development distribution. Both games reached paired eye submission, Windows SteamVR identified the launched game as its renderer, and headset runtime screenshots showed game scenes. A distinctive synthetic pose applied on the headset reached Windows with matching pose matrices. This validates the wireless runtime path; it does not validate physical sensor tracking, lens output, comfort or sustained gameplay. Screen UI and gameplay input remain open checks. See the [physical probe results](docs/physical-probes.md).
 
 ## Current scope
 
@@ -24,7 +26,7 @@ Both final runs exceeded 16,000 successful paired eye submissions. Fourteen trac
 - Tracking relative to the game's camera, with camera state restored after rendering.
 - F8 toggles rendering and F9 recenters when the game's legacy keyboard API is available.
 
-IL2CPP, OpenXR, D3D12, Vulkan, URP/HDRP, motion controllers and multi-camera composition are not implemented or validated. Screen-space UI is not converted to a VR panel. Reusing the original camera runs its effects repeatedly; temporal effects and game callbacks may need adaptation. Rendering the desktop view and both eyes adds cost.
+IL2CPP, OpenXR, D3D12, Vulkan, URP/HDRP, motion controllers and multi-camera composition are not implemented or validated. An opt-in screen UI adapter is experimental and has not passed physical validation. Reusing the original camera runs its effects repeatedly; temporal effects and game callbacks may need adaptation. Rendering the desktop view and both eyes adds cost.
 
 ## Wayfinder
 
@@ -38,7 +40,7 @@ The [decomposition](docs/wayfinder/decomposition.md) groups the target into subs
 
 The first S1 wave adds a [standalone session controller](docs/session-controller.md), [reversible deployment](docs/session-deployment.md), a [checked native frame contract](docs/native-frame-contract.md) and [managed tracking/session state](docs/injector-session-protocol.md). These changes have controlled tests and clean builds against Firewatch and Outer Wilds assemblies. The updated code has not yet passed same-binary physical gameplay in those games.
 
-[Development distribution packaging](docs/development-distribution.md) builds one injector and native bridge with the controller, deployment scripts and YAML provenance. Frame Testbench remains separate; its [Add separate UGEVR session client and bounded streamed-test orchestration](https://github.com/JakeGreen2145/frame-testbench/pull/1) draft contains the external test client. Stream start and physical peer/image/input evidence remain incomplete.
+[Development distribution packaging](docs/development-distribution.md) builds one injector and native bridge with the controller, deployment scripts and YAML provenance. Frame Testbench remains separate; its [Add separate UGEVR session client and bounded streamed-test orchestration](https://github.com/JakeGreen2145/frame-testbench/pull/1) draft contains the external test client and an experimental Steam CEF connection provider. Owned stream connection, dashboard dismissal and disconnection have been exercised on the physical headset. Gameplay input and the full physical gate remain incomplete.
 
 ## Build
 

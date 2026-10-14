@@ -19,6 +19,14 @@ Source snapshot: [`f999d3bb70de55efb6a01214108f08c6b5e4f776`](https://github.com
 
 A local Windows Python import probe of this snapshot's CLI succeeded. It did not run an MCP server, connect to the headset, launch a game or validate streaming. No Frame Testbench MCP tools are currently exposed in this task's available tool inventory.
 
+## Implementation and physical probes
+
+The separate [Add separate UGEVR session client and bounded streamed-test orchestration](https://github.com/JakeGreen2145/frame-testbench/pull/1) draft adds the controller client, bounded recording timeline, lease renewal and an opt-in Steam CEF provider. At revision `8de1fcabe01b778e844fa44bde1e89d8e8a99f38`, 47 focused orchestration/provider checks passed. These controlled checks do not establish gameplay.
+
+The provider uses the headset's existing loopback Steam debugging context over SSH and requires one named, VR-capable peer. It guards against another active stream and records ownership for a newly requested connection. Disconnection requires the private receipt and the original observed stream row; reused or replaced streams are not claimed. This is an experimental internal Steam interface, not a public API contract. Stream association removal and Windows runtime shutdown are separate observations.
+
+Physical testing exercised connection, dashboard dismissal and owned disconnection. Independent Windows observations confirmed the headset and intended game renderer; synthetic pose forwarding and runtime screenshots were also observed. [Physical probe results](../physical-probes.md) record the scope and remaining UI/input defects. The required 3–5 minute gameplay gate remains open.
+
 ## Required extension outcomes
 
 - Select and launch the intended streamed game on the Windows host, with the selected UGEVR/runtime configuration, and distinguish process launch from injector readiness, runtime readiness and stream readiness.
