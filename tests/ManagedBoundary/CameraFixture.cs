@@ -7,8 +7,9 @@ namespace UnityEngine
         static int nextId;
         readonly int id=++nextId;
         public bool Destroyed;
+        public int? InstanceIdOverride;
         public string name="fixture";
-        public int GetInstanceID() { return id; }
+        public int GetInstanceID() { return InstanceIdOverride ?? id; }
         public static Object[] FindObjectsOfType(System.Type type) { return type==typeof(Canvas)?Canvas.Instances.ToArray():new Object[0]; }
         public static bool operator ==(Object a,Object b) { return (System.Object.ReferenceEquals(a,null) || a.Destroyed)?(System.Object.ReferenceEquals(b,null) || b.Destroyed):System.Object.ReferenceEquals(a,b); }
         public static bool operator !=(Object a,Object b) { return !(a==b); }
@@ -28,8 +29,10 @@ namespace UnityEngine
     {
         public GameObject gameObject=new GameObject();
         public Component[] AttachedComponents=new Component[0];
+        public int ComponentInventoryQueries;
         public T[] GetComponents<T>()
         {
+            ++ComponentInventoryQueries;
             var found=new System.Collections.Generic.List<T>();
             foreach(Component component in AttachedComponents) if(component is T) found.Add((T)(object)component);
             return found.ToArray();
@@ -53,6 +56,7 @@ namespace UnityEngine
     }
     public static class LayerMask {public static System.Func<int,string> Name;public static string LayerToName(int layer) {return Name==null?"":Name(layer);} }
     public struct Vector2 { public float x,y; public Vector2(float x,float y) {this.x=x;this.y=y;} }
+    public class RectOffset {public int left,right,top,bottom;}
     public struct Vector3 { public float x,y,z; public Vector3(float x,float y,float z) { this.x=x;this.y=y;this.z=z; } }
     public struct Quaternion { public float x,y,z,w; public Quaternion(float x,float y,float z,float w) { this.x=x;this.y=y;this.z=z;this.w=w; } }
     public struct Matrix4x4 { public float Marker; public float this[int i] { get { return i==0?Marker:0; } } }

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.Json;
@@ -110,6 +112,89 @@ static class UiLayoutDiagnosticChecks
         assert(componentBound.ComponentCount==1024 && componentBound.Summary().Contains("\"droppedComponents\":1"),"Cached input component admission stops at its global bound without hiding truncation");
         var nodeBound=new UiLayoutDiagnostics();for(int i=0;i<8193;++i) nodeBound.Add(new RectTransform(),canvas);
         assert(nodeBound.Summary().Contains("\"nodeCount\":8192") && nodeBound.Summary().Contains("\"droppedNodes\":1"),"Node inventory also stops at its explicit global bound");
+        TargetedChecks(assert,text,group,canvas);
         Canvas.Instances.Clear();Canvas.ForceAction=null;
+    }
+
+    static void Register(UiLayoutDiagnostics diagnostic,RectTransform rect,Canvas canvas)
+    {
+        diagnostic.RegisterSnapshot(rect,canvas,rect.GetInstanceID(),rect.name);
+    }
+    static int Count(UiLayoutDiagnostics diagnostic,string field)
+    {
+        using(var document=JsonDocument.Parse(diagnostic.Summary())) return document.RootElement.GetProperty(field).GetInt32();
+    }
+    static void TargetedChecks(Action<bool,string> assert,Component text,Component group,Canvas canvas)
+    {
+        Set(text,"text","private menu text");
+        var ancestor=new RectTransform {name="Selector parent",InstanceIdOverride=-200};
+        var selected=new RectTransform {name="LayoutGroup",InstanceIdOverride=-123,parent=ancestor,AttachedComponents=new[]{group}};
+        var child=new RectTransform {name="Text",parent=selected,AttachedComponents=new[]{text}};
+        var unrelated=new RectTransform[500];
+        for(int i=0;i<unrelated.Length;++i) unrelated[i]=new RectTransform {AttachedComponents=new[]{text}};
+        var filtered=new UiLayoutDiagnostics(" -123 ");Register(filtered,ancestor,canvas);Register(filtered,selected,canvas);Register(filtered,child,canvas);
+        foreach(var rect in unrelated) Register(filtered,rect,canvas);
+        int reads=UiDiagnosticCounter.Cached;
+        assert(selected.ComponentInventoryQueries==0 && Count(filtered,"componentInventoryQueries")==0 && UiDiagnosticCounter.Cached==reads,"Snapshot registration admits no components or getters before selector matching");
+        filtered.FinishAdmission();for(int phase=0;phase<8;++phase) filtered.Capture(phase);
+        assert(Count(filtered,"nodeCount")==503 && Count(filtered,"admittedNodeCount")==3 && Count(filtered,"componentInventoryQueries")==3 && filtered.ComponentCount==2,"Signed runtime root selection admits only its subtree and existing ancestors");
+        bool untouched=true;foreach(var rect in unrelated) untouched&=rect.ComponentInventoryQueries==0;
+        assert(untouched,"Five hundred unrelated snapshot nodes never execute a component inventory");
+        using(var document=JsonDocument.Parse(filtered.Selection()))
+        {
+            var root=document.RootElement.GetProperty("requestedRoots")[0];
+            assert(root.GetProperty("requestedRectId").GetInt32()==-123 && root.GetProperty("matched").GetBoolean() && root.GetProperty("observedName").GetString()=="LayoutGroup" && root.GetProperty("parentInstanceId").GetInt32()==-200 && root.GetProperty("parentName").GetString()=="Selector parent" && root.GetProperty("subtreeNodesAdmitted").GetInt32()==2,"Filtered evidence preserves actual signed identity, name, parent identity and subtree count");
+        }
+        using(var document=JsonDocument.Parse(filtered.SelectedContexts()))
+        {
+            var contexts=document.RootElement.GetProperty("contexts");
+            var phases=contexts[1].GetProperty("nodes")[0].GetProperty("knownEngineInputs")[0].GetProperty("phases");
+            assert(contexts.GetArrayLength()==2 && phases.GetProperty("snapshot").ValueKind==JsonValueKind.Object && phases.GetProperty("final-rebuild").ValueKind==JsonValueKind.Object && phases.EnumerateObject().Count()==8,"Healthy filtered captures expose the selected text/layout inputs in all eight phases without requiring a mismatch");
+        }
+        var full=new UiLayoutDiagnostics("  ");Register(full,ancestor,canvas);Register(full,selected,canvas);Register(full,child,canvas);foreach(var rect in unrelated) Register(full,rect,canvas);full.FinishAdmission();for(int phase=0;phase<8;++phase) full.Capture(phase);
+        assert(Count(full,"admittedNodeCount")==503 && full.ComponentCount==502 && Count(full,"getterReads")>Count(filtered,"getterReads")*200 && full.Selection().Contains("full-snapshot") && full.SelectedContexts()=="null","Empty selector retains full coverage while explicit selection avoids over two hundred times the controlled fixture getter reads");
+        var cached=new UiLayoutDiagnostics("-123");Register(cached,selected,canvas);Register(cached,child,canvas);cached.FinishAdmission();cached.Capture(0);
+        assert(Count(cached,"metadataCacheMisses")==0 && Count(cached,"metadataCacheHits")==2,"Immutable admitted type metadata is reused by later collector instances");
+        var excluded=Fixture("Game.Excluded","Untrusted.Game",TextInputs());var excludedRect=new RectTransform {AttachedComponents=new[]{excluded}};
+        var negativeFirst=new UiLayoutDiagnostics();negativeFirst.Add(excludedRect,canvas);var negativeAgain=new UiLayoutDiagnostics();negativeAgain.Add(excludedRect,canvas);reads=UiDiagnosticCounter.Cached;negativeAgain.Capture(0);
+        assert(Count(negativeAgain,"metadataCacheHits")==1 && Count(negativeAgain,"metadataCacheMisses")==0 && UiDiagnosticCounter.Cached==reads,"Persistent negative schemas skip repeated reflection without permitting excluded getters");
+        var missing=new UiLayoutDiagnostics("2147483647");Register(missing,selected,canvas);missing.FinishAdmission();missing.Capture(0);
+        assert(Count(missing,"componentInventoryQueries")==0 && missing.Selection().Contains("\"matched\":false") && !missing.Selection().Contains("invalid-selector"),"Missing valid runtime roots are visible and do not silently expand coverage");
+        assert(missing.Selection().Contains("\"status\":\"no-matched-roots\"") && missing.Selection().Contains("\"missingRootCount\":1"),"Missing root coverage has an explicit diagnostic status");
+        string[] invalid={"0","2147483648","-2147483649","-123,-123","abc","1,",new string('1',257),"1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17"};
+        foreach(string selector in invalid)
+        {
+            var bad=new UiLayoutDiagnostics(selector);bad.Add(selected,canvas);bad.FinishAdmission();bad.Capture(0);
+            assert(Count(bad,"componentInventoryQueries")==0 && bad.Selection().Contains("invalid-selector") && bad.SelectedContexts()=="null","Invalid runtime selector is diagnostic-only and performs no component queries: "+selector.Substring(0,Math.Min(selector.Length,40)));
+        }
+        var extremes=new UiLayoutDiagnostics("-2147483648,2147483647");extremes.FinishAdmission();
+        assert(!extremes.Selection().Contains("invalid-selector") && extremes.Selection().Contains("-2147483648"),"Both nonzero signed Int32 endpoints remain valid runtime selectors");
+        var sixteen=new UiLayoutDiagnostics("1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16");sixteen.FinishAdmission();
+        assert(!sixteen.Selection().Contains("invalid-selector"),"Sixteen explicit roots remain within the selector bound");
+        var broadRoot=new RectTransform {name="Broad root"};var capped=new UiLayoutDiagnostics(broadRoot.GetInstanceID().ToString(CultureInfo.InvariantCulture));Register(capped,broadRoot,canvas);
+        for(int i=0;i<300;++i) Register(capped,new RectTransform {parent=broadRoot,AttachedComponents=new[]{text}},canvas);
+        capped.FinishAdmission();capped.Capture(0);
+        assert(Count(capped,"admittedNodeCount")==256 && capped.Selection().Contains("\"droppedSubtreeFrontierNodes\":45"),"Filtered subtree admission is bounded before component inventory and reports its unvisited frontier precisely");
+        using(var document=JsonDocument.Parse(capped.SelectedContexts())) assert(document.RootElement.GetProperty("contexts").GetArrayLength()==64 && document.RootElement.GetProperty("droppedContexts").GetInt32()==191,"Healthy selected input context serialization has its own explicit cap");
+        RectTransform top=null,deep=null;var ancestors=new List<RectTransform>();for(int i=0;i<12;++i) {deep=new RectTransform {parent=top};ancestors.Add(deep);top=deep;}
+        var deepFilter=new UiLayoutDiagnostics(deep.GetInstanceID().ToString(CultureInfo.InvariantCulture));foreach(var rect in ancestors) Register(deepFilter,rect,canvas);deepFilter.FinishAdmission();
+        assert(Count(deepFilter,"admittedNodeCount")==9,"Filtered ancestry adds at most eight ancestors beyond the requested root");
+        var padding=new RectOffset {left=1,right=2,top=3,bottom=4};var padded=Fixture("UnityEngine.UI.VerticalLayoutGroup","UnityEngine.UI",new Dictionary<string,object>{{"padding",padding}});
+        var paddedRect=new RectTransform {AttachedComponents=new[]{padded}};var paddingDiagnostic=new UiLayoutDiagnostics();paddingDiagnostic.Add(paddedRect,canvas);paddingDiagnostic.Capture(0);padding.left=7;paddingDiagnostic.Capture(7);
+        string paddingJson=paddingDiagnostic.Context(paddedRect.GetInstanceID());
+        assert(paddingJson.Contains("\"padding\":[1,2,3,4]") && paddingJson.Contains("\"padding\":[7,2,3,4]"),"Exact engine RectOffset values are frozen per phase without retaining mutable padding references");
+        Canvas.Instances.Clear();var guardRect=new RectTransform {name="guard",sizeDelta=new Vector2(100,100),localScale=new Vector3(1,1,1),localRotation=new Quaternion(0,0,0,1)};
+        var guardCanvas=new Canvas {name="guard canvas",renderMode=RenderMode.ScreenSpaceOverlay,Rects=new[]{guardRect}};guardRect.gameObject=guardCanvas.gameObject;Canvas.Instances.Add(guardCanvas);
+        var guarded=new OverlayCanvasScope(new Camera(),1,2,false,1.8,true,"0");guarded.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));using(guarded) {guarded.ApplyEye(0);guarded.RecordAfterRender(0);}
+        Canvas.ForceAction=delegate {guardRect.sizeDelta=new Vector2(100.75f,100);};guarded.RebuildRestoredGeometry();Canvas.ForceAction=null;
+        assert(guarded.RestorationConflicts==1 && guarded.DiagnosticJson().Contains("invalid-selector"),"Invalid diagnostic selection leaves the strict production restoration guard active");
+        var module=AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("NegativeMetadataFixtures"),AssemblyBuilderAccess.Run).DefineDynamicModule("fixture");
+        var negatives=new UiLayoutDiagnostics();
+        for(int i=0;i<270;++i)
+        {
+            var type=module.DefineType("UnknownComponent"+i,TypeAttributes.Public,typeof(Component));type.DefineDefaultConstructor(MethodAttributes.Public);
+            negatives.Add(new RectTransform {AttachedComponents=new[]{(Component)Activator.CreateInstance(type.CreateType())}},canvas);
+        }
+        assert(Count(negatives,"metadataCacheCount")==256 && negatives.ComponentCount==0,"Persistent negative type schemas stop at 256 entries and never admit unknown getters");
     }
 }

@@ -75,9 +75,9 @@ namespace Ugevr
             public Quaternion LocalRotation;
         }
 
-        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false)
+        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null)
         {
-            if(captureLayoutInputs) layoutInputs=new UiLayoutDiagnostics();
+            if(captureLayoutInputs) layoutInputs=new UiLayoutDiagnostics(layoutInputRootRectIds);
             this.camera=camera; this.includeLayers=includeLayers;
             this.unitsPerMeter=unitsPerMeter;this.panelWidthMeters=panelWidthMeters;
             OriginalMask=camera.cullingMask; AppliedMask=OriginalMask;
@@ -141,11 +141,13 @@ namespace Ugevr
                 {
                     if (rect==null || !seen.Add(rect.GetInstanceID())) continue;
                     if (rects.Count==RectLimit) throw new InvalidOperationException("Overlay UI exceeds 8192 RectTransforms; an explicit profile selection is required.");
-                    rects.Add(new RectState {Rect=rect,Name=rect.name,Id=rect.GetInstanceID(),AnchorMin=rect.anchorMin,AnchorMax=rect.anchorMax,Pivot=rect.pivot,Size=rect.sizeDelta,
-                        AnchoredPosition=rect.anchoredPosition3D,LocalPosition=rect.localPosition,LocalScale=rect.localScale,LocalRotation=rect.localRotation});
-                    if(layoutInputs!=null) layoutInputs.Add(rect,canvas);
+                    var saved=new RectState {Rect=rect,Name=rect.name,Id=rect.GetInstanceID(),AnchorMin=rect.anchorMin,AnchorMax=rect.anchorMax,Pivot=rect.pivot,Size=rect.sizeDelta,
+                        AnchoredPosition=rect.anchoredPosition3D,LocalPosition=rect.localPosition,LocalScale=rect.localScale,LocalRotation=rect.localRotation};
+                    rects.Add(saved);
+                    if(layoutInputs!=null) layoutInputs.RegisterSnapshot(rect,canvas,saved.Id,saved.Name);
                 }
             }
+            if(layoutInputs!=null) layoutInputs.FinishAdmission();
             CaptureLayoutPhase(0);
         }
 
@@ -546,7 +548,8 @@ namespace Ugevr
             if(layoutInputs==null) text.Append("null");
             else
             {
-                text.Append("{\"summary\":").Append(layoutInputs.Summary()).Append(",\"error\":").Append(Quote(layoutDiagnosticError)).Append(",\"mismatchContexts\":[");
+                text.Append("{\"summary\":").Append(layoutInputs.Summary()).Append(",\"selection\":").Append(layoutInputs.Selection())
+                    .Append(",\"selectedContexts\":").Append(layoutInputs.SelectedContexts()).Append(",\"error\":").Append(Quote(layoutDiagnosticError)).Append(",\"mismatchContexts\":[");
                 for(int i=0;i<layoutContextIds.Count;++i) {if(i>0) text.Append(',');text.Append(layoutInputs.Context(layoutContextIds[i]));}
                 text.Append("]}");
             }
