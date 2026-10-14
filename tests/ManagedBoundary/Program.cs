@@ -27,6 +27,7 @@ class Program
         EngineInputExperimentChecks.Run(Assert);
         OwnedGamepadChecks.Run(Assert);
         LegacyControllerChecks.Run(Assert);
+        RewiredInputChecks.Run(Assert);
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void ProjectionChecks()

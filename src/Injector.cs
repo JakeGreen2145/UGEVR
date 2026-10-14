@@ -40,6 +40,8 @@ public class Injector : BaseUnityPlugin
     EngineEInputExperiment engineInputExperiment;
     OpenVrGamepadDiagnostic gamepadDiagnostic;
     string gamepadDiagnosticProfile;
+    RewiredInputDiagnostic rewiredDiagnostic;
+    double nextRewiredReport;
     double nextInputReport;
     SessionCommand pending;
     MethodInfo getKeyDown;
@@ -95,11 +97,27 @@ public class Injector : BaseUnityPlugin
             float inputSeconds=Config.Bind("Input","DiagnosticDurationSeconds",15f,"Bounded 5..300 second diagnostic window, starting only with a neutral valid right controller and focused active VR.").Value;
             float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
             int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Require 1..10 consecutive valid neutral reads with stable controller, runtime generation and metadata before creating the first owned device. Default 3.").Value;
+            bool allowRewired=Config.Bind("Input","AllowRewiredInputDiagnostic",false,"Explicit code activation for one bounded owned public Rewired custom-controller window. Requires CaptureImages, a controller session and exact Firewatch profile; no private game callback is invoked.").Value;
+            string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 explicitly; right axis0 stick and uniquely identified Trigger axis feed normal game actions31/32/36.").Value;
+            string rewiredConflict=Config.Bind("Input","RewiredConflictPolicy","refuse","Only refuse is supported. Existing custom definitions/devices or physical Rewired joysticks reject this prototype; game additions to owned content are preserved.").Value;
+            float rewiredSeconds=Config.Bind("Input","RewiredDurationSeconds",15f,"Explicit bounded 5..300 seconds after fresh neutral admission. Source expires after 500ms without a refreshed valid sample.").Value;
+            float rewiredDeadzone=Config.Bind("Input","RewiredStickDeadzone",0.2f,"Explicit radial stick deadzone .1...8. The trigger remains an analog axis for the game's ordinary threshold logic.").Value;
+            if(allowRewired)
+            {
+                try
+                {
+                    if(!capturesEnabled || !session.Available || allowGamepad || allowEngineInputExperiment || rewiredProfile!=PublicOwnedRewiredInput.Profile)
+                        throw new InvalidOperationException("Rewired diagnostic requires images/session/profile and no simultaneous gamepad or E experiment.");
+                    rewiredDiagnostic=new RewiredInputDiagnostic(PublicOwnedRewiredInput.Create,rewiredSeconds,rewiredDeadzone,rewiredConflict);
+                    Logger.LogWarning("EXPLICIT_REWIRED_DIAGNOSTIC profile="+rewiredProfile+" duration="+rewiredSeconds+" conflict="+rewiredConflict+"; normal game action consumption remains unobserved.");
+                }
+                catch(Exception error) {Logger.LogWarning("REWIRED_DIAGNOSTIC unavailable: "+error.Message);}
+            }
             if(allowGamepad)
             {
                 try
                 {
-                    if(!session.Available || allowEngineInputExperiment || !OuterGamepadCompatibilityProfile.Supports(inputProfile))
+                    if(!session.Available || allowRewired || allowEngineInputExperiment || !OuterGamepadCompatibilityProfile.Supports(inputProfile))
                         throw new InvalidOperationException("Select a valid session, the explicit diagnostic profile and disable the separate E experiment.");
                     gamepadDiagnosticProfile=inputProfile;
                     gamepadDiagnostic=new OpenVrGamepadDiagnostic(delegate {return OuterGamepadCompatibilityProfile.Create(inputProfile);},inputSeconds,inputDeadzone,inputConflict,inputNeutralReads);
@@ -202,6 +220,7 @@ public class Injector : BaseUnityPlugin
         if (KeyPressed("f8")) SetEnabled(!active);
         if (KeyPressed("f9")) pendingRecenter="true";
         TickGamepadDiagnostic();
+        TickRewiredDiagnostic();
         Publish(false);
     }
 
@@ -230,6 +249,20 @@ public class Injector : BaseUnityPlugin
             nextInputReport=0;TickGamepadDiagnostic();
         }
     }
+    void TickRewiredDiagnostic()
+    {
+        if(rewiredDiagnostic==null) return;
+        double now=InputClock();bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
+        var source=new RewiredRightSample();if(enabled && Application.isFocused && !rewiredDiagnostic.Complete) try {source=OpenVrRewiredRightReader.Read(system);} catch { }
+        rewiredDiagnostic.Tick(enabled,Application.isFocused,generation,source,now);
+        if(now>=nextRewiredReport)
+        {
+            nextRewiredReport=now+1;
+            Logger.LogInfo("REWIRED_DIAGNOSTIC status="+rewiredDiagnostic.Status+" reason="+rewiredDiagnostic.Reason+" addAttempts="+rewiredDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredDiagnostic.AppliedUpdates+" removeAttempts="+rewiredDiagnostic.RemoveAttempts+" cleanup="+rewiredDiagnostic.CleanupStatus+" gameConsumption=unknown");
+        }
+    }
+    void CancelRewiredDiagnostic(string reason)
+    {if(rewiredDiagnostic!=null) {rewiredDiagnostic.Cancel(reason,InputClock());nextRewiredReport=0;TickRewiredDiagnostic();}}
 
     void ApplyCommand()
     {
@@ -261,6 +294,7 @@ public class Injector : BaseUnityPlugin
         }
         else if (active)
         {
+            CancelRewiredDiagnostic("session_disabled");
             active=false; renderingActive=false; pendingRecenter=null;
             CancelGamepadDiagnostic("session_disabled",true);
             RestoreBackground();
@@ -614,6 +648,7 @@ public class Injector : BaseUnityPlugin
         }
         active=false; renderingActive=false; RestoreBackground();
         CancelGamepadDiagnostic("vr_failure",true);
+        CancelRewiredDiagnostic("vr_failure");
         try { BeginDrain(); } catch (Exception drainError) { Logger.LogError("Drain failed: "+drainError.Message); }
         Publish(true);
     }
@@ -624,10 +659,11 @@ public class Injector : BaseUnityPlugin
     }
     void OnApplicationQuit() { quitting=true; StopOwnedWork(); }
     void OnDestroy() { quitting=true; StopOwnedWork(); }
-    void OnDisable() {CancelGamepadDiagnostic("component_disabled");}
+    void OnDisable() {CancelGamepadDiagnostic("component_disabled");CancelRewiredDiagnostic("component_disabled");}
     void StopOwnedWork()
     {
         CancelGamepadDiagnostic("game_lifecycle_end");
+        CancelRewiredDiagnostic("game_lifecycle_end");
         if (inputProbe!=null) { inputProbe.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp()); inputProbe=null; }
         if(hierarchyProbe!=null)
         {

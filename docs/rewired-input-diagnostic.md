@@ -1,0 +1,37 @@
+# Owned Rewired input prototype
+
+This default-off prototype maps one right controller to Firewatch's normal stick-look and trigger actions. It uses public Rewired definitions, maps, assignments and input-update callbacks. It invokes no private game method, changes no interaction requirement, and installs no native hook or global device driver. It has not been validated in a running game.
+
+Select the profile explicitly in a controller-managed launch:
+
+```ini
+[Diagnostics]
+CaptureImages = true
+AllowEngineInputExperiment = false
+
+[Input]
+AllowOpenVrGamepadDiagnostic = false
+AllowRewiredInputDiagnostic = true
+RewiredDiagnosticProfile = firewatch-2017-rewired-right-stick-trigger-v1
+RewiredConflictPolicy = refuse
+RewiredDurationSeconds = 15
+RewiredStickDeadzone = 0.2
+```
+
+The profile requires the inspected Assembly-CSharp MVID `4e377d15-4996-4da3-9447-797d50034429`, SHA256 `145b56aebe921c0fdc660a4e64008272e09a283332146958ce2f356c7490522a`, and Rewired_Core MVID `159fb15d-62c3-4977-b0f0-ed64736f91be`, SHA256 `15508ee97bbf97731f20be14e40b36d208507ad475b97c896866d39c13aef87b`. It checks already loaded assembly identities and their file hashes, then exact public mutator shapes/tokens. It loads no target assembly. An unready, missing or ambiguous active input manager refuses creation. Other game versions require another evidenced profile.
+
+Admission requires focused active VR, valid connected right-controller state and pose, bounded serial identity, unchanged right role, declared joystick axis0, and exactly one declared Trigger axis among axes1..4. All five axis properties must succeed. Missing, ambiguous or unknown metadata refuses input before a Rewired device is created. Raw axis values alone do not establish their meaning; a Frame transport fallback requires separate observed channel evidence and explicit selection. A fresh neutral stick and trigger starts the one allowed window. Duration is bounded to 5..300 seconds; radial stick deadzone is .1...8. Trigger values remain analog in 0..1 for ordinary game threshold logic.
+
+The public backend refuses any existing custom definition/device or physical Rewired joystick. It requires the existing category0/custom-layout0 and exact action names/IDs. It creates one definition with three axes, one definition map, one runtime custom controller, and one map/assignment on the system player. The map connects axes0/1 to `LookXAxis_Stick`31 and `LookYAxis_Stick`32, and axis2 to `DialogDownButton`36. The inspected default game context routes the latter through `DialogSelectionDownOrUse` and its normal dialog/radio/target checks. A is not mapped to Use. Locomotion and other controller buttons are outside this prototype.
+
+The source supplies values to the public `InputSourceUpdateEvent`. Each desired state expires after 500ms without refresh, or at the window deadline. A callback checks focus, monotonic time and ownership independently of the injector Update. Source loss, identity/trigger-axis change, packet regression, VR generation change, disable, focus loss or lifecycle teardown stops the window. Expiry checks and neutral release run when Unity calls Update or the Rewired event; a stalled engine cannot acknowledge them. A returned public setter is not engine action readback or game consumption.
+
+Cleanup detaches only the exact owned delegate and releases only the created controller's axes. Fresh checks compare definition, axis/identifier, editor-map entry, runtime-map and assignment references, relevant public mapping values and runtime-map XML. They bound controller/player/definition collections to64, complete player map inspection to1024, definition child collections to16, and each serialized field/map to65536 characters. The initial active-manager query is bounded to16 returned objects for inspection; Unity allocates its query result first.
+
+Replaced IDs, changed mappings, new axes/entries/maps, duplicate or additional player assignments, new custom/physical devices, incomplete collections and failed getters prevent destructive cleanup. An unrelated new definition can remain while the exact owned definition is deleted using a fresh identity lookup. Definition deletion also removes its definition maps, so a second proof runs after runtime device destruction. Game additions during destruction are preserved. Uncertain creation outcomes or incomplete cleanup report `cleanup_unconfirmed` and may leave neutral, detached owned objects until process exit. The prototype never resets ID counters, restores a whole collection snapshot, or claims a complete observation of private engine caches or callback state.
+
+Logs report status/reason, creation/removal attempts, returned public update feeds, and cleanup status with `gameConsumption=unknown`. No ordinary camera motion, targeting receipt, settings persistence, gameplay progression or gate completion is inferred from these counters. Game-driven input/settings saves remain an untested persistence boundary.
+
+The source-only checks use controlled public API fixtures and the real vendored OpenVR function-table ABI. They cover creation/assignment/mapping/feed/cleanup, changed and added content, changes during destruction, ID reuse, partial failures, expiry, conflicts and axis metadata. The fixtures do not establish native Rewired execution. Both shipped Unity reference builds compile the adapter without depending on proprietary Rewired assemblies at build time.
+
+[Rewired's custom-controller documentation](https://guavaman.com/projects/rewired/docs/CustomControllers.html) describes explicit assignment/maps and update-event delivery. [Its player documentation](https://guavaman.com/projects/rewired/docs/Players.html) describes ordinary action aggregation. Shipped metadata and CIL establish the selected API and game-consumer profile; the current documentation alone does not prove compatibility with the older shipped build.
