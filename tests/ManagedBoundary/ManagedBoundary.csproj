@@ -13,6 +13,7 @@
     <Compile Include="../../src/KeyboardEProbe.cs" Link="KeyboardEProbe.cs" />
     <Compile Include="../../src/EngineEInputExperiment.cs" Link="EngineEInputExperiment.cs" />
     <Compile Include="../../src/PublicEngineEKeyboard.cs" Link="PublicEngineEKeyboard.cs" />
+    <Compile Include="../../src/ControllerIdentityDiagnostics.cs" Link="ControllerIdentityDiagnostics.cs" />
     <Compile Include="../../src/OpenVrGamepadDiagnostic.cs" Link="OpenVrGamepadDiagnostic.cs" />
     <Compile Include="../../src/PublicOwnedGamepad.cs" Link="PublicOwnedGamepad.cs" />
     <Compile Include="../../src/OuterGamepadCompatibilityProfile.cs" Link="OuterGamepadCompatibilityProfile.cs" />

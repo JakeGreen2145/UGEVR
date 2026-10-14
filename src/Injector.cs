@@ -42,6 +42,8 @@ public class Injector : BaseUnityPlugin
     string gamepadDiagnosticProfile;
     RewiredInputDiagnostic rewiredDiagnostic;
     double nextRewiredReport;
+    bool captureInputIdentityDetails;
+    ControllerIdentityCapture inputIdentityCapture;
     double nextInputReport;
     SessionCommand pending;
     MethodInfo getKeyDown;
@@ -96,6 +98,7 @@ public class Injector : BaseUnityPlugin
             string inputConflict=Config.Bind("Input","CurrentGamepadConflictPolicy","refuse","refuse leaves an existing current gamepad untouched. prefer-owned explicitly permits the owned diagnostic pad to become current, with conditional restoration.").Value;
             float inputSeconds=Config.Bind("Input","DiagnosticDurationSeconds",15f,"Bounded 5..300 second diagnostic window, starting only with a neutral valid right controller and focused active VR.").Value;
             float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
+            captureInputIdentityDetails=Config.Bind("Input","CaptureIdentityDetails",false,"Explicit private diagnostic: capture bounded raw controller serial/model SDK results in this controller-owned session evidence directory. Never include raw IDs in public reports.").Value;
             int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Require 1..10 consecutive valid neutral reads with stable controller, runtime generation and metadata before creating the first owned device. Default 3.").Value;
             bool allowRewired=Config.Bind("Input","AllowRewiredInputDiagnostic",false,"Explicit code activation for one bounded owned public Rewired custom-controller window. Requires CaptureImages, a controller session and exact Firewatch profile; no private game callback is invoked.").Value;
             string rewiredProfile=Config.Bind("Input","RewiredDiagnosticProfile","none","Select firewatch-2017-rewired-right-stick-trigger-v1 explicitly; right axis0 stick and uniquely identified Trigger axis feed normal game actions31/32/36.").Value;
@@ -148,6 +151,7 @@ public class Injector : BaseUnityPlugin
             string directory=Environment.GetEnvironmentVariable("UGEVR_SESSION_DIRECTORY");
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
+            if(captureInputIdentityDetails && gamepadDiagnostic!=null && session.Available) inputIdentityCapture=new ControllerIdentityCapture(evidenceDir);
             if (capturesEnabled && session.Available)
                 inputProbe=new KeyboardEProbe(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicKeyboardEReader.Create);
             if(compareHierarchyInventory && session.Available)
@@ -233,10 +237,17 @@ public class Injector : BaseUnityPlugin
         if(enabled && Application.isFocused && !gamepadDiagnostic.Complete)
             input=OuterGamepadCompatibilityProfile.ReadSafely(system,gamepadDiagnosticProfile);
         gamepadDiagnostic.Tick(enabled,Application.isFocused,generation,input,now);
+        if(inputIdentityCapture!=null)
+        {
+            if(input.Available && !inputIdentityCapture.FirstSuccessAttempted) inputIdentityCapture.Capture(input.IdentityDiagnostics,true,false);
+            if(gamepadDiagnostic.Complete && !inputIdentityCapture.TerminalAttempted) inputIdentityCapture.Capture(gamepadDiagnostic.LastIdentitySnapshot,false,true);
+        }
         if(now>=nextInputReport)
         {
             nextInputReport=now+1;
-            Logger.LogInfo("INPUT_DIAGNOSTIC profile="+gamepadDiagnosticProfile+" sourceAxes="+(input.AxesSource ?? "unavailable")+" axis0Metadata="+(input.Axis0Metadata ?? "not_queried")+" axis0Type="+(input.Axis0Type.HasValue?input.Axis0Type.Value.ToString():"unavailable")+" status="+gamepadDiagnostic.Status+" reason="+gamepadDiagnostic.Reason+" nativeUnavailableReason="+gamepadDiagnostic.NativeUnavailableReason+" neutralReads="+gamepadDiagnostic.NeutralReads+" requiredNeutralReads="+gamepadDiagnostic.RequiredNeutralReads+" addAttempts="+gamepadDiagnostic.AddAttempts+
+            if(inputIdentityCapture!=null && !gamepadDiagnostic.Complete) inputIdentityCapture.Capture(gamepadDiagnostic.LastIdentitySnapshot,false,false);
+            var identitySnapshot=gamepadDiagnostic.LastIdentitySnapshot;
+            Logger.LogInfo("INPUT_DIAGNOSTIC profile="+gamepadDiagnosticProfile+" sourceAxes="+(input.AxesSource ?? "unavailable")+" axis0Metadata="+(input.Axis0Metadata ?? "not_queried")+" axis0Type="+(input.Axis0Type.HasValue?input.Axis0Type.Value.ToString():"unavailable")+" status="+gamepadDiagnostic.Status+" reason="+gamepadDiagnostic.Reason+" identityStage="+(identitySnapshot==null?"not_read":identitySnapshot.Stage)+" identityVerdict="+(identitySnapshot==null?"not_read":identitySnapshot.Verdict)+" identityCaptureAttempts="+(inputIdentityCapture==null?0:inputIdentityCapture.Attempts)+" identityCaptureError="+(inputIdentityCapture==null?"":inputIdentityCapture.LastError)+" nativeUnavailableReason="+gamepadDiagnostic.NativeUnavailableReason+" neutralReads="+gamepadDiagnostic.NeutralReads+" requiredNeutralReads="+gamepadDiagnostic.RequiredNeutralReads+" addAttempts="+gamepadDiagnostic.AddAttempts+
                 " queues="+gamepadDiagnostic.Queues+" appliedStateSamples="+gamepadDiagnostic.AppliedSamples+" releaseAttempts="+gamepadDiagnostic.ReleaseAttempts+
                 " neutralObserved="+gamepadDiagnostic.ReleaseObserved+" removeAttempts="+gamepadDiagnostic.RemoveAttempts+" cleanup="+gamepadDiagnostic.CleanupStatus+" gameConsumption=unknown");
         }

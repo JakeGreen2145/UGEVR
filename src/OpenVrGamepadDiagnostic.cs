@@ -9,6 +9,7 @@ namespace Ugevr
         public string Identity;
         public string UnavailableReason,AxesSource,Axis0Metadata;
         public int? Axis0Type;
+        public ControllerIdentitySnapshot IdentityDiagnostics;
         public double X,Y;
     }
     public struct OwnedPadState
@@ -44,6 +45,7 @@ namespace Ugevr
         double lastX,lastY;
         public string Status {get;private set;}
         public string Reason {get;private set;}
+        public ControllerIdentitySnapshot LastIdentitySnapshot {get;private set;}
         public string NativeUnavailableReason {get;private set;}
         public int NeutralReads {get;private set;}
         public int RequiredNeutralReads {get;private set;}
@@ -89,6 +91,7 @@ namespace Ugevr
                 if(started) End(!enabled?"session_disabled":"focus_lost",now,false);else ResetAdmission();
                 return;
             }
+            if(input.IdentityDiagnostics!=null) LastIdentitySnapshot=input.IdentityDiagnostics;
             if(!started)
             {
                 if(!Valid(input)) {Reason=RecordUnavailable(input);ResetAdmission();return;}

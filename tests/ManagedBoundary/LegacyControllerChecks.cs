@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Reflection;
+using System.IO;
 using System.Text;
 using Ugevr;
 using Valve.VR;
@@ -127,6 +128,45 @@ static class LegacyControllerChecks
             s=Read(r,true);string expected=fault=="invalid_pose"?"controller_pose_invalid":fault=="disconnected"?"controller_disconnected":fault=="sdk_false"?"controller_state_read_failed":fault=="role_changed"?"right_role_changed":"controller_pose_nonfinite";
             check(!s.Available && s.UnavailableReason==expected,"Shipping reader distinguishes the exact guarded source failure: "+fault);
         }
+        r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel};s=Read(r,false,true);
+        var snapshot=s.IdentityDiagnostics;
+        check(s.Available && snapshot.Index==3 && snapshot.DeviceClass==ETrackedDeviceClass.Controller && snapshot.Role==ETrackedControllerRole.RightHand && snapshot.PostIndex==3 && snapshot.PostClass==ETrackedDeviceClass.Controller && snapshot.PostRole==ETrackedControllerRole.RightHand && snapshot.Stage=="complete" && snapshot.Verdict=="accepted","In-process identity diagnostics retain the selected and post-state public class/role/index without changing admission pins");
+        check(snapshot.InitialSerial.RawValue==r.Serial && snapshot.InitialModel.RawValue==r.Model && snapshot.PostSerial.RawValue==r.Serial && snapshot.PostModel.RawValue==r.Model && snapshot.InitialSerial.RequiredBytes==8 && snapshot.InitialSerial.InitialCapacity==257 && snapshot.InitialSerial.ReturnedCapacity>=snapshot.InitialSerial.Length && snapshot.InitialSerial.Length==r.Serial.Length && snapshot.InitialSerial.Error==ETrackedPropertyError.TrackedProp_Success && snapshot.InitialSerial.Returned,"SDK text/count/error/builder observations are captured before validation at both identity stages");
+        foreach(string fault in new[]{"empty_serial","empty_model","zero_count_nonempty_text","error_with_text","oversized_count","different_serial","different_model","post_serial","post_model","exception"})
+        {
+            r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel};
+            if(fault=="empty_serial") r.Serial="";if(fault=="empty_model") r.Model="";if(fault=="zero_count_nonempty_text") r.StringLength=0;if(fault=="error_with_text") r.StringError=true;if(fault=="oversized_count") r.StringLength=258;
+            if(fault=="different_serial") r.Serial="other-private-device";if(fault=="different_model") r.Model="DeckardMP";if(fault=="post_serial") r.IdentityChange=true;if(fault=="post_model") r.ModelChange=true;if(fault=="exception") r.MissingStringReader=true;
+            s=Read(r,false,true);snapshot=s.IdentityDiagnostics;
+            check(!s.Available && snapshot!=null && snapshot.InitialSerial!=null && snapshot.InitialModel!=null,"Each rejected identity result remains observable with both initial properties captured: "+fault);
+            if(fault=="empty_serial") check(snapshot.InitialSerial.RawValue=="" && snapshot.InitialSerial.Length==0 && snapshot.InitialSerial.Verdict=="empty_builder","An empty builder is distinct from a mismatching nonempty identity");
+            if(fault=="empty_model") check(snapshot.InitialModel.Verdict=="empty_builder" && snapshot.InitialSerial.RawValue==OuterGamepadCompatibilityProfile.ButtonOnlySerial,"Empty model does not erase the independent serial result");
+            if(fault=="zero_count_nonempty_text") check(snapshot.InitialSerial.RawValue==r.Serial && snapshot.InitialSerial.RequiredBytes==0 && snapshot.InitialSerial.Length==r.Serial.Length && snapshot.InitialSerial.Verdict=="zero_required_bytes" && r.AxisCalls==0 && r.StateCalls==0,"Needed-zero with valid-looking text is preserved distinctly and never relaxes the primary guard");
+            if(fault=="error_with_text") check(snapshot.InitialSerial.RawValue==r.Serial && snapshot.InitialSerial.Error==ETrackedPropertyError.TrackedProp_UnknownProperty && snapshot.InitialSerial.Verdict=="property_error","Raw text accompanying an SDK property error remains private evidence rather than an accepted identity");
+            if(fault=="oversized_count") check(snapshot.InitialSerial.RequiredBytes==258 && snapshot.InitialSerial.Verdict=="required_bytes_exceed_buffer" && snapshot.InitialSerial.RawValue==r.Serial,"Required-byte overflow is retained without truncating it into accepted identity");
+            if(fault=="different_serial" || fault=="different_model") check(snapshot.Stage=="initial_identity_validation" && snapshot.Verdict=="identity_disagreement" && r.AxisCalls==0 && r.StateCalls==0,"An accepted property result with different identity is distinguished from SDK/buffer rejection: "+fault);
+            if(fault=="post_serial" || fault=="post_model") check(snapshot.Stage=="post_identity_validation" && snapshot.Verdict=="identity_disagreement" && snapshot.PostSerial!=null && snapshot.PostModel!=null && r.StringCalls==4,"Both post-state properties remain captured even when the first one disagrees: "+fault);
+            if(fault=="exception") check(!snapshot.InitialSerial.Returned && !snapshot.InitialSerial.RequiredBytes.HasValue && snapshot.InitialSerial.ExceptionType=="System.NullReferenceException" && snapshot.InitialSerial.Verdict=="reader_exception","A thrown SDK wrapper has no fabricated byte-count result and retains its typed exception");
+        }
+        UnityEngine.InputSystem.InputSystem.Reset();
+        diagnostic=new OpenVrGamepadDiagnostic(delegate {return new PublicOwnedGamepad(Assembly.GetExecutingAssembly(),false,OuterGamepadCompatibilityProfile.LayoutPrefix,OwnedGamepadButton.West);},5,0.2,"refuse",1);
+        r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,Pressed=0};diagnostic.Tick(true,true,1,Read(r,true),0);
+        r.IdentityChange=true;s=Read(r,true);var endingSnapshot=s.IdentityDiagnostics;diagnostic.Tick(true,true,1,s,0.1);UnityEngine.InputSystem.InputSystem.NormalUpdate();
+        r.IdentityChange=false;diagnostic.Tick(true,true,1,Read(r,true),0.2);diagnostic.Tick(true,true,1,Read(r,true),0.3);
+        check(diagnostic.Complete && Object.ReferenceEquals(diagnostic.LastIdentitySnapshot,endingSnapshot) && endingSnapshot.InitialSerial.RawValue=="replacement" && diagnostic.NativeUnavailableReason=="button_only_controller_identity_mismatch","The terminating private identity snapshot survives release, Complete and later valid reads without changing rejection");
+        string privateDirectory=Path.Combine(Path.GetFullPath(".local-tools/identity-checks"),Guid.NewGuid().ToString("N"));var capture=new ControllerIdentityCapture(privateDirectory);
+        for(int i=0;i<100;++i) capture.Capture(new ControllerIdentitySnapshot {Index=uint.MaxValue,Verdict="index_out_of_range"},false,false);
+        check(capture.Attempts==0 && !Directory.Exists(privateDirectory),"Disconnected polls without an attempted identity property cannot spend private capture records before the first real mismatch");
+        for(int i=0;i<100;++i) capture.Capture(endingSnapshot,false,false);
+        check(capture.Attempts==7 && Directory.GetFiles(privateDirectory).Length==7,"Repeated diagnostic polling cannot produce unbounded private files or consume the successful-read reservation");
+        capture.Capture(endingSnapshot,true,false);capture.Capture(endingSnapshot,true,false);capture.Capture(endingSnapshot,false,true);capture.Capture(endingSnapshot,false,true);
+        check(capture.Attempts==9 && Directory.GetFiles(privateDirectory).Length==9 && capture.FirstSuccessAttempted && capture.TerminalAttempted && capture.LastError=="","Eight private records include a reserved first success, with exactly one additional reserved terminal snapshot");
+        string terminalPath=Path.Combine(privateDirectory,"input-identity-terminal.yaml"),terminalText=File.ReadAllText(terminalPath);
+        var collisionCapture=new ControllerIdentityCapture(privateDirectory);collisionCapture.Capture(endingSnapshot,false,true);
+        check(collisionCapture.LastError=="System.IO.IOException" && File.ReadAllText(terminalPath)==terminalText,"Private capture uses CreateNew and preserves an existing terminal evidence file on collision");
+        var escaped=new ControllerIdentitySnapshot {InitialSerial=new StringPropertyObservation {RawValue="private\nidentity\0value",Returned=true,RequiredBytes=23,Length=22,InitialCapacity=257,ReturnedCapacity=257}};
+        string escapedText=escaped.ToPrivateYaml();
+        check(escapedText.Contains("private\\u000aidentity\\u0000value") && escapedText.Contains("private_device_identity: true") && !escapedText.Contains("private\nidentity"),"Private raw identity text is explicitly marked and escaped without injecting YAML/log structure");
         foreach(string reason in new[]{"invalid_pose","disconnected","sdk_false","role_changed"})
         {
             r=new Runtime();if(reason=="invalid_pose") r.PoseValid=false;if(reason=="disconnected") r.Connected=false;if(reason=="sdk_false") r.StateSuccess=false;if(reason=="role_changed") r.RoleChange=true;
