@@ -51,6 +51,7 @@ public class Injector : BaseUnityPlugin
     int overlayIsolationLayer=-1,layerFailureCaptures;
     int overlaySceneScanLimit=OverlayLayerInventory.DefaultScanLimit;
     bool captureLayoutInputs;
+    bool flushDesktopLayoutBeforeBorrow;
     string layoutInputRootRectIds;
     Camera overlayCamera;
     double overlayPlaneMeters;
@@ -77,6 +78,7 @@ public class Injector : BaseUnityPlugin
             layoutInputRootRectIds=Config.Bind("Diagnostics","LayoutInputRootRectIds","","Optional comma-separated runtime RectTransform IDs selecting diagnostic subtrees plus up to eight ancestors. Empty retains full coverage. Runtime IDs require observed name/parent validation each launch.").Value;
             disableOcclusionCulling=Config.Bind("Rendering","DisableOcclusionCulling",false,"Explicit fidelity remedy: disable the selected camera's occlusion culling only during eye rendering.").Value;
             captureOverlayCanvases=Config.Bind("UI","CaptureOverlayCanvases",false,"Experimental: borrow active screen overlay canvases during eye rendering and restore desktop state.").Value;
+            flushDesktopLayoutBeforeBorrow=Config.Bind("UI","FlushDesktopLayoutBeforeBorrow",false,"Explicit experimental fallback: flush pending desktop canvas layout once before current camera selection and all state snapshots. Runs game canvas callbacks; requires CaptureOverlayCanvases.").Value;
             includeOverlayLayers=Config.Bind("UI","IncludeOverlayLayers",false,"Explicitly include selected overlay canvas renderer layers in the borrowed camera mask; may also reveal other geometry on those layers.").Value;
             overlayPlaneMeters=Config.Bind("UI","OverlayPlaneDistanceMeters",2f,"Experimental overlay camera plane distance in physical meters; bounded by game camera clipping.").Value;
             overlayWidthMeters=Config.Bind("UI","OverlayPanelWidthMeters",1.8f,"Experimental common physical panel width; desktop aspect/layout retained independently of game FOV.").Value;
@@ -89,6 +91,7 @@ public class Injector : BaseUnityPlugin
                 throw new ArgumentException("UnitsPerMeter must be finite and greater than zero.");
             if (disableOcclusionCulling) Logger.LogWarning("EXPLICIT_FIDELITY_REMEDY DisableOcclusionCulling=true; game culling is restored after the eye pair.");
             if (captureOverlayCanvases) Logger.LogWarning("EXPERIMENTAL_UI_ADAPTER CaptureOverlayCanvases=true; only active root overlay canvases are borrowed; IncludeOverlayLayers="+includeOverlayLayers+". Layout, canvas callbacks and headset readability require validation.");
+            if(captureOverlayCanvases && flushDesktopLayoutBeforeBorrow) Logger.LogInfo("EXPLICIT_UI_FALLBACK FlushDesktopLayoutBeforeBorrow=true; pending desktop layout is flushed before fresh camera selection and state snapshots.");
             string directory=Environment.GetEnvironmentVariable("UGEVR_SESSION_DIRECTORY");
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
@@ -285,7 +288,11 @@ public class Injector : BaseUnityPlugin
             pendingRecenter=null;
             if (pending!=null && pending.Recenter!=null) { session.Acknowledge(pending); pending=null; Publish(true); }
         }
-        Camera camera=SelectCamera();
+        Camera camera;
+        DesktopLayoutFlush desktopFlush=null;
+        if(captureOverlayCanvases && flushDesktopLayoutBeforeBorrow)
+            desktopFlush=DesktopLayoutFlush.BeforeCameraSelection(true,captureLayoutInputs,layoutInputRootRectIds,SelectCamera,out camera);
+        else camera=SelectCamera();
         if (camera==null)
         {
             renderingActive=false; phase=0;
@@ -300,6 +307,7 @@ public class Injector : BaseUnityPlugin
         var actualEyes=new RigidPose[2];
         var beforeRenderProjection=new Matrix4x4[2];
         OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds):null;
+        if(overlays!=null) overlays.SetDesktopLayoutFlush(desktopFlush);
         if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
         if (overlays!=null && overlays.SelectedCount>0 && overlayAfterImageEffects)
         {

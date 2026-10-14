@@ -18,6 +18,7 @@ namespace Ugevr
         readonly List<string> errors=new List<string>();
         readonly List<string> rectMismatches=new List<string>();
         readonly UiLayoutDiagnostics layoutInputs;
+        DesktopLayoutFlush desktopLayoutFlush;
         readonly List<int> layoutContextIds=new List<int>();
         string layoutDiagnosticError;
         readonly string[] appliedEyes=new string[2];
@@ -160,6 +161,7 @@ namespace Ugevr
             if(eye>=0 && eye<2) CaptureLayoutPhase(eye==0?1:3);
             if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
         }
+        public void SetDesktopLayoutFlush(DesktopLayoutFlush evidence) {desktopLayoutFlush=evidence;}
         public void SetCommonHead(RigidPose head) {if (applied) throw new InvalidOperationException("Common panel pose cannot change between eyes.");commonHead=head;commonHeadSet=true;}
         public void UseAfterEffectsCamera(Camera ui,int isolationLayer=-1,int sceneScanLimit=OverlayLayerInventory.DefaultScanLimit)
         {
@@ -545,7 +547,8 @@ namespace Ugevr
                     .Append(",\"sortingOrder\":").Append(state.SortingOrder).Append(",\"originalEngineUiContext\":").Append(state.OriginalUiContext)
                     .Append(",\"restoredEngineUiContext\":").Append(state.Canvas==null?"null":UiContext(state.Canvas)).Append('}');
             }
-            text.Append("],\"layoutInputDiagnostic\":");
+            text.Append("],\"desktopLayoutFlush\":").Append(desktopLayoutFlush==null?"null":desktopLayoutFlush.DiagnosticJson());
+            text.Append(",\"layoutInputDiagnostic\":");
             if(layoutInputs==null) text.Append("null");
             else
             {

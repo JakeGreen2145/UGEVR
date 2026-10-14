@@ -113,7 +113,77 @@ static class UiLayoutDiagnosticChecks
         var nodeBound=new UiLayoutDiagnostics();for(int i=0;i<8193;++i) nodeBound.Add(new RectTransform(),canvas);
         assert(nodeBound.Summary().Contains("\"nodeCount\":8192") && nodeBound.Summary().Contains("\"droppedNodes\":1"),"Node inventory also stops at its explicit global bound");
         TargetedChecks(assert,text,group,canvas);
+        DesktopFlushChecks(assert,text);
         Canvas.Instances.Clear();Canvas.ForceAction=null;
+    }
+
+    static void DesktopFlushChecks(Action<bool,string> assert,Component text)
+    {
+        Canvas.Instances.Clear();Canvas.ForceAction=null;
+        var root=new RectTransform {name="desktop root",sizeDelta=new Vector2(1920,1080),localScale=new Vector3(1,1,1),localRotation=new Quaternion(0,0,0,1)};
+        var label=new RectTransform {name="pending label",parent=root,sizeDelta=new Vector2(326.91f,44.25f),localScale=new Vector3(1,1,1),localRotation=new Quaternion(0,0,0,1),AttachedComponents=new[]{text}};
+        var canvas=new Canvas {name="desktop canvas",renderMode=RenderMode.ScreenSpaceOverlay,scaleFactor=0.6666667f,Rects=new[]{root,label}};root.gameObject=canvas.gameObject;Canvas.Instances.Add(canvas);
+        Set(text,"text","new cached label");
+        int calls=0,selections=0;var oldCamera=new Camera();oldCamera.transform.position=new Vector3(10,0,0);var currentCamera=oldCamera;
+        Func<Camera> select=delegate {++selections;return currentCamera;};Camera selected;
+        Canvas.ForceAction=delegate {++calls;label.sizeDelta=new Vector2(266.16f,44.25f);};
+        var disabled=DesktopLayoutFlush.BeforeCameraSelection(false,true,label.GetInstanceID().ToString(CultureInfo.InvariantCulture),select,out selected);
+        assert(calls==0 && selections==1 && selected==oldCamera && label.sizeDelta.x==326.91f && !disabled.Completed,"Disabled fallback performs no flush or diagnostic query and retains ordinary camera selection");
+        var flush=DesktopLayoutFlush.BeforeCameraSelection(true,true,label.GetInstanceID().ToString(CultureInfo.InvariantCulture),select,out selected);
+        assert(calls==1 && selections==2 && flush.Completed && canvas.renderMode==RenderMode.ScreenSpaceOverlay && canvas.scaleFactor==0.6666667f,"Desktop flush runs exactly once before state ownership with original overlay mode and scale");
+        using(var document=JsonDocument.Parse(flush.DiagnosticJson()))
+        {
+            var before=document.RootElement.GetProperty("beforeDesktopFlush").GetProperty("selectedContexts").GetProperty("contexts")[0].GetProperty("nodes")[0].GetProperty("knownEngineInputs")[0].GetProperty("phases").GetProperty("snapshot");
+            var after=document.RootElement.GetProperty("afterDesktopFlush").GetProperty("selectedContexts").GetProperty("contexts")[0].GetProperty("nodes")[0].GetProperty("knownEngineInputs")[0].GetProperty("phases").GetProperty("snapshot");
+            assert(before.GetProperty("sizeDelta")[0].GetSingle()==326.91f && after.GetProperty("sizeDelta")[0].GetSingle()==266.16f && before.GetProperty("inputs").GetProperty("text").GetProperty("sha256").GetString()==after.GetProperty("inputs").GetProperty("text").GetProperty("sha256").GetString(),"Bounded pre/post flush evidence identifies pending derived reflow while cached semantic input stays constant");
+            assert(before.GetProperty("canvasMode").GetString()=="ScreenSpaceOverlay" && after.GetProperty("canvasMode").GetString()=="ScreenSpaceOverlay" && before.GetProperty("canvasScaleFactor").GetSingle()==after.GetProperty("canvasScaleFactor").GetSingle(),"Pre/post evidence distinguishes unchanged desktop mode/scale from later canvas conversion");
+        }
+        var settled=new OverlayCanvasScope(selected,1,2,false,1.8,true,label.GetInstanceID().ToString(CultureInfo.InvariantCulture));settled.SetDesktopLayoutFlush(flush);settled.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));using(settled) {settled.ApplyEye(0);settled.RecordAfterRender(0);}settled.RebuildRestoredGeometry();
+        assert(settled.RestorationConflicts==0 && label.sizeDelta.x==266.16f && settled.DiagnosticJson().Contains("beforeDesktopFlush"),"Authoritative snapshot follows settled desktop layout and survives the strict final rebuild");
+        Canvas.ForceAction=null;var later=new OverlayCanvasScope(selected,1,2,false);later.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));using(later) {later.ApplyEye(0);later.RecordAfterRender(0);}
+        Canvas.ForceAction=delegate {label.sizeDelta=new Vector2(300,44.25f);};later.RebuildRestoredGeometry();
+        assert(later.RestorationConflicts==1,"New derived layout changes after the authoritative snapshot still fail the strict restoration guard");
+        var newRoot=new RectTransform {name="new root",sizeDelta=new Vector2(800,450),localScale=new Vector3(1,1,1),localRotation=new Quaternion(0,0,0,1)};
+        var newCanvas=new Canvas {name="new canvas",renderMode=RenderMode.ScreenSpaceOverlay,Rects=new[]{newRoot}};newRoot.gameObject=newCanvas.gameObject;
+        var newCamera=new Camera();newCamera.transform.position=new Vector3(200,5,0);
+        Canvas.ForceAction=delegate {++calls;Canvas.Instances.Clear();Canvas.Instances.Add(newCanvas);currentCamera=newCamera;};
+        var changed=DesktopLayoutFlush.BeforeCameraSelection(true,true,root.GetInstanceID().ToString(CultureInfo.InvariantCulture),select,out selected);
+        var rediscovered=new OverlayCanvasScope(selected,1,2,false);
+        assert(selected==newCamera && selected.transform.position.x==200 && rediscovered.SelectedCount==1 && rediscovered.DiagnosticJson().Contains("new canvas") && !rediscovered.DiagnosticJson().Contains("desktop canvas"),"Callbacks may replace roots/camera and selection plus base pose are rediscovered after the flush");
+        using(var document=JsonDocument.Parse(changed.DiagnosticJson())) assert(document.RootElement.GetProperty("beforeDesktopFlush").GetProperty("selection").GetProperty("matchedRootCount").GetInt32()==1 && document.RootElement.GetProperty("afterDesktopFlush").GetProperty("selection").GetProperty("missingRootCount").GetInt32()==1,"Pre/post inventory exposes roots removed by desktop callbacks rather than reusing earlier identity");
+        Canvas.ForceAction=delegate {++calls;};int countBefore=calls,readsBefore=UiDiagnosticCounter.Cached;
+        var invalid=DesktopLayoutFlush.BeforeCameraSelection(true,true,"0",select,out selected);
+        assert(calls==countBefore+1 && selected==newCamera && invalid.DiagnosticJson().Contains("invalid-selector") && UiDiagnosticCounter.Cached==readsBefore,"Invalid targeted diagnostics do not prevent the explicit flush or camera selection and invoke no known input getters");
+        readsBefore=UiDiagnosticCounter.Cached;var empty=DesktopLayoutFlush.BeforeCameraSelection(true,true,"",select,out selected);
+        assert(UiDiagnosticCounter.Cached==readsBefore && empty.DiagnosticJson().Contains("\"beforeDesktopFlush\":null"),"Empty default selector does not add full-coverage pre/post sampling");
+        newCanvas.Rects=null;int selectionsBefore=selections;
+        var failedQuery=DesktopLayoutFlush.BeforeCameraSelection(true,true,"123",select,out selected);
+        using(var document=JsonDocument.Parse(failedQuery.DiagnosticJson())) assert(failedQuery.Completed && selections==selectionsBefore+1 && selected==newCamera && document.RootElement.GetProperty("beforeDesktopFlush").GetProperty("error").ValueKind==JsonValueKind.String,"Diagnostic discovery failure remains evidence and cannot prevent flush completion or post-flush selection");
+        newCanvas.Rects=new[]{newRoot};
+        Canvas.Instances.Clear();for(int i=0;i<65;++i) Canvas.Instances.Add(new Canvas {renderMode=RenderMode.ScreenSpaceOverlay});
+        var rootCapped=DesktopLayoutFlush.BeforeCameraSelection(true,true,"123",select,out selected);
+        using(var document=JsonDocument.Parse(rootCapped.DiagnosticJson())) assert(document.RootElement.GetProperty("beforeDesktopFlush").GetProperty("overlayRootCount").GetInt32()==64 && document.RootElement.GetProperty("beforeDesktopFlush").GetProperty("droppedRoots").GetInt32()==1,"Pre/post discovery admits at most 64 active overlay roots and exposes additional roots");
+        Canvas.Instances.Clear();var many=new RectTransform[8193];for(int i=0;i<many.Length;++i) many[i]=new RectTransform();var manyCanvas=new Canvas {renderMode=RenderMode.ScreenSpaceOverlay,Rects=many};Canvas.Instances.Add(manyCanvas);
+        var rectCapped=DesktopLayoutFlush.BeforeCameraSelection(true,true,many[0].GetInstanceID().ToString(CultureInfo.InvariantCulture),select,out selected);
+        using(var document=JsonDocument.Parse(rectCapped.DiagnosticJson()))
+        {
+            var stage=document.RootElement.GetProperty("beforeDesktopFlush");
+            assert(stage.GetProperty("rectCount").GetInt32()==8192 && stage.GetProperty("droppedRects").GetInt32()==1 && stage.GetProperty("summary").GetProperty("componentInventoryQueries").GetInt32()==1,"Pre/post rectangle admission stops at 8192 while only the selected node queries components");
+        }
+        for(int i=0;i<many.Length;++i) many[i]=many[0];Canvas.Instances.Add(new Canvas {renderMode=RenderMode.ScreenSpaceOverlay,Rects=new[]{newRoot}});
+        var duplicates=DesktopLayoutFlush.BeforeCameraSelection(true,true,many[0].GetInstanceID().ToString(CultureInfo.InvariantCulture),select,out selected);
+        using(var document=JsonDocument.Parse(duplicates.DiagnosticJson()))
+        {
+            var stage=document.RootElement.GetProperty("beforeDesktopFlush");
+            assert(stage.GetProperty("rectCount").GetInt32()==1 && stage.GetProperty("inspectedRectEntries").GetInt32()==8192 && stage.GetProperty("skippedRootRectInventories").GetInt32()==1 && stage.GetProperty("droppedRects").GetInt32()==1,"Duplicate native entries cannot defeat the processing bound and skipped root inventories remain visible");
+        }
+        Canvas.Instances.Clear();for(int i=0;i<4097;++i) Canvas.Instances.Add(new Canvas {isActiveAndEnabled=false});
+        var scanCapped=DesktopLayoutFlush.BeforeCameraSelection(true,true,"123",select,out selected);
+        using(var document=JsonDocument.Parse(scanCapped.DiagnosticJson())) assert(document.RootElement.GetProperty("beforeDesktopFlush").GetProperty("inspectedCanvasCount").GetInt32()==4096 && document.RootElement.GetProperty("beforeDesktopFlush").GetProperty("uninspectedCanvasCount").GetInt32()==1,"Diagnostic native inventory scan exposes its separate processing bound");
+        selectionsBefore=selections;Canvas.ForceAction=delegate {throw new InvalidOperationException("Controlled desktop flush failure");};bool threw=false;
+        try {DesktopLayoutFlush.BeforeCameraSelection(true,false,"",select,out selected);} catch(InvalidOperationException) {threw=true;}
+        assert(threw && selections==selectionsBefore,"A failure of the explicitly requested engine flush prevents rendering instead of being mislabeled a diagnostic query failure");
+        Canvas.ForceAction=null;
     }
 
     static void Register(UiLayoutDiagnostics diagnostic,RectTransform rect,Canvas canvas)
