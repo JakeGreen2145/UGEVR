@@ -12,6 +12,9 @@ namespace Ugevr
     {
         public string CapturedUtc,StateException,IndexException,ClassException,RoleException;
         public uint QueriedIndex;
+        public int? PreAxis0RawReturn,PreAxis0Type;
+        public ETrackedPropertyError? PreAxis0Error;
+        public string PreAxis0Exception;
         public bool? StateResult,Connected,PoseValid,MatrixFinite;
         public uint? Packet,PostRightIndex;
         public ulong? Pressed,Touched;
@@ -25,6 +28,14 @@ namespace Ugevr
         public static RejectedControllerObservation Read(CVRSystem system,uint index)
         {
             var result=new RejectedControllerObservation {QueriedIndex=index,CapturedUtc=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture)};
+            var preError=ETrackedPropertyError.TrackedProp_Success;
+            try
+            {
+                int raw=system.GetInt32TrackedDeviceProperty(index,ETrackedDeviceProperty.Prop_Axis0Type_Int32,ref preError);
+                result.PreAxis0RawReturn=raw;if(preError==ETrackedPropertyError.TrackedProp_Success) result.PreAxis0Type=raw;
+            }
+            catch(Exception failure) {result.PreAxis0Exception=failure.GetType().FullName;}
+            result.PreAxis0Error=preError;
             var state=new VRControllerState_t();var pose=new TrackedDevicePose_t();
             try
             {
@@ -157,7 +168,11 @@ namespace Ugevr
             if(passive!=null)
             {
                 b.Append("  diagnostic_only: true\n  authorizes_input: false\n  capture_time_utc: "+Scalar(passive.CapturedUtc)+
-                    "\n  queried_index: "+passive.QueriedIndex+"\n  origin: standing\n  state_result: "+Boolean(passive.StateResult)+
+                    "\n  queried_index: "+passive.QueriedIndex+"\n  origin: standing\n  pre_state_axis0_returned: "+passive.PreAxis0RawReturn.HasValue.ToString().ToLowerInvariant()+
+                    "\n  pre_state_axis0_raw_return: "+Number(passive.PreAxis0RawReturn)+"\n  pre_state_axis0_type: "+Number(passive.PreAxis0Type)+
+                    "\n  pre_state_axis0_error_name: "+Scalar(passive.PreAxis0Error.HasValue?passive.PreAxis0Error.Value.ToString():null)+
+                    "\n  pre_state_axis0_error_code: "+Number(passive.PreAxis0Error)+"\n  pre_state_axis0_exception: "+Scalar(passive.PreAxis0Exception)+
+                    "\n  state_result: "+Boolean(passive.StateResult)+
                     "\n  raw_outputs_valid: "+(passive.StateResult==true).ToString().ToLowerInvariant()+"\n  state_exception: "+Scalar(passive.StateException)+
                     "\n  connected: "+Boolean(passive.Connected)+"\n  pose_valid: "+Boolean(passive.PoseValid)+"\n  matrix_finite: "+Boolean(passive.MatrixFinite)+
                     "\n  matrix_3x4_row_major: "+Array(passive.Matrix)+"\n  packet: "+Unsigned(passive.Packet)+"\n  pressed: "+Unsigned(passive.Pressed)+

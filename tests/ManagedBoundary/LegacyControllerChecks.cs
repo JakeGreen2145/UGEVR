@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Reflection;
 using System.IO;
+using System.Collections.Generic;
 using System.Text;
 using Ugevr;
 using Valve.VR;
@@ -11,8 +12,9 @@ static class LegacyControllerChecks
     sealed class Runtime
     {
         public int AxisKind=2,StateCalls,RoleCalls,AxisCalls,StringCalls;
+        public readonly List<string> Order=new List<string>();
         public string Serial="fixture",Model="fixture-model";
-        public bool StringError,IdentityChange,ModelError,ModelChange,NonfinitePose,MissingStringReader,MissingStateReader,MissingAxisReader;
+        public bool StringError,IdentityChange,ModelError,ModelChange,NonfinitePose,MissingStringReader,MissingStateReader,MissingAxisReader,ActivateAfterJoint,SerialChangeBetweenReads,ClassChange;
         public ETrackedPropertyError AxisError=ETrackedPropertyError.TrackedProp_Success;
         public bool PoseValid=true,Connected=true,RoleChange,StateSuccess=true,PropertyError;
         public ulong Pressed=1UL<<7,Touched;
@@ -25,20 +27,21 @@ static class LegacyControllerChecks
         public IVRSystem Table()
         {
             var t=new IVRSystem();
-            t.GetTrackedDeviceIndexForControllerRole=delegate(ETrackedControllerRole role) {++RoleCalls;return RoleChange && RoleCalls>1?4u:3u;};
-            t.GetControllerRoleForTrackedDeviceIndex=delegate(uint index) {return ETrackedControllerRole.RightHand;};
-            t.GetTrackedDeviceClass=delegate(uint index) {return ETrackedDeviceClass.Controller;};
+            t.GetTrackedDeviceIndexForControllerRole=delegate(ETrackedControllerRole role) {Order.Add("index");++RoleCalls;return RoleChange && RoleCalls>1?4u:3u;};
+            t.GetControllerRoleForTrackedDeviceIndex=delegate(uint index) {Order.Add("role");return ETrackedControllerRole.RightHand;};
+            t.GetTrackedDeviceClass=delegate(uint index) {Order.Add("class");return ClassChange && StateCalls>0?ETrackedDeviceClass.GenericTracker:ETrackedDeviceClass.Controller;};
             t.GetInt32TrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,ref ETrackedPropertyError error)
-            {++AxisCalls;error=AxisPropertyErrors!=null?AxisPropertyErrors[(int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32]:PropertyError?ETrackedPropertyError.TrackedProp_UnknownProperty:AxisError;return AxisKinds==null?AxisKind:AxisKinds[(int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32];};
+            {Order.Add("axis"+((int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32));++AxisCalls;error=ActivateAfterJoint && StateCalls==0?ETrackedPropertyError.TrackedProp_UnknownProperty:AxisPropertyErrors!=null?AxisPropertyErrors[(int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32]:PropertyError?ETrackedPropertyError.TrackedProp_UnknownProperty:AxisError;return AxisKinds==null?AxisKind:AxisKinds[(int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32];};
             t.GetStringTrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,StringBuilder value,uint capacity,ref ETrackedPropertyError error)
             {
-                ++StringCalls;bool model=property==ETrackedDeviceProperty.Prop_ModelNumber_String;
-                error=StringError || (model && ModelError)?ETrackedPropertyError.TrackedProp_UnknownProperty:ETrackedPropertyError.TrackedProp_Success;
-                value.Append(model?(ModelChange && StateCalls>0?"replacement-model":Model):(IdentityChange && StateCalls>0?"replacement":Serial));return StringLength;
+                Order.Add("serial_or_model");++StringCalls;bool model=property==ETrackedDeviceProperty.Prop_ModelNumber_String;
+                error=ActivateAfterJoint && StateCalls==0 || StringError || (model && ModelError)?ETrackedPropertyError.TrackedProp_UnknownProperty:ETrackedPropertyError.TrackedProp_Success;
+                if(ActivateAfterJoint && StateCalls==0) return 0;
+                value.Append(!model && SerialChangeBetweenReads && StringCalls>1?"changed-again":model?(ModelChange && StateCalls>0?"replacement-model":Model):(IdentityChange && StateCalls>0?"replacement":Serial));return StringLength;
             };
             t.GetControllerStateWithPose=delegate(ETrackingUniverseOrigin origin,uint index,ref VRControllerState_t state,uint size,ref TrackedDevicePose_t pose)
             {
-                ++StateCalls;if(size!=(uint)Marshal.SizeOf(typeof(VRControllerState_t)) || origin!=ETrackingUniverseOrigin.TrackingUniverseStanding) throw new Exception("Incorrect public ABI arguments.");
+                Order.Add("state");++StateCalls;if(size!=(uint)Marshal.SizeOf(typeof(VRControllerState_t)) || origin!=ETrackingUniverseOrigin.TrackingUniverseStanding) throw new Exception("Incorrect public ABI arguments.");
                 state=new VRControllerState_t {unPacketNum=17,ulButtonPressed=Pressed,ulButtonTouched=Touched,rAxis0=new VRControllerAxis_t {x=X,y=Y},rAxis1=ExtraAxes[0],rAxis2=ExtraAxes[1],rAxis3=ExtraAxes[2],rAxis4=ExtraAxes[3]};
                 pose=new TrackedDevicePose_t {bDeviceIsConnected=Connected,bPoseIsValid=PoseValid,mDeviceToAbsoluteTracking=new HmdMatrix34_t {m0=1,m5=1,m10=1,m3=NonfinitePose?float.NaN:PoseX,m7=PoseY,m11=PoseZ}};return StateSuccess;
             };if(MissingStringReader) t.GetStringTrackedDeviceProperty=null;if(MissingStateReader) t.GetControllerStateWithPose=null;if(MissingAxisReader) t.GetInt32TrackedDeviceProperty=null;return t;
@@ -56,9 +59,9 @@ static class LegacyControllerChecks
         check(s.Available && s.A && s.Packet==17 && s.Index==3 && s.Identity=="fixture" && Math.Abs(s.X-0.3)<1e-6 && Math.Abs(s.Y+0.4)<1e-6 && r.StateCalls==1 && r.RoleCalls==2,"Real vendored CVRSystem ABI reader jointly polls fresh state/pose and rechecks the right role without SDK initialization");
         r=new Runtime {Pressed=1UL<<2,Touched=1UL<<7};s=Read(r);
         check(s.Available && !s.A,"Explicit legacy A profile uses SDK bit7 pressed state, not touch or the Index-controller bit2 alias");
-        foreach(int kind in new[]{0,1,3,99}) {r=new Runtime {AxisKind=kind};s=Read(r);check(!s.Available && r.StateCalls==0,"Nonjoystick axis metadata does not become a guessed thumbstick: "+kind);}
-        r=new Runtime {PropertyError=true};s=Read(r);check(!s.Available && s.UnavailableReason=="axis0_metadata_unavailable" && r.StateCalls==0,"Property errors refuse input before state polling");
-        r=new Runtime {StringLength=258};s=Read(r);check(!s.Available && r.StateCalls==0,"Oversized serial identity is not truncated into a valid controller identity");
+        foreach(int kind in new[]{0,1,3,99}) {r=new Runtime {AxisKind=kind};s=Read(r);check(!s.Available && r.StateCalls==1,"Nonjoystick axis metadata after joint polling still never becomes a guessed thumbstick: "+kind);}
+        r=new Runtime {PropertyError=true};s=Read(r);check(!s.Available && s.UnavailableReason=="axis0_metadata_unavailable" && r.StateCalls==1 && r.StringCalls==0,"Metadata errors after joint polling still refuse before serial reads or publication");
+        r=new Runtime {StringLength=258};s=Read(r);check(!s.Available && r.StateCalls==1,"Oversized serial identity is not truncated into a valid controller identity");
         r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true,X=float.NaN,Y=float.PositiveInfinity};s=Read(r,true);
         check(s.Available && s.A && !s.AxesAvailable && s.X==0 && s.Y==0 && r.AxisCalls==0 && r.StateCalls==1 && r.RoleCalls==2 && r.StringCalls==4,"Restricted received button profile validates exact identity/pose and ignores all unknown or nonfinite axes without querying axis properties");
         r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,Pressed=0,Touched=128};s=Read(r,true);
@@ -179,12 +182,12 @@ static class LegacyControllerChecks
         s=Read(r,false,true,capture);var passive=s.IdentityDiagnostics.RejectedState;
         check(!s.Available && s.UnavailableReason=="observed_transport_controller_identity_mismatch" && s.X==0 && s.Y==0 && !s.A && s.IdentityDiagnostics.Verdict=="identity_disagreement" && passive.StateResult==true && passive.Connected==true && passive.PoseValid==true,"Opt-in passive SDK output never becomes accepted input or changes the original identity rejection");
         check(passive.Matrix.Length==12 && passive.MatrixFinite==true && Math.Abs(passive.Matrix[3]-0.27)<1e-6 && Math.Abs(passive.Matrix[7]-1.23)<1e-6 && Math.Abs(passive.Matrix[11]+0.41)<1e-6 && passive.Packet==17 && passive.Pressed==128 && passive.Touched==256 && passive.Axes.Length==10 && Math.Abs(passive.Axes[0]-0.35)<1e-6 && Math.Abs(passive.Axes[9]+3.2)<1e-6,"A rejected controller's entire matrix, packet, masks and all five raw XY axes remain independently inspectable");
-        check(r.StateCalls==1 && r.AxisCalls==5 && r.StringCalls==4 && passive.PostRightIndex==3 && passive.PostClass==ETrackedDeviceClass.Controller && passive.PostRole==ETrackedControllerRole.RightHand && passive.PostSerial.RawValue==r.Serial && passive.PostModel.RawValue==r.Model,"One captured rejection performs one joint read, five metadata reads and complete post-state public context/identity rechecks");
+        check(r.StateCalls==1 && r.AxisCalls==6 && r.StringCalls==4 && passive.PostRightIndex==3 && passive.PostClass==ETrackedDeviceClass.Controller && passive.PostRole==ETrackedControllerRole.RightHand && passive.PostSerial.RawValue==r.Serial && passive.PostModel.RawValue==r.Model,"One captured rejection performs one pre-state metadata read, one joint read, five post-state metadata reads and complete post-state public context/identity rechecks");
         check(passive.AxisTypes[0]==2 && passive.AxisTypes[1]==3 && !passive.AxisTypes[2].HasValue && !passive.AxisTypes[3].HasValue && passive.AxisTypes[4]==99 && passive.AxisRawReturns[2]==0 && passive.AxisErrors[2]==ETrackedPropertyError.TrackedProp_UnknownProperty,"Passive metadata preserves all raw returns/errors while successful unknown enum integers remain raw and failed properties never imply a type");
         string passiveText=File.ReadAllText(Path.Combine(passiveDirectory,"input-identity-1.yaml"));
         check(passiveText.Contains("diagnostic_only: true") && passiveText.Contains("authorizes_input: false") && passiveText.Contains("raw_outputs_valid: true") && passiveText.Contains("raw_axes_0_to_4_xy:") && passiveText.Contains("passive_axis_type_properties:"),"Private passive evidence explicitly states its nonauthorizing role and contains the complete raw SDK fields");
         for(int i=0;i<20;++i) s=Read(r,false,true,capture);
-        check(capture.Attempts==7 && r.StateCalls==7 && r.AxisCalls==35 && r.StringCalls==56,"Exhausted capture slots cannot continue passive API reads despite continued rejected polling");
+        check(capture.Attempts==7 && r.StateCalls==7 && r.AxisCalls==42 && r.StringCalls==56,"Exhausted capture slots cannot continue passive API reads despite continued rejected polling");
         capture=new ControllerIdentityCapture(Path.Combine(Path.GetFullPath(".local-tools/identity-checks"),Guid.NewGuid().ToString("N")));
         r=new Runtime {Serial="app-view-controller",Model="app-view-model",Pressed=ulong.MaxValue,Touched=1UL<<63};s=Read(r,false,true,capture);
         check(s.IdentityDiagnostics.ToPrivateYaml().Contains("pressed: 18446744073709551615") && s.IdentityDiagnostics.ToPrivateYaml().Contains("touched: 9223372036854775808"),"Passive button masks preserve all unsigned64 bits without overflow or lossy signed conversion");
@@ -204,6 +207,29 @@ static class LegacyControllerChecks
             if(fault=="state_exception") check(!passive.StateResult.HasValue && passive.StateException=="System.NullReferenceException" && passive.Matrix==null && passive.Packet==null,"A passive SDK wrapper exception has no fabricated successful state or pose payload");
             if(fault=="axis_exception") check(!passive.AxisRawReturns[0].HasValue && passive.AxisExceptions[0]=="System.NullReferenceException" && passive.AxisTypes[0]==null,"Passive axis exceptions are recorded separately from metadata returns and types");
         }
+        r=new Runtime {ActivateAfterJoint=true};s=Read(r);
+        check(s.Available && s.A && s.Identity=="fixture" && s.Axis0Type==2 && r.Order.Contains("state") && r.Order.IndexOf("state")<r.Order.IndexOf("axis0") && r.Order.IndexOf("state")<r.Order.IndexOf("serial_or_model") && r.StringCalls==2,"Actual standard FnTable reader polls valid joint state first, then validates newly available declared metadata and bounded serial plus serial recheck");
+        foreach(string fault in new[]{"persistent_unknown","conflict","sdk_false","invalid_pose","disconnected","nonfinite_pose","changed_serial","changed_class","changed_index","bad_axis_x","bad_axis_y"})
+        {
+            r=new Runtime {ActivateAfterJoint=true};
+            if(fault=="persistent_unknown") r.PropertyError=true;if(fault=="conflict") r.AxisKind=1;if(fault=="sdk_false") r.StateSuccess=false;if(fault=="invalid_pose") r.PoseValid=false;if(fault=="disconnected") r.Connected=false;if(fault=="nonfinite_pose") r.NonfinitePose=true;
+            if(fault=="changed_serial") r.SerialChangeBetweenReads=true;if(fault=="changed_class") r.ClassChange=true;if(fault=="changed_index") r.RoleChange=true;if(fault=="bad_axis_x") r.X=float.NaN;if(fault=="bad_axis_y") r.Y=1.001f;
+            s=Read(r);check(!s.Available && !s.AxesAvailable && !s.A && s.X==0 && s.Y==0 && r.StateCalls==1,"Poll-first never publishes controller work unless every remaining guard passes: "+fault);
+            if(fault=="persistent_unknown" || fault=="conflict") check(r.StringCalls==0,"Unknown or conflicting post-poll metadata still refuses before serial reads or publication: "+fault);
+            if(fault=="sdk_false" || fault=="invalid_pose" || fault=="disconnected" || fault=="nonfinite_pose") check(r.AxisCalls==0 && r.StringCalls==0,"Invalid joint state/pose never proceeds to metadata or identity admission: "+fault);
+            if(fault=="changed_serial") check(s.UnavailableReason=="controller_identity_changed" && r.StringCalls==2,"Standard serial recheck rejects identity changes even when both bounded SDK strings individually succeed");
+        }
+        capture=new ControllerIdentityCapture(Path.Combine(Path.GetFullPath(".local-tools/identity-checks"),Guid.NewGuid().ToString("N")));
+        r=new Runtime {ActivateAfterJoint=true,Serial="invented-controller",Model="invented-model"};s=Read(r,false,true,capture);passive=s.IdentityDiagnostics.RejectedState;
+        check(!s.Available && s.IdentityDiagnostics.IdentityRejected && passive.PreAxis0Error==ETrackedPropertyError.TrackedProp_UnknownProperty && !passive.PreAxis0Type.HasValue && passive.PreAxis0RawReturn==2 && passive.AxisTypes[0]==2 && passive.AxisErrors[0]==ETrackedPropertyError.TrackedProp_Success && r.AxisCalls==6,"One opt-in rejected snapshot records actual pre-state UnknownProperty versus successful post-state declaration without turning it into admitted input");
+        check(r.Order.Contains("state") && r.Order.IndexOf("axis0")<r.Order.IndexOf("state") && s.IdentityDiagnostics.ToPrivateYaml().Contains("pre_state_axis0_error_name: \"TrackedProp_UnknownProperty\""),"Passive pre/post comparison is explicitly ordered and serialized inside the existing bounded record");
+        UnityEngine.InputSystem.InputSystem.Reset();
+        diagnostic=new OpenVrGamepadDiagnostic(delegate {return new PublicOwnedGamepad(Assembly.GetExecutingAssembly(),false,OuterGamepadCompatibilityProfile.LayoutPrefix,OwnedGamepadButton.West);},5,0.2,"refuse");
+        r=new Runtime {ActivateAfterJoint=true,Pressed=0,X=0,Y=0};
+        diagnostic.Tick(true,true,1,Read(r),0);diagnostic.Tick(true,true,1,Read(r),0.1);diagnostic.Tick(true,true,1,Read(r),0.2);
+        check(diagnostic.Status=="active" && UnityEngine.InputSystem.InputSystem.Adds==1 && r.StateCalls==3,"Poll-first validated samples still require the complete production neutral admission before owned device creation");
+        r.PropertyError=true;diagnostic.Tick(true,true,1,Read(r),0.3);UnityEngine.InputSystem.InputSystem.NormalUpdate();diagnostic.Tick(true,true,1,Read(r),0.4);
+        check(diagnostic.Complete && diagnostic.Queues==0 && diagnostic.NativeUnavailableReason=="axis0_metadata_unavailable" && UnityEngine.InputSystem.InputSystem.Removes==1,"A real persistent post-poll metadata error ends the admitted window without input forwarding and preserves cleanup");
         foreach(string reason in new[]{"invalid_pose","disconnected","sdk_false","role_changed"})
         {
             r=new Runtime();if(reason=="invalid_pose") r.PoseValid=false;if(reason=="disconnected") r.Connected=false;if(reason=="sdk_false") r.StateSuccess=false;if(reason=="role_changed") r.RoleChange=true;

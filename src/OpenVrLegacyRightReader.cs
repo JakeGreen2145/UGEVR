@@ -101,7 +101,15 @@ namespace Ugevr
             sample.UnavailableReason="right_role_unavailable";
             if(index>=OpenVR.k_unMaxTrackedDeviceCount || system.GetTrackedDeviceClass(index)!=ETrackedDeviceClass.Controller ||
                 system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) return sample;
-            ETrackedPropertyError error=ETrackedPropertyError.TrackedProp_Success;
+            // Poll first, but publish nothing until every state, metadata and identity guard passes.
+            var state=new VRControllerState_t();var pose=new TrackedDevicePose_t();
+            if(!system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose)) {sample.UnavailableReason="controller_state_read_failed";return sample;}
+            if(!pose.bDeviceIsConnected) {sample.UnavailableReason="controller_disconnected";return sample;}
+            if(!pose.bPoseIsValid) {sample.UnavailableReason="controller_pose_invalid";return sample;}
+            var m=pose.mDeviceToAbsoluteTracking;
+            foreach(double v in new double[]{m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11})
+                if(Double.IsNaN(v) || Double.IsInfinity(v)) {sample.UnavailableReason="controller_pose_nonfinite";return sample;}
+            var error=ETrackedPropertyError.TrackedProp_Success;
             int kind=system.GetInt32TrackedDeviceProperty(index,ETrackedDeviceProperty.Prop_Axis0Type_Int32,ref error);
             sample.Axis0Metadata=error.ToString();if(error==ETrackedPropertyError.TrackedProp_Success) sample.Axis0Type=kind;
             sample.UnavailableReason=error==ETrackedPropertyError.TrackedProp_Success?"axis0_not_joystick":"axis0_metadata_unavailable";
@@ -110,16 +118,15 @@ namespace Ugevr
             uint needed=system.GetStringTrackedDeviceProperty(index,ETrackedDeviceProperty.Prop_SerialNumber_String,serial,257,ref error);
             sample.UnavailableReason="controller_identity_unavailable";
             if(error!=ETrackedPropertyError.TrackedProp_Success || needed==0 || needed>257 || serial.Length==0 || serial.Length>256) return sample;
-            var state=new VRControllerState_t();var pose=new TrackedDevicePose_t();
-            sample.UnavailableReason="controller_pose_state_unavailable";
-            if(!system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose)) {sample.UnavailableReason="controller_state_read_failed";return sample;}
-            if(!pose.bDeviceIsConnected) {sample.UnavailableReason="controller_disconnected";return sample;}
-            if(!pose.bPoseIsValid) {sample.UnavailableReason="controller_pose_invalid";return sample;}
-            var m=pose.mDeviceToAbsoluteTracking;
-            foreach(double v in new double[]{m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11})
-                if(Double.IsNaN(v) || Double.IsInfinity(v)) {sample.UnavailableReason="controller_pose_nonfinite";return sample;}
-            // Recheck the role after the joint pose/state sample to reject an observed hand reassignment.
-            if(system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand)!=index || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) {sample.UnavailableReason="right_role_changed";return sample;}
+            // Recheck the original selected device, including bounded serial, after the metadata reads.
+            if(system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand)!=index || system.GetTrackedDeviceClass(index)!=ETrackedDeviceClass.Controller || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand)
+            {sample.UnavailableReason="right_role_changed";return sample;}
+            var postSerial=new StringBuilder(257);error=ETrackedPropertyError.TrackedProp_Success;
+            needed=system.GetStringTrackedDeviceProperty(index,ETrackedDeviceProperty.Prop_SerialNumber_String,postSerial,257,ref error);
+            sample.UnavailableReason="controller_identity_changed";
+            if(error!=ETrackedPropertyError.TrackedProp_Success || needed==0 || needed>257 || postSerial.Length==0 || postSerial.Length>256 || postSerial.ToString()!=serial.ToString()) return sample;
+            sample.UnavailableReason="controller_axis_invalid";
+            if(!BoundedAxis(state.rAxis0.x) || !BoundedAxis(state.rAxis0.y)) return sample;
             sample.Available=true;sample.UnavailableReason="";sample.Index=index;sample.Identity=serial.ToString();sample.Packet=state.unPacketNum;
             sample.A=(state.ulButtonPressed & (1UL<<(int)EVRButtonId.k_EButton_A))!=0;
             sample.AxesAvailable=true;sample.AxesSource="axis0_joystick";sample.X=state.rAxis0.x;sample.Y=state.rAxis0.y;return sample;
