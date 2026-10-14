@@ -22,7 +22,7 @@ namespace Ugevr
             if(String.IsNullOrEmpty(evidenceDirectory) || !Path.IsPathRooted(evidenceDirectory))throw new ArgumentException("An absolute private evidence directory is required.");
             directory=Path.GetFullPath(evidenceDirectory);LastError="";
         }
-        static void CheckPath(string path)
+        internal static void CheckPath(string path)
         {
             for(var parent=new DirectoryInfo(path);parent!=null;parent=parent.Parent)
                 if(parent.Exists && (parent.Attributes&FileAttributes.ReparsePoint)!=0)throw new IOException("Evidence path contains a reparse point.");
