@@ -16,22 +16,25 @@ namespace Ugevr
         public int ObjectCount {get {return entries.Count;}}
         public int DestroyedObjects {get;private set;}
         public string[] Errors {get {return errors.ToArray();}}
-        public OverlayLayerLease(IEnumerable<GameObject> objects)
+        public OverlayLayerLease(IEnumerable<GameObject> objects,int requestedLayer=-1)
         {
-            int used=0,scanned=0;
-            foreach(Transform transform in Resources.FindObjectsOfTypeAll(typeof(Transform)))
-            {
-                if(++scanned>100000) throw new InvalidOperationException("UI layer selection exceeds 100000 loaded transforms; use an explicit engine adapter.");
-                if(transform!=null && transform.gameObject.scene.IsValid() && transform.gameObject.scene.isLoaded) used|=1<<transform.gameObject.layer;
-            }
+            if(requestedLayer!=-1 && (requestedLayer<8 || requestedLayer>31))
+                throw new ArgumentOutOfRangeException("requestedLayer","UI isolation layer must be -1 for automatic selection or 8 through 31.");
+            OverlayLayerInventory inventory=OverlayLayerInventory.Capture(requestedLayer);
             Layer=-1;
-            for(int layer=31;layer>=8;--layer)
-                if((used & (1<<layer))==0 && String.IsNullOrEmpty(LayerMask.LayerToName(layer))) {Layer=layer;break;}
-            if(Layer<0) throw new InvalidOperationException("No unused unnamed scene layer is available for after-effects UI capture.");
+            if(requestedLayer!=-1)
+            {
+                if(inventory.OccupiedCount(requestedLayer)!=0)
+                    throw new OverlayLayerSelectionException("Explicit UI isolation layer is occupied by loaded scene objects, including inactive objects.",inventory,requestedLayer);
+                Layer=requestedLayer;
+            }
+            else for(int layer=31;layer>=8;--layer)
+                if(inventory.OccupiedCount(layer)==0 && String.IsNullOrEmpty(inventory.Name(layer))) {Layer=layer;break;}
+            if(Layer<0) throw new OverlayLayerSelectionException("No unused unnamed scene layer is available for after-effects UI capture.",inventory,requestedLayer);
             foreach(GameObject gameObject in objects)
             {
                 if(gameObject==null || owned.ContainsKey(gameObject.GetInstanceID())) continue;
-                if(entries.Count>=8192) throw new InvalidOperationException("UI layer selection exceeds 8192 objects; use an explicit profile selection.");
+                if(entries.Count>=8192) throw new OverlayLayerSelectionException("UI layer selection exceeds 8192 objects; use an explicit profile selection.",inventory,requestedLayer);
                 entries.Add(new Entry {Object=gameObject,Layer=gameObject.layer});
                 owned.Add(gameObject.GetInstanceID(),gameObject);
             }
@@ -45,6 +48,7 @@ namespace Ugevr
         }
         public void ValidateExclusive()
         {
+            CheckExclusive(Resources.FindObjectsOfTypeAll(typeof(Transform)));
             CheckExclusive(Resources.FindObjectsOfTypeAll(typeof(Renderer)));
             CheckExclusive(Resources.FindObjectsOfTypeAll(typeof(CanvasRenderer)));
         }
@@ -64,6 +68,7 @@ namespace Ugevr
         public void Dispose()
         {
             if(disposed) return;disposed=true;if(!applied) return;
+            RecordExclusiveFailure("before layer restoration");
             foreach(Entry entry in entries)
             {
                 if(!entry.Attempted) continue;
@@ -81,6 +86,12 @@ namespace Ugevr
                 }
                 catch(Exception error) {if(errors.Count<64) errors.Add("UI layer restore: "+error.Message);}
             }
+            RecordExclusiveFailure("after layer restoration");
+        }
+        void RecordExclusiveFailure(string stage)
+        {
+            try {ValidateExclusive();}
+            catch(Exception error) {if(errors.Count<64) errors.Add("UI layer exclusivity "+stage+": "+error.Message);}
         }
     }
 }

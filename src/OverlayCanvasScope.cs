@@ -161,11 +161,11 @@ namespace Ugevr
             if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
         }
         public void SetCommonHead(RigidPose head) {if (applied) throw new InvalidOperationException("Common panel pose cannot change between eyes.");commonHead=head;commonHeadSet=true;}
-        public void UseAfterEffectsCamera(Camera ui)
+        public void UseAfterEffectsCamera(Camera ui,int isolationLayer=-1)
         {
             if(applied) throw new InvalidOperationException("UI pass selection cannot change between eyes.");
             if(canvases.Count==0) return;
-            layerLease=new OverlayLayerLease(isolatedObjects);uiCamera=ui;
+            layerLease=new OverlayLayerLease(isolatedObjects,isolationLayer);uiCamera=ui;
         }
         public void ValidateLayerExclusive() {if(layerLease!=null) layerLease.ValidateExclusive();}
         public void ValidateInactiveCanvases(string stage)
@@ -360,6 +360,7 @@ namespace Ugevr
             CaptureLayoutPhase(6);
             Attempt(delegate {Canvas.ForceUpdateCanvases();},"final desktop canvas rebuild");
             CaptureLayoutPhase(7);
+            if(layerLease!=null) Attempt(delegate {layerLease.ValidateExclusive();},"isolated UI layer exclusivity after desktop restoration");
             foreach(RectState state in rects)
             {
                 if(state.Rect==null) continue;

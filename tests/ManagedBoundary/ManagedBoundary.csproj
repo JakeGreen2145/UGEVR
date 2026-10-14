@@ -16,6 +16,7 @@
     <Compile Include="../../src/UiLayoutDiagnostics.cs" Link="UiLayoutDiagnostics.cs" />
     <Compile Include="../../src/OverlayPanelGeometry.cs" Link="OverlayPanelGeometry.cs" />
     <Compile Include="../../src/OverlayLayerLease.cs" Link="OverlayLayerLease.cs" />
+    <Compile Include="../../src/OverlayLayerInventory.cs" Link="OverlayLayerInventory.cs" />
     <Compile Include="../../src/OverlayCameraPass.cs" Link="OverlayCameraPass.cs" />
   </ItemGroup>
 </Project>

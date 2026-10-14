@@ -21,6 +21,7 @@ namespace UnityEngine
     {
         int savedLayer;
         public System.Action<int> LayerSetter;
+        public bool activeSelf=true;
         public int layer {get {return savedLayer;} set {if(LayerSetter!=null) LayerSetter(value);savedLayer=value;}}
         public Scene scene=new Scene {Valid=true,isLoaded=true};
         public bool activeInHierarchy=true;

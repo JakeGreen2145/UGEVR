@@ -48,6 +48,7 @@ public class Injector : BaseUnityPlugin
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
     bool captureOverlayCanvases,includeOverlayLayers;
     bool overlayAfterImageEffects;
+    int overlayIsolationLayer=-1,layerFailureCaptures;
     bool captureLayoutInputs;
     string layoutInputRootRectIds;
     Camera overlayCamera;
@@ -79,6 +80,8 @@ public class Injector : BaseUnityPlugin
             overlayPlaneMeters=Config.Bind("UI","OverlayPlaneDistanceMeters",2f,"Experimental overlay camera plane distance in physical meters; bounded by game camera clipping.").Value;
             overlayWidthMeters=Config.Bind("UI","OverlayPanelWidthMeters",1.8f,"Experimental common physical panel width; desktop aspect/layout retained independently of game FOV.").Value;
             overlayAfterImageEffects=Config.Bind("UI","OverlayAfterImageEffects",false,"Experimental opt-in: render selected overlay UI in an isolated no-effect pass after the game eye's effects. Requires explicit overlay capture activation.").Value;
+            overlayIsolationLayer=Config.Bind("UI","OverlayIsolationLayer",-1,"-1 selects an unused unnamed layer. Explicit 8..31 may borrow a named layer only while no loaded scene object, including inactive objects, occupies it.").Value;
+            if(overlayIsolationLayer!=-1 && (overlayIsolationLayer<8 || overlayIsolationLayer>31)) throw new ArgumentOutOfRangeException("OverlayIsolationLayer","Use -1 or 8 through 31.");
             if (Double.IsNaN(unitsPerMeter) || Double.IsInfinity(unitsPerMeter) || unitsPerMeter<=0)
                 throw new ArgumentException("UnitsPerMeter must be finite and greater than zero.");
             if (disableOcclusionCulling) Logger.LogWarning("EXPLICIT_FIDELITY_REMEDY DisableOcclusionCulling=true; game culling is restored after the eye pair.");
@@ -302,7 +305,8 @@ public class Injector : BaseUnityPlugin
                 var owner=new GameObject("UGEVR overlay camera");owner.hideFlags=HideFlags.HideAndDontSave;
                 overlayCamera=owner.AddComponent<Camera>();overlayCamera.enabled=false;
             }
-            overlays.UseAfterEffectsCamera(overlayCamera);
+            try {overlays.UseAfterEffectsCamera(overlayCamera,overlayIsolationLayer);}
+            catch(OverlayLayerSelectionException selectionError) {WriteLayerFailureDiagnostic(selectionError);overlays.Dispose();throw;}
         }
         try
         {
@@ -325,6 +329,7 @@ public class Injector : BaseUnityPlugin
                 actualEyes[i]=new RigidPose(Position(camera.transform.position),Rotation(camera.transform.rotation));
                 if (overlays!=null) overlays.ApplyEye(i);
                 bool isolatedUi=overlays!=null && overlays.IsolatedMask!=0;
+                if(isolatedUi) overlays.ValidateLayerExclusive();
                 if(isolatedUi) OverlayCameraPass.Prepare(camera,overlayCamera,overlays.IsolatedMask);
                 camera.Render();
                 if(overlays!=null) overlays.ValidateInactiveCanvases("after game render");
@@ -332,6 +337,7 @@ public class Injector : BaseUnityPlugin
                 {
                     overlays.ValidateLayerExclusive();
                     OverlayCameraPass.Render(overlayCamera);
+                    overlays.ValidateLayerExclusive();
                 }
                 if(overlays!=null) overlays.ValidateInactiveCanvases("after UI render");
                 if (overlays!=null) overlays.RecordAfterRender(i);
@@ -402,6 +408,23 @@ public class Injector : BaseUnityPlugin
                 ",\"failureCaptureLimit\":8,\"overlayCapture\":"+overlays.DiagnosticJson()+"}");
         }
         catch (Exception error) { Logger.LogWarning("UI failure diagnostics unavailable: "+error.Message); }
+    }
+    void WriteLayerFailureDiagnostic(OverlayLayerSelectionException error)
+    {
+        if(!capturesEnabled || session==null || !session.Available || error.Inventory==null || layerFailureCaptures>=4) return;
+        while(layerFailureCaptures<4 && File.Exists(Path.Combine(evidenceDir,"ui-layer-selection-failure-"+(layerFailureCaptures+1)+".yaml"))) ++layerFailureCaptures;
+        if(layerFailureCaptures>=4) return;
+        ++layerFailureCaptures;
+        string destination=Path.Combine(evidenceDir,"ui-layer-selection-failure-"+layerFailureCaptures+".yaml");
+        string temporary=destination+"."+Guid.NewGuid().ToString("N")+".tmp";
+        try
+        {
+            string body=error.Inventory.DiagnosticYaml(Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,error.RequestedLayer,error.Message);
+            File.WriteAllText(temporary,body,new System.Text.UTF8Encoding(false));
+            File.Move(temporary,destination);
+        }
+        catch(Exception failure) {Logger.LogWarning("UI layer selection diagnostic unavailable: "+failure.Message);}
+        finally {try {if(File.Exists(temporary)) File.Delete(temporary);} catch {}}
     }
     void ClearTrackingDiagnostic()
     {
