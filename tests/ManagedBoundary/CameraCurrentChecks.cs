@@ -25,6 +25,14 @@ static class CameraCurrentChecks
             check(restore.GetterAttempts==3 && Camera.SetupCurrentCalls==1,"Successful restoration uses exactly capture/after/verification getters and one setter");
             restore.Dispose();check(Camera.SetupCurrentCalls==1,"Current-camera disposal is idempotent");
 
+            Reset(selected);var noRender=new CameraCurrentScope(selected,true);Camera.current=null;noRender.Dispose();
+            check(noRender.Conflict && noRender.Outcome=="unrendered_context_changed" && Camera.SetupCurrentCalls==0 && Camera.current==null,"Null changed context without a render attempt grants no restoration ownership");
+            Reset(selected);var preRenderFailure=new CameraCurrentScope(selected,true);bool originalFault=false;
+            try {using(var state=new CameraState(selected)) {throw new InvalidOperationException("before render");}}
+            catch(InvalidOperationException error) {originalFault=error.Message=="before render";}
+            finally {Camera.current=null;preRenderFailure.Dispose();}
+            check(originalFault && preRenderFailure.Conflict && !preRenderFailure.SetterAttempted && Camera.SetupCurrentCalls==0 && Camera.current==null,"Pre-render failure and a desktop cleanup context change remain unowned without hiding the original fault");
+
             Reset(selected);var noChange=new CameraCurrentScope(selected,true);noChange.MarkRender(selected);noChange.Dispose();
             check(noChange.Verified && noChange.Outcome=="already_current" && Camera.SetupCurrentCalls==0,"Already matching current requires no redundant setter");
 

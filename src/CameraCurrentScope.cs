@@ -54,6 +54,7 @@ namespace Ugevr
             try {++GetterAttempts;after=Camera.current;}
             catch {Outcome="restore_getter_failed";Conflict=true;return;}
             if(after==prior) {Outcome="already_current";Verified=true;return;}
+            if(after==null && !selectedRendered && !uiRendered) {Outcome="unrendered_context_changed";Conflict=true;return;}
             bool owned=after==null || (selectedRendered && after==selected) || (uiRendered && ui!=null && after==ui);
             if(!owned) {Outcome="foreign_preserved";Conflict=true;return;}
             // Never set a null prior. The live selected camera is the sole
