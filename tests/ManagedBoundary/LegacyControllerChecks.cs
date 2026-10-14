@@ -11,7 +11,8 @@ static class LegacyControllerChecks
     {
         public int AxisKind=2,StateCalls,RoleCalls,AxisCalls,StringCalls;
         public string Serial="fixture",Model="fixture-model";
-        public bool StringError,IdentityChange,ModelError,NonfinitePose;
+        public bool StringError,IdentityChange,ModelError,ModelChange,NonfinitePose;
+        public ETrackedPropertyError AxisError=ETrackedPropertyError.TrackedProp_Success;
         public bool PoseValid=true,Connected=true,RoleChange,StateSuccess=true,PropertyError;
         public ulong Pressed=1UL<<7,Touched;
         public uint StringLength=8;
@@ -23,12 +24,12 @@ static class LegacyControllerChecks
             t.GetControllerRoleForTrackedDeviceIndex=delegate(uint index) {return ETrackedControllerRole.RightHand;};
             t.GetTrackedDeviceClass=delegate(uint index) {return ETrackedDeviceClass.Controller;};
             t.GetInt32TrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,ref ETrackedPropertyError error)
-            {++AxisCalls;error=PropertyError?ETrackedPropertyError.TrackedProp_UnknownProperty:ETrackedPropertyError.TrackedProp_Success;return AxisKind;};
+            {++AxisCalls;error=PropertyError?ETrackedPropertyError.TrackedProp_UnknownProperty:AxisError;return AxisKind;};
             t.GetStringTrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,StringBuilder value,uint capacity,ref ETrackedPropertyError error)
             {
                 ++StringCalls;bool model=property==ETrackedDeviceProperty.Prop_ModelNumber_String;
                 error=StringError || (model && ModelError)?ETrackedPropertyError.TrackedProp_UnknownProperty:ETrackedPropertyError.TrackedProp_Success;
-                value.Append(model?Model:(IdentityChange && StateCalls>0?"replacement":Serial));return StringLength;
+                value.Append(model?(ModelChange && StateCalls>0?"replacement-model":Model):(IdentityChange && StateCalls>0?"replacement":Serial));return StringLength;
             };
             t.GetControllerStateWithPose=delegate(ETrackingUniverseOrigin origin,uint index,ref VRControllerState_t state,uint size,ref TrackedDevicePose_t pose)
             {
@@ -38,10 +39,10 @@ static class LegacyControllerChecks
             };return t;
         }
     }
-    static LegacyRightSample Read(Runtime runtime,bool buttonOnly=false)
+    static LegacyRightSample Read(Runtime runtime,bool buttonOnly=false,bool observedAxis=false)
     {
         var table=runtime.Table();IntPtr pointer=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(IVRSystem)));
-        try {Marshal.StructureToPtr(table,pointer,false);var system=new CVRSystem(pointer);var sample=buttonOnly?OuterGamepadCompatibilityProfile.Read(system,OuterGamepadCompatibilityProfile.ButtonOnlyWakeName):OpenVrLegacyRightReader.Read(system);GC.KeepAlive(table);return sample;}
+        try {Marshal.StructureToPtr(table,pointer,false);var system=new CVRSystem(pointer);var sample=observedAxis?OuterGamepadCompatibilityProfile.Read(system,OuterGamepadCompatibilityProfile.ObservedAxis0Name):buttonOnly?OuterGamepadCompatibilityProfile.Read(system,OuterGamepadCompatibilityProfile.ButtonOnlyWakeName):OpenVrLegacyRightReader.Read(system);GC.KeepAlive(table);return sample;}
         finally {Marshal.DestroyStructure(pointer,typeof(IVRSystem));Marshal.FreeHGlobal(pointer);}
     }
     public static void Run(Action<bool,string> check)
@@ -74,6 +75,49 @@ static class LegacyControllerChecks
             if(fault=="role_changed") r.RoleChange=true;if(fault=="identity_changed") r.IdentityChange=true;if(fault=="nonfinite_pose") r.NonfinitePose=true;
             s=Read(r,true);check(!s.Available && r.AxisCalls==0,"Button-only identity/role/pose failure cannot authorize device creation or guessed axes: "+fault);
         }
+        r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true,X=0.3464567f,Y=0.5984252f};s=Read(r,false,true);
+        check(s.Available && s.A && s.AxesAvailable && s.AxesSource=="observed_transport_axis0" && s.Axis0Metadata=="TrackedProp_UnknownProperty" && !s.Axis0Type.HasValue && s.X==(double)0.3464567f && s.Y==(double)0.5984252f && r.AxisCalls==1,"Explicit observed transport preserves received quantized raw axis0 with UnknownProperty diagnostics without claiming a joystick declaration");
+        r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true,AxisKind=3};s=Read(r,false,true);
+        check(s.Available && !s.Axis0Type.HasValue,"A returned integer accompanying UnknownProperty is not treated as a successful type declaration");
+        r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,AxisKind=2};s=Read(r,false,true);
+        check(s.Available && s.Axis0Type==2 && s.Axis0Metadata=="TrackedProp_Success" && s.AxesSource=="observed_transport_axis0","A compatible known type retains the explicitly selected transport label and raw metadata");
+        foreach(int kind in new[]{0,1,3,99})
+        {
+            r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,AxisKind=kind};s=Read(r,false,true);
+            check(!s.Available && s.UnavailableReason=="observed_transport_axis0_metadata_conflict" && s.Axis0Type==kind && r.StateCalls==0,"The observed transport cannot override a known conflicting axis type: "+kind);
+        }
+        foreach(var error in new[]{ETrackedPropertyError.TrackedProp_WrongDataType,ETrackedPropertyError.TrackedProp_WrongDeviceClass,ETrackedPropertyError.TrackedProp_BufferTooSmall})
+        {
+            r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,AxisError=error};s=Read(r,false,true);
+            check(!s.Available && s.UnavailableReason=="observed_transport_axis0_metadata_fault" && s.Axis0Metadata==error.ToString() && !s.Axis0Type.HasValue && r.StateCalls==0,"A property failure other than observed UnknownProperty cannot authorize transport axes: "+error);
+        }
+        foreach(float value in new[]{float.NaN,float.PositiveInfinity,float.NegativeInfinity,1.0001f,-1.0001f})
+        {
+            r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true,X=value};s=Read(r,false,true);
+            check(!s.Available && !s.AxesAvailable && s.UnavailableReason=="observed_transport_axis0_invalid","Nonfinite or out-of-range raw axis X cannot reach the game: "+value);
+            r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true,Y=value};s=Read(r,false,true);
+            check(!s.Available && !s.AxesAvailable && s.UnavailableReason=="observed_transport_axis0_invalid","Nonfinite or out-of-range raw axis Y cannot reach the game: "+value);
+        }
+        foreach(string fault in new[]{"serial","model","identity_changed","model_changed","invalid_pose","disconnected","sdk_false","role_changed","nonfinite_pose"})
+        {
+            r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true};
+            if(fault=="serial") r.Serial="different";if(fault=="model") r.Model="DeckardMP";if(fault=="identity_changed") r.IdentityChange=true;if(fault=="model_changed") r.ModelChange=true;
+            if(fault=="invalid_pose") r.PoseValid=false;if(fault=="disconnected") r.Connected=false;if(fault=="sdk_false") r.StateSuccess=false;if(fault=="role_changed") r.RoleChange=true;if(fault=="nonfinite_pose") r.NonfinitePose=true;
+            s=Read(r,false,true);check(!s.Available && !s.AxesAvailable,"Observed raw axis evidence never bypasses identity, role or valid pose guards: "+fault);
+        }
+        UnityEngine.InputSystem.InputSystem.Reset();
+        diagnostic=new OpenVrGamepadDiagnostic(delegate {return new PublicOwnedGamepad(Assembly.GetExecutingAssembly(),false,OuterGamepadCompatibilityProfile.LayoutPrefix,OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.ObservedAxis0Name));},5,0.2,"refuse");
+        r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true,Pressed=0,X=0.3464567f,Y=0.5984252f};
+        diagnostic.Tick(true,true,1,Read(r,false,true),0);
+        check(UnityEngine.InputSystem.InputSystem.Adds==0 && diagnostic.Reason=="right_controller_not_neutral","An observed transported nonneutral axis cannot arm the first owned window");
+        r.X=r.Y=0;diagnostic.Tick(true,true,1,Read(r,false,true),0.1);r.Pressed=128;r.X=0.3464567f;r.Y=0.5984252f;diagnostic.Tick(true,true,1,Read(r,false,true),0.2);UnityEngine.InputSystem.InputSystem.NormalUpdate();
+        owned=UnityEngine.InputSystem.Gamepad.current;
+        // Independently calculated expected vector from the received PC values and configured .2 radial deadzone.
+        check(owned.buttonWest.isPressed && !owned.buttonSouth.isPressed && Math.Abs(owned.leftStick.Value.x-0.307811806)<1e-6 && Math.Abs(owned.leftStick.Value.y-0.531674929)<1e-6,"Quantized PC axis0 passes the actual public queue with the configured radial result, without replacing it with requested headset values");
+        r.Pressed=0;r.X=r.Y=0;diagnostic.Tick(true,true,1,Read(r,false,true),0.3);UnityEngine.InputSystem.InputSystem.NormalUpdate();
+        check(!owned.buttonWest.isPressed && owned.leftStick.Value.x==0 && owned.leftStick.Value.y==0 && diagnostic.Queues==2,"Observed transport zero releases the owned West and movement state once");
+        r.PropertyError=false;r.AxisKind=1;diagnostic.Tick(true,true,1,Read(r,false,true),0.4);UnityEngine.InputSystem.InputSystem.NormalUpdate();diagnostic.Tick(true,true,1,Read(r,false,true),0.5);
+        check(diagnostic.Complete && diagnostic.ReleaseObserved && !owned.added && UnityEngine.InputSystem.InputSystem.Removes==1,"A newly conflicting metadata declaration ends and cleans up the started transport window");
         foreach(string reason in new[]{"invalid_pose","disconnected","sdk_false","role_changed"})
         {
             r=new Runtime();if(reason=="invalid_pose") r.PoseValid=false;if(reason=="disconnected") r.Connected=false;if(reason=="sdk_false") r.StateSuccess=false;if(reason=="role_changed") r.RoleChange=true;

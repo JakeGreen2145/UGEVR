@@ -7,7 +7,8 @@ namespace Ugevr
         public bool Available,A,AxesAvailable;
         public uint Index,Packet;
         public string Identity;
-        public string UnavailableReason;
+        public string UnavailableReason,AxesSource,Axis0Metadata;
+        public int? Axis0Type;
         public double X,Y;
     }
     public struct OwnedPadState

@@ -25,6 +25,14 @@ This route does not query axis metadata or read/map any axis value. Left-stick o
 
 The transport pin comes from the root operator's independent Windows receiver window on 2026-10-14: RightHand index 1, exact serial/model above, connected valid pose, pressed and touched mask 128 for eight of 240 reads with zero before/after. The same receiver returned UnknownProperty for all five axis-type properties. This is observed transport evidence supplied by the operator, separate from these source-only checks. PC touched128 was present despite the headset test's touchfalse request; no touch passthrough claim is made. Delivery to original game bindings and gameplay remain unvalidated.
 
+## Restricted observed axis-0 transport profile
+
+Select `DiagnosticProfile = outer-1.4.1-deckardmp-right-a-west-observed-axis0-leftstick-v1` explicitly to test the separately observed raw axis-0 route. It uses the same exact serial/model, role, joint valid connected pose/state and repeated identity guards as the button-only profile. SDK A pressed bit 7 maps to West. Raw received axis-0 X/Y maps to the owned left stick through the configured radial deadzone. A released and raw stick inside that deadzone are required before arming.
+
+Only this restricted profile permits the observed `TrackedProp_UnknownProperty` result for axis-0 type metadata. A successful compatible Joystick type is also accepted. A successful conflicting type or any other property error rejects the sample before state polling. A returned integer accompanying an error is never treated as a declaration. Raw X/Y must each be finite and within [-1,1]. Logs report `sourceAxes=observed_transport_axis0`, `axis0Metadata` and a successful raw `axis0Type` or `unavailable`. They never label this route as a declared joystick. The declared joystick profiles retain their strict metadata check; button-only still queries and maps no axes.
+
+Root's independent paired transport window on 2026-10-14 requested headset right-stick [0.35,0.60] for 500 ms, then zero. The headset read ten nonzero samples and 290 zero samples. The Windows receiver read eight raw axis-0 samples near [0.3464567,0.5984252] and 232 zero samples, with other axes zero and all axis-type properties UnknownProperty. The received values are consistent with 44/127 and 76/127 quantization, rather than exact passthrough. The injector uses the received values. This point and neutral return do not establish unobserved signs, full range, latency, every controller model or original movement consumption. These source checks validate filtering, radial output and cleanup independently of the operator's transport evidence.
+
 ## Ownership and compatibility
 
 The backend queues public `GamepadState` events only to a separately owned `Gamepad`. It never changes physical keyboard state, nonowned keys, IME, physical controller input, device enable state or game input actions. No Lua, native virtual-controller driver or Frame Testbench dependency is introduced.
@@ -43,7 +51,7 @@ Release queues neutral state and normally waits for a later Update to observe ne
 
 Layout ownership includes the unique name, a recorded public layout definition, public layout-change observation and a bounded 256-device check. A collision is refused before registration. A replaced layout or any other device using it prevents deregistration. Such a layout is preserved and reported. Layout/device callbacks are unsubscribed after successful bounded cleanup. An unavailable cleanup remains explicit; no original device or global input state is cleared to compensate.
 
-`INPUT_DIAGNOSTIC` log records show status/reason, creation and queue counts, observed owned state samples, release/removal attempts and cleanup/current restoration outcomes. Observed owned state is read through public unprocessed stick state; normal game processors can alter the values the game consumes. The queue itself is not a processing acknowledgement. All records keep `gameConsumption=unknown`.
+`INPUT_DIAGNOSTIC` log records show selected profile, axis source/metadata and status/reason, creation and queue counts, observed owned state samples, release/removal attempts and cleanup/current restoration outcomes. Observed owned state is read through public unprocessed stick state; normal game processors can alter the values the game consumes. The queue itself is not a processing acknowledgement. All records keep `gameConsumption=unknown`.
 
 ## Source evidence and remaining test
 
