@@ -30,6 +30,7 @@ namespace Ugevr
         public int DestroyedObjects { get; private set; }
         public int RestorationConflicts { get; private set; }
         public int DerivedPositionRoundoff { get; private set; }
+        public int RotationRoundoff { get; private set; }
         public int SelectedCount { get { return canvases.Count; } }
         public string RestorationError { get { return String.Join("; ",errors.ToArray()); } }
 
@@ -195,7 +196,7 @@ namespace Ugevr
                     Verify(state,"anchoredPosition3D",Values(state.AnchoredPosition),Values(rect.anchoredPosition3D));
                     Verify(state,"localPosition",Values(state.LocalPosition),Values(rect.localPosition),true);
                     Verify(state,"localScale",Values(state.LocalScale),Values(rect.localScale));
-                    Verify(state,"localRotation",Values(state.LocalRotation),Values(rect.localRotation));
+                    VerifyRotation(state,Values(state.LocalRotation),Values(rect.localRotation));
                 },"verify rect restoration "+state.Name);
             }
             foreach (CanvasState state in canvases)
@@ -263,6 +264,38 @@ namespace Ugevr
                 ",\"expected\":"+Numbers(expected)+",\"observed\":"+Numbers(observed)+",\"finite\":"+(finite?"true":"false")+
                 ",\"maxAbsoluteDelta\":"+delta+",\"acceptedTolerance\":"+tolerance.ToString("R",CultureInfo.InvariantCulture)+",\"acceptedDerivedRoundoff\":"+(accepted?"true":"false")+"}");
         }
+        void VerifyRotation(RectState state,float[] expected,float[] observed)
+        {
+            const double unitTolerance=.000002;
+            double expectedNorm=0,observedNorm=0,dot=0;bool finite=true,changed=false;
+            for (int i=0;i<4;++i)
+            {
+                finite&=!Single.IsNaN(expected[i]) && !Single.IsInfinity(expected[i]) && !Single.IsNaN(observed[i]) && !Single.IsInfinity(observed[i]);
+                expectedNorm+=(double)expected[i]*expected[i];observedNorm+=(double)observed[i]*observed[i];dot+=(double)expected[i]*observed[i];
+                changed|=expected[i]!=observed[i];
+            }
+            bool unit=finite && Math.Abs(expectedNorm-1)<=unitTolerance && Math.Abs(observedNorm-1)<=unitTolerance;
+            if (!changed && unit) return;
+            bool signAligned=dot<0,accepted=unit;double maximum=0,tolerance=0;
+            for (int i=0;i<4;++i)
+            {
+                float aligned=signAligned?-observed[i]:observed[i];
+                double componentDelta=Math.Abs((double)expected[i]-aligned);
+                double componentTolerance=unit?4*Math.Max(Ulp(expected[i]),Ulp(aligned)):0;
+                maximum=Math.Max(maximum,componentDelta);tolerance=Math.Max(tolerance,componentTolerance);
+                accepted&=componentDelta<=componentTolerance;
+            }
+            string name=state.Name==null?"":state.Name.Substring(0,Math.Min(64,state.Name.Length));
+            string delta=finite?maximum.ToString("R",CultureInfo.InvariantCulture):"null";
+            if (accepted) ++RotationRoundoff;
+            else Conflict("Rect "+name+" id="+state.Id+" localRotation expected="+Numbers(expected)+" observed="+Numbers(observed)+" unit="+unit+" maxDelta="+delta);
+            if (rectMismatches.Count<64) rectMismatches.Add("{\"name\":"+Quote(name)+",\"instanceId\":"+state.Id+",\"field\":\"localRotation\",\"expected\":"+Numbers(expected)+
+                ",\"observed\":"+Numbers(observed)+",\"finite\":"+(finite?"true":"false")+",\"unitQuaternion\":"+(unit?"true":"false")+
+                ",\"expectedNormSquared\":"+(finite?expectedNorm.ToString("R",CultureInfo.InvariantCulture):"null")+
+                ",\"observedNormSquared\":"+(finite?observedNorm.ToString("R",CultureInfo.InvariantCulture):"null")+
+                ",\"unitNormSquaredTolerance\":0.000002,\"hemisphereAligned\":"+(signAligned?"true":"false")+",\"maxAbsoluteDelta\":"+delta+
+                ",\"acceptedTolerance\":"+tolerance.ToString("R",CultureInfo.InvariantCulture)+",\"acceptedRotationRoundoff\":"+(accepted?"true":"false")+"}");
+        }
         static string Vector(Vector3 v) { return "["+Number(v.x)+","+Number(v.y)+","+Number(v.z)+"]"; }
         string AppliedCanvasJson()
         {
@@ -296,7 +329,8 @@ namespace Ugevr
                 .Append(",\"overlayLayerMask\":").Append(OverlayLayerMask).Append(",\"excludedOverlayLayers\":").Append(OverlayLayerMask & ~AppliedMask)
                 .Append(",\"includeOverlayLayers\":").Append(includeLayers?"true":"false").Append(",\"selectedCount\":").Append(canvases.Count)
                 .Append(",\"rectCount\":").Append(rects.Count).Append(",\"destroyedObjects\":").Append(DestroyedObjects)
-                .Append(",\"restorationConflicts\":").Append(RestorationConflicts).Append(",\"derivedPositionRoundoff\":").Append(DerivedPositionRoundoff).Append(",\"errors\":[");
+                .Append(",\"restorationConflicts\":").Append(RestorationConflicts).Append(",\"derivedPositionRoundoff\":").Append(DerivedPositionRoundoff)
+                .Append(",\"rotationRoundoff\":").Append(RotationRoundoff).Append(",\"errors\":[");
             for (int i=0;i<errors.Count;++i) { if (i>0) text.Append(','); text.Append(Quote(errors[i])); }
             text.Append("],\"rectMismatches\":[").Append(String.Join(",",rectMismatches.ToArray())).Append("],\"selectedRoots\":[");
             for (int i=0;i<canvases.Count;++i)

@@ -18,7 +18,7 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); SessionChecks();
+        MathChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void TrackingReacquisitionChecks()
@@ -298,6 +298,42 @@ class Program
         bool parentRejected=false;
         try {PanelScope(camera,1,2,false);} catch (InvalidOperationException) {parentRejected=true;}
         Assert(parentRejected && overlay.renderMode==RenderMode.ScreenSpaceOverlay,"Nonuniform parent rejects before mutation instead of stretching physical UI");
+        Canvas.Instances.Clear();Canvas.ForceAction=null;
+    }
+    static Quaternion NormalizeQuaternion(Quaternion value)
+    {
+        double norm=Math.Sqrt((double)value.x*value.x+(double)value.y*value.y+(double)value.z*value.z+(double)value.w*value.w);
+        return new Quaternion((float)(value.x/norm),(float)(value.y/norm),(float)(value.z/norm),(float)(value.w/norm));
+    }
+    static void RotationRoundoffChecks()
+    {
+        Canvas.Instances.Clear();Canvas.ForceAction=null;
+        var overlay=Overlay("menu",5);var rect=overlay.Rects[0];rect.name="spinner_save";
+        var original=new Quaternion(0,0,-.651493669f,-.758654f);rect.localRotation=original;
+        var camera=new Camera();var scope=PanelScope(camera,1,2,false);
+        rect.LocalRotationSetter=NormalizeQuaternion;
+        using(scope) scope.ApplyEye();
+        Near(rect.localRotation.z,-.6514937281608582,"Quaternion setter reproduces observed spinner Z normalization");
+        Near(rect.localRotation.w,-.7586540579795837,"Quaternion setter reproduces observed spinner W normalization");
+        Assert(scope.RestorationConflicts==0 && scope.RotationRoundoff==1,"One-ULP unit-quaternion normalization accepted separately");
+        Assert(scope.DiagnosticJson().Contains("\"acceptedRotationRoundoff\":true") && scope.DiagnosticJson().Contains("\"unitQuaternion\":true"),"Quaternion roundoff records raw values and unit checks");
+        rect.LocalRotationSetter=null;rect.localRotation=original;
+        var sign=PanelScope(camera,1,2,false);
+        rect.LocalRotationSetter=value=>new Quaternion(-value.x,-value.y,-value.z,-value.w);
+        using(sign) sign.ApplyEye();
+        Assert(sign.RestorationConflicts==0 && sign.DiagnosticJson().Contains("\"hemisphereAligned\":true"),"Equivalent quaternion sign is not a real rotation change");
+        foreach(var invalid in new[]{new Quaternion(0,0,0,0),new Quaternion(0,0,.5f,.5f),new Quaternion(float.NaN,0,0,1)})
+        {
+            rect.LocalRotationSetter=null;rect.localRotation=original;var rejected=PanelScope(camera,1,2,false);
+            rect.LocalRotationSetter=value=>invalid;
+            using(rejected) rejected.ApplyEye();
+            Assert(rejected.RestorationConflicts>0 && rejected.RotationRoundoff==0,"Zero, nonunit and nonfinite quaternion are rejected");
+            Assert(rejected.DiagnosticJson().Contains("\"acceptedRotationRoundoff\":false"),"Invalid quaternion remains a recorded restoration failure");
+        }
+        rect.LocalRotationSetter=null;rect.localRotation=original;var angle=PanelScope(camera,1,2,false);
+        rect.LocalRotationSetter=value=>new Quaternion(0,0,(float)Math.Sin(.5),(float)Math.Cos(.5));
+        using(angle) angle.ApplyEye();
+        Assert(angle.RestorationConflicts>0 && angle.RotationRoundoff==0,"Real unit-quaternion angle change rejected");
         Canvas.Instances.Clear();Canvas.ForceAction=null;
     }
     static void ExternalProducer(string directory,string content)

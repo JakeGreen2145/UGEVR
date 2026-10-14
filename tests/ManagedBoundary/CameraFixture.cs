@@ -31,7 +31,9 @@ namespace UnityEngine
         public virtual Vector3 position {get {return localPosition;} set {localPosition=value;} }
         public virtual Vector3 localPosition {get;set;}
         public Quaternion rotation {get {return localRotation;} set {localRotation=value;} }
-        public Quaternion localRotation;
+        Quaternion savedLocalRotation;
+        public System.Func<Quaternion,Quaternion> LocalRotationSetter;
+        public Quaternion localRotation {get {return savedLocalRotation;} set {savedLocalRotation=LocalRotationSetter==null?value:LocalRotationSetter(value);} }
         public Transform parent;
         public Vector3 lossyScale=new Vector3(1,1,1);
     }
