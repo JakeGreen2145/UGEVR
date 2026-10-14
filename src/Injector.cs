@@ -36,6 +36,7 @@ public class Injector : BaseUnityPlugin
     readonly TrackingReacquisition tracking=new TrackingReacquisition(5);
     InjectorSession session;
     KeyboardEProbe inputProbe;
+    EngineEInputExperiment engineInputExperiment;
     SessionCommand pending;
     MethodInfo getKeyDown;
     IntPtr renderEvent;
@@ -46,6 +47,7 @@ public class Injector : BaseUnityPlugin
     bool active=true, runtimeReady, draining, renderingActive, quitting;
     bool ownsBackground, oldBackground;
     bool capturesEnabled, retainGameTilt, disableOcclusionCulling;
+    bool allowEngineInputExperiment;
     bool captureOverlayCanvases,includeOverlayLayers;
     bool overlayAfterImageEffects;
     int overlayIsolationLayer=-1,layerFailureCaptures;
@@ -74,6 +76,7 @@ public class Injector : BaseUnityPlugin
             unitsPerMeter=Config.Bind("Tracking","UnitsPerMeter",1f,"Game world units per physical meter.").Value;
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
+            allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
             captureLayoutInputs=Config.Bind("Diagnostics","CaptureLayoutInputs",false,"Opt-in bounded cached text/layout input snapshots for UI restoration mismatches. Requires CaptureImages; no preferred-size, generator or game getters are queried.").Value && capturesEnabled;
             layoutInputRootRectIds=Config.Bind("Diagnostics","LayoutInputRootRectIds","","Optional comma-separated runtime RectTransform IDs selecting diagnostic subtrees plus up to eight ancestors. Empty retains full coverage. Runtime IDs require observed name/parent validation each launch.").Value;
             disableOcclusionCulling=Config.Bind("Rendering","DisableOcclusionCulling",false,"Explicit fidelity remedy: disable the selected camera's occlusion culling only during eye rendering.").Value;
@@ -97,6 +100,8 @@ public class Injector : BaseUnityPlugin
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
             if (capturesEnabled && session.Available)
                 inputProbe=new KeyboardEProbe(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicKeyboardEReader.Create);
+            if(allowEngineInputExperiment && session.Available)
+                engineInputExperiment=new EngineEInputExperiment(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicEngineEKeyboard.Create,Stopwatch.GetTimestamp);
             var inputType=Type.GetType("UnityEngine.Input, UnityEngine.InputLegacyModule",false) ??
                 Type.GetType("UnityEngine.Input, UnityEngine.InputModule",false) ?? Type.GetType("UnityEngine.Input, UnityEngine",false);
             if (inputType!=null) getKeyDown=inputType.GetMethod("GetKeyDown",new[] { typeof(string) });
@@ -146,6 +151,7 @@ public class Injector : BaseUnityPlugin
     {
         ++updateCount;
         if (!quitting && inputProbe!=null) inputProbe.Tick(capturesEnabled,Application.isFocused,DateTime.UtcNow,Stopwatch.GetTimestamp());
+        if(!quitting && engineInputExperiment!=null) engineInputExperiment.Tick(allowEngineInputExperiment && capturesEnabled,Application.isFocused,DateTime.UtcNow,Stopwatch.GetTimestamp());
         if (session!=null)
         {
             SessionCommand command=session.Poll(DateTime.UtcNow);
@@ -538,6 +544,7 @@ public class Injector : BaseUnityPlugin
     void StopOwnedWork()
     {
         if (inputProbe!=null) { inputProbe.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp()); inputProbe=null; }
+        if(engineInputExperiment!=null) {engineInputExperiment.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp(),"game_lifecycle_end");engineInputExperiment=null;}
         active=false; renderingActive=false; RestoreBackground();
         if(overlayCamera!=null) {overlayCamera.enabled=false;overlayCamera.targetTexture=null;}
         try { BeginDrain(); } catch (Exception error) { Logger.LogError("Final drain pending: "+error.Message); }

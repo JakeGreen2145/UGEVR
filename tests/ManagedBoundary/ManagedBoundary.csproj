@@ -11,6 +11,8 @@
     <Compile Include="../../src/TrackingReacquisition.cs" Link="TrackingReacquisition.cs" />
     <Compile Include="../../src/InjectorSession.cs" Link="InjectorSession.cs" />
     <Compile Include="../../src/KeyboardEProbe.cs" Link="KeyboardEProbe.cs" />
+    <Compile Include="../../src/EngineEInputExperiment.cs" Link="EngineEInputExperiment.cs" />
+    <Compile Include="../../src/PublicEngineEKeyboard.cs" Link="PublicEngineEKeyboard.cs" />
     <Compile Include="../../src/CameraState.cs" Link="CameraState.cs" />
     <Compile Include="../../src/OverlayCanvasScope.cs" Link="OverlayCanvasScope.cs" />
     <Compile Include="../../src/UiLayoutDiagnostics.cs" Link="UiLayoutDiagnostics.cs" />
