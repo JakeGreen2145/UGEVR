@@ -18,7 +18,7 @@ namespace UnityEngine.InputSystem.Layouts
 }
 namespace UnityEngine.InputSystem.LowLevel
 {
-    public enum GamepadButton {South=6}
+    public enum GamepadButton {South=6,West=11}
     public struct GamepadState {public uint buttons;public Vector2 leftStick;}
 }
 namespace UnityEngine.InputSystem
@@ -33,6 +33,7 @@ namespace UnityEngine.InputSystem
     {
         public static Gamepad current {get;set;}
         public Controls.ButtonControl buttonSouth {get;private set;}=new Controls.ButtonControl();
+        public Controls.ButtonControl buttonWest {get;private set;}=new Controls.ButtonControl();
         public Controls.StickControl leftStick {get;private set;}=new Controls.StickControl();
         public void MakeCurrent() {current=this;}
     }
@@ -86,7 +87,7 @@ namespace UnityEngine.InputSystem
         {
             foreach(var entry in Pending) if(entry.Item1.added && entry.Item1.enabled)
             {
-                var d=(Gamepad)entry.Item1;d.buttonSouth.isPressed=(entry.Item2.buttons&(1u<<6))!=0;d.leftStick.Value=entry.Item2.leftStick;d.MakeCurrent();
+                var d=(Gamepad)entry.Item1;d.buttonSouth.isPressed=(entry.Item2.buttons&(1u<<6))!=0;d.buttonWest.isPressed=(entry.Item2.buttons&(1u<<11))!=0;d.leftStick.Value=entry.Item2.leftStick;d.MakeCurrent();
             }
             Pending.Clear();
         }

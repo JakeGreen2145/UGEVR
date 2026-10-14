@@ -10,12 +10,12 @@ namespace Ugevr
     {
         readonly string unavailable;
         readonly Type padType,stateType,descriptionType,vectorType;
-        readonly PropertyInfo current,added,enabled,layout,description,serial,devices,south,stick,pressed;
+        readonly PropertyInfo current,added,enabled,layout,description,serial,devices,selectedButton,stick,pressed;
         readonly MethodInfo register,load,removeLayout,add,remove,makeCurrent,queue,readVector,toJson;
         readonly FieldInfo buttons,leftStick,vx,vy;
         readonly EventInfo deviceChanges,layoutChanges;
         readonly string identity,layoutName;
-        readonly uint southMask;
+        readonly uint buttonMask;
         Delegate deviceHandler,layoutHandler;
         object owned,prior;
         string definition;
@@ -30,7 +30,7 @@ namespace Ugevr
         public bool NeedsCleanup {get {return HasOwnedDevice || subscribed;}}
         public string CleanupStatus {get;private set;}
         PublicOwnedGamepad(string reason) {unavailable=reason;CleanupStatus="not_created";}
-        internal PublicOwnedGamepad(Assembly assembly,bool pinnedTokens,string prefix)
+        internal PublicOwnedGamepad(Assembly assembly,bool pinnedTokens,string prefix,OwnedGamepadButton target)
         {
             unavailable="";CleanupStatus="not_created";
             identity="ugevr-synthetic-"+Guid.NewGuid().ToString("N");
@@ -46,7 +46,10 @@ namespace Ugevr
             layout=Property(device,"layout",false,typeof(string));description=Property(device,"description",false,descriptionType);serial=Property(descriptionType,"serial",false,typeof(string));
             devices=hub.GetProperty("devices",BindingFlags.Public|BindingFlags.Static);
             if(devices==null || !typeof(IEnumerable).IsAssignableFrom(devices.PropertyType)) throw new InvalidOperationException("Public device enumeration unavailable.");
-            south=Property(padType,"buttonSouth",false,button);stick=Property(padType,"leftStick",false,stickType);pressed=Property(button,"isPressed",false,typeof(bool));
+            if(target!=OwnedGamepadButton.South && target!=OwnedGamepadButton.West) throw new ArgumentException("Unsupported owned gamepad button.");
+            selectedButton=Property(padType,target==OwnedGamepadButton.South?"buttonSouth":"buttonWest",false,button);
+            if(pinnedTokens && selectedButton.GetGetMethod(false).MetadataToken!=(target==OwnedGamepadButton.South?0x06000446:0x06000442)) throw new InvalidOperationException("Public button read changed.");
+            stick=Property(padType,"leftStick",false,stickType);pressed=Property(button,"isPressed",false,typeof(bool));
             buttons=Field(stateType,"buttons",typeof(uint),pinnedTokens?0x040004c8:0);
             leftStick=stateType.GetField("leftStick",BindingFlags.Public|BindingFlags.Instance);
             if(leftStick==null || (pinnedTokens && leftStick.MetadataToken!=0x040004c9)) throw new InvalidOperationException("Public GamepadState shape changed.");
@@ -56,7 +59,12 @@ namespace Ugevr
             if(readVector==null || !readVector.IsPublic || readVector.ReturnType!=vectorType || (pinnedTokens && readVector.MetadataToken!=0x060003c4)) throw new InvalidOperationException("Public stick read unavailable.");
             Type enumType=assembly.GetType("UnityEngine.InputSystem.LowLevel.GamepadButton",true);
             if(!enumType.IsEnum) throw new InvalidOperationException("Public button enum unavailable.");
-            int bit=Convert.ToInt32(Enum.Parse(enumType,"South",false));if(bit<0 || bit>=32) throw new InvalidOperationException("Invalid South bit.");southMask=1u<<bit;
+            int bit=Convert.ToInt32(Enum.Parse(enumType,target.ToString(),false));
+            if(bit<0 || bit>=32) throw new InvalidOperationException("Invalid selected button bit.");
+            if(pinnedTokens && bit!=(target==OwnedGamepadButton.South?6:7)) throw new InvalidOperationException("Public button enum value changed.");
+            buttonMask=1u<<bit;
+            var enumField=enumType.GetField(target.ToString(),BindingFlags.Public|BindingFlags.Static);
+            if(enumField==null || !enumField.IsLiteral || (pinnedTokens && enumField.MetadataToken!=(target==OwnedGamepadButton.South?0x040004d4:0x040004d5))) throw new InvalidOperationException("Public button enum changed.");
             Type matcher=assembly.GetType("UnityEngine.InputSystem.Layouts.InputDeviceMatcher",true);
             register=Method(hub,"RegisterLayout",new[]{typeof(string),typeof(string),typeof(Nullable<>).MakeGenericType(matcher)},typeof(void),true,pinnedTokens?0x0600031b:0);
             load=Method(hub,"LoadLayout",new[]{typeof(string)},assembly.GetType("UnityEngine.InputSystem.Layouts.InputControlLayout",true),true,pinnedTokens?0x06000325:0);
@@ -75,14 +83,14 @@ namespace Ugevr
             if(deviceChanges==null || layoutChanges==null) throw new InvalidOperationException("Public ownership observers unavailable.");
         }
         public static IOwnedGamepad Unavailable(string reason) {return new PublicOwnedGamepad(reason);}
-        public static IOwnedGamepad Create(string prefix)
+        public static IOwnedGamepad Create(string prefix,OwnedGamepadButton target)
         {
             try
             {
                 foreach(Assembly a in AppDomain.CurrentDomain.GetAssemblies()) if(a.GetName().Name=="Unity.InputSystem")
                 {
                     if(!PublicKeyboardEReader.MatchesIdentity(a.GetName(),a.ManifestModule.ModuleVersionId)) return new PublicOwnedGamepad("assembly_identity_mismatch");
-                    return new PublicOwnedGamepad(a,true,prefix);
+                    return new PublicOwnedGamepad(a,true,prefix,target);
                 }
                 return new PublicOwnedGamepad("assembly_not_loaded");
             }
@@ -180,8 +188,8 @@ namespace Ugevr
             s.Added=Added(owned);if(!s.Added) return s;
             s.Enabled=(bool)enabled.GetValue(owned,null);s.Current=Object.ReferenceEquals(Current(),owned);
             if(!s.Current) currentConflict=true;
-            object button=south.GetValue(owned,null),axis=stick.GetValue(owned,null),v=readVector.Invoke(axis,null);
-            s.South=(bool)pressed.GetValue(button,null);s.X=(float)vx.GetValue(v);s.Y=(float)vy.GetValue(v);return s;
+            object button=selectedButton.GetValue(owned,null),axis=stick.GetValue(owned,null),v=readVector.Invoke(axis,null);
+            s.ButtonDown=(bool)pressed.GetValue(button,null);s.X=(float)vx.GetValue(v);s.Y=(float)vy.GetValue(v);return s;
         }
         public void Queue(bool down,double x,double y)
         {
@@ -190,7 +198,7 @@ namespace Ugevr
             bool neutral=!down && x==0 && y==0;
             if(!Object.ReferenceEquals(Current(),owned)) currentConflict=true;
             if(!neutral && (!(bool)enabled.GetValue(owned,null) || !Object.ReferenceEquals(Current(),owned))) {currentConflict=true;throw new InvalidOperationException("Current gamepad ownership changed.");}
-            object state=Activator.CreateInstance(stateType),v=Activator.CreateInstance(vectorType);buttons.SetValue(state,down?southMask:0u);vx.SetValue(v,(float)x);vy.SetValue(v,(float)y);leftStick.SetValue(state,v);
+            object state=Activator.CreateInstance(stateType),v=Activator.CreateInstance(vectorType);buttons.SetValue(state,down?buttonMask:0u);vx.SetValue(v,(float)x);vy.SetValue(v,(float)y);leftStick.SetValue(state,v);
             queue.Invoke(null,new[]{owned,state,(object)(-1.0)});
         }
         public void Remove()

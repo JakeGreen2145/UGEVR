@@ -40,9 +40,9 @@ static class LegacyControllerChecks
     public static void Run(Action<bool,string> check)
     {
         var r=new Runtime();var s=Read(r);
-        check(s.Available && s.South && s.Packet==17 && s.Index==3 && s.Identity=="fixture" && Math.Abs(s.X-0.3)<1e-6 && Math.Abs(s.Y+0.4)<1e-6 && r.StateCalls==1 && r.RoleCalls==2,"Real vendored CVRSystem ABI reader jointly polls fresh state/pose and rechecks the right role without SDK initialization");
+        check(s.Available && s.A && s.Packet==17 && s.Index==3 && s.Identity=="fixture" && Math.Abs(s.X-0.3)<1e-6 && Math.Abs(s.Y+0.4)<1e-6 && r.StateCalls==1 && r.RoleCalls==2,"Real vendored CVRSystem ABI reader jointly polls fresh state/pose and rechecks the right role without SDK initialization");
         r=new Runtime {Pressed=1UL<<2,Touched=1UL<<7};s=Read(r);
-        check(s.Available && !s.South,"Explicit legacy A profile uses SDK bit7 pressed state, not touch or the Index-controller bit2 alias");
+        check(s.Available && !s.A,"Explicit legacy A profile uses SDK bit7 pressed state, not touch or the Index-controller bit2 alias");
         foreach(int kind in new[]{0,1,3,99}) {r=new Runtime {AxisKind=kind};s=Read(r);check(!s.Available && r.StateCalls==0,"Nonjoystick axis metadata does not become a guessed thumbstick: "+kind);}
         r=new Runtime {PropertyError=true};s=Read(r);check(!s.Available && s.UnavailableReason=="axis0_metadata_unavailable" && r.StateCalls==0,"Property errors refuse input before state polling");
         r=new Runtime {StringLength=258};s=Read(r);check(!s.Available && r.StateCalls==0,"Oversized serial identity is not truncated into a valid controller identity");

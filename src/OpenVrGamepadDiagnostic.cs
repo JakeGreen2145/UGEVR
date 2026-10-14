@@ -4,18 +4,17 @@ namespace Ugevr
 {
     public struct LegacyRightSample
     {
-        public bool Available,South;
+        public bool Available,A;
         public uint Index,Packet;
         public string Identity;
         public string UnavailableReason;
         public double X,Y;
-        public bool Neutral {get {return !South && Math.Abs(X)<=0.2 && Math.Abs(Y)<=0.2;}}
     }
     public struct OwnedPadState
     {
-        public bool Added,Enabled,Current,South;
+        public bool Added,Enabled,Current,ButtonDown;
         public double X,Y;
-        public bool Neutral {get {return !South && Math.Abs(X)<0.001 && Math.Abs(Y)<0.001;}}
+        public bool Neutral {get {return !ButtonDown && Math.Abs(X)<0.001 && Math.Abs(Y)<0.001;}}
     }
     public interface IOwnedGamepad
     {
@@ -24,7 +23,7 @@ namespace Ugevr
         bool NeedsCleanup {get;}
         void Add(bool preferOwned);
         OwnedPadState Read();
-        void Queue(bool south,double x,double y);
+        void Queue(bool down,double x,double y);
         // Removes only the captured reference. Current restoration is conditional.
         void Remove();
         string CleanupStatus {get;}
@@ -39,7 +38,7 @@ namespace Ugevr
         LegacyRightSample source;
         ulong generation;
         double start,lastTick,releaseDeadline;
-        bool started,ending,finished,lastSouth;
+        bool started,ending,finished,lastButton;
         double lastX,lastY;
         public string Status {get;private set;}
         public string Reason {get;private set;}
@@ -76,7 +75,7 @@ namespace Ugevr
             {
                 if(!Valid(input)) {Reason=input.UnavailableReason ?? "right_controller_unavailable";return;}
                 // Activation must be zero under the same radial mapping used below.
-                if(input.South || Math.Sqrt(input.X*input.X+input.Y*input.Y)>deadzone) {Reason="right_controller_not_neutral";return;}
+                if(input.A || Math.Sqrt(input.X*input.X+input.Y*input.Y)>deadzone) {Reason="right_controller_not_neutral";return;}
                 started=true;start=now;source=input;generation=runtimeGeneration;
                 try
                 {
@@ -102,14 +101,14 @@ namespace Ugevr
                 var current=pad.Read();
                 if(!current.Added || !current.Enabled) {End("owned_device_removed_or_disabled",now,true);return;}
                 if(!current.Current) {End("current_device_conflict",now,true);return;}
-                if(Queues>0 && current.South==lastSouth && Math.Abs(current.X-lastX)<0.001 && Math.Abs(current.Y-lastY)<0.001) ++AppliedSamples;
+                if(Queues>0 && current.ButtonDown==lastButton && Math.Abs(current.X-lastX)<0.001 && Math.Abs(current.Y-lastY)<0.001) ++AppliedSamples;
                 double x=input.X,y=input.Y,mag=Math.Sqrt(x*x+y*y);
                 if(mag<=deadzone) x=y=0;
                 else {double scale=Math.Min(1,(mag-deadzone)/(1-deadzone))/mag;x*=scale;y*=scale;}
-                if(input.South==lastSouth && x==lastX && y==lastY) return;
+                if(input.A==lastButton && x==lastX && y==lastY) return;
                 // Record the desired state before the call: a throwing queue may have enqueued it.
-                lastSouth=input.South;lastX=x;lastY=y;
-                pad.Queue(input.South,x,y);++Queues;
+                lastButton=input.A;lastX=x;lastY=y;
+                pad.Queue(input.A,x,y);++Queues;
             }
             catch {End("public_input_queue_or_read_failed",now,true);}
         }

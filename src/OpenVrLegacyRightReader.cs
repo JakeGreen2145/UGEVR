@@ -33,7 +33,7 @@ namespace Ugevr
             // Recheck the role after the joint pose/state sample to reject an observed hand reassignment.
             if(system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand)!=index || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) return sample;
             sample.Available=true;sample.UnavailableReason="";sample.Index=index;sample.Identity=serial.ToString();sample.Packet=state.unPacketNum;
-            sample.South=(state.ulButtonPressed & (1UL<<(int)EVRButtonId.k_EButton_A))!=0;
+            sample.A=(state.ulButtonPressed & (1UL<<(int)EVRButtonId.k_EButton_A))!=0;
             sample.X=state.rAxis0.x;sample.Y=state.rAxis0.y;return sample;
         }
     }

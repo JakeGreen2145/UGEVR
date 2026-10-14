@@ -88,7 +88,7 @@ public class Injector : BaseUnityPlugin
             compareHierarchyInventory=Config.Bind("Diagnostics","CompareHierarchyInventory",false,"Diagnostic only: permit at most two explicitly requested sequential Resources-versus-scene hierarchy comparisons before an eye pair. Requires CaptureImages and controller session identity; does not replace layer guards.").Value && capturesEnabled;
             allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
             bool allowGamepad=Config.Bind("Input","AllowOpenVrGamepadDiagnostic",false,"Explicit code activation for one bounded owned InputSystem gamepad experiment per launch. Never changes physical keyboard state; game consumption requires observation.").Value;
-            string inputProfile=Config.Bind("Input","DiagnosticProfile","none","Select outer-1.4.1-right-a-south-axis0-leftstick-v1 explicitly. This is a test profile, not general game bindings.").Value;
+            string inputProfile=Config.Bind("Input","DiagnosticProfile","none","Select outer-1.4.1-right-a-west-axis0-leftstick-v1 for original wake/interact or outer-1.4.1-right-a-south-axis0-leftstick-v1 for menu confirm/jump explicitly. This is a test profile, not general game bindings.").Value;
             string inputConflict=Config.Bind("Input","CurrentGamepadConflictPolicy","refuse","refuse leaves an existing current gamepad untouched. prefer-owned explicitly permits the owned diagnostic pad to become current, with conditional restoration.").Value;
             float inputSeconds=Config.Bind("Input","DiagnosticDurationSeconds",15f,"Bounded 5..300 second diagnostic window, starting only with a neutral valid right controller and focused active VR.").Value;
             float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
@@ -96,9 +96,9 @@ public class Injector : BaseUnityPlugin
             {
                 try
                 {
-                    if(!session.Available || allowEngineInputExperiment || inputProfile!=OuterGamepadCompatibilityProfile.Name)
+                    if(!session.Available || allowEngineInputExperiment || !OuterGamepadCompatibilityProfile.Supports(inputProfile))
                         throw new InvalidOperationException("Select a valid session, the explicit diagnostic profile and disable the separate E experiment.");
-                    gamepadDiagnostic=new OpenVrGamepadDiagnostic(OuterGamepadCompatibilityProfile.Create,inputSeconds,inputDeadzone,inputConflict);
+                    gamepadDiagnostic=new OpenVrGamepadDiagnostic(delegate {return OuterGamepadCompatibilityProfile.Create(inputProfile);},inputSeconds,inputDeadzone,inputConflict);
                     Logger.LogWarning("EXPLICIT_INPUT_DIAGNOSTIC profile="+inputProfile+" currentConflict="+inputConflict+" duration="+inputSeconds+"; synthetic owned gamepad, game consumption unknown.");
                 }
                 catch(Exception inputError) {Logger.LogWarning("INPUT_DIAGNOSTIC unavailable: "+inputError.Message);}
