@@ -128,5 +128,52 @@ static class UiPanelClipChecks
         var ordinary=new OverlayCanvasScope(game,1,2,true,1.8,false,null,false,1024,UiPanelClipping.None,roots=>{factoryCalled=true;throw new Exception();});ordinary.Dispose();
         check(!factoryCalled,"default-off construction does not call clipping adapter factory");
         Canvas.Instances.Clear();Canvas.ForceAction=null;
+        ZeroRootChecks(check);
+    }
+    static void ZeroRootChecks(Action<bool,string> check)
+    {
+        Canvas.Instances.Clear();Resources.Extras.Clear();Canvas.ForceAction=null;
+        int materialQueries=Graphic.DefaultQueries,layerQueries=Resources.QueryTypes.Count,factoryCalls=0,renders=0,flushes=0;
+        var camera=new Camera {nearClipPlane=.01f,farClipPlane=100,cullingMask=123};
+        Canvas.ForceAction=()=>++flushes;
+        var scope=new OverlayCanvasScope(camera,1,2,true,1.8,false,null,false,1024,UiPanelClipping.CanonicalUguiDefaultRootV1,
+            roots=>{++factoryCalls;throw new Exception("zero roots must never reach clip admission");});
+        camera.RenderAction=()=>++renders;
+        scope.UseAfterEffectsCamera(new Camera(),20);scope.ApplyEye(0);scope.RenderGameEye(0);scope.ApplyEye(1);scope.RenderGameEye(1);
+        scope.Dispose();scope.RebuildRestoredGeometry();
+        check(renders==2&&camera.cullingMask==123&&scope.SelectedCount==0&&scope.IsolatedMask==0&&scope.RestorationConflicts==0,"zero selected roots preserve ordinary two-eye rendering");
+        check(factoryCalls==0&&Graphic.DefaultQueries==materialQueries&&Resources.QueryTypes.Count==layerQueries&&flushes==0,"zero selected roots perform no clip admission, material, layer or layout operations");
+        using(var json=JsonDocument.Parse(scope.DiagnosticJson()))
+        {
+            var clip=json.RootElement.GetProperty("panelClipping");
+            check(clip.GetProperty("status").GetString()=="not_applicable_no_selected_roots"&&!clip.GetProperty("admitted").GetBoolean()&&clip.GetProperty("selectedRootCount").GetInt32()==0,"selected zero-root snapshot explicitly not applicable");
+            check(!clip.GetProperty("clipSpecificQueriesPerformed").GetBoolean()&&!clip.GetProperty("clipSettersPerformed").GetBoolean()&&!clip.GetProperty("uiCoverageClaimed").GetBoolean(),"not applicable does not claim sampled native UI or coverage");
+            JsonElement unused;check(!clip.TryGetProperty("originalClipFlag",out unused)&&!clip.TryGetProperty("completeNativeStateRestored",out unused),"unsampled renderer flag and restoration remain unclaimed");
+        }
+        var ordinary=new OverlayCanvasScope(camera,1,2,true);
+        using(var json=JsonDocument.Parse(ordinary.DiagnosticJson())){JsonElement unused;check(!json.RootElement.TryGetProperty("panelClipping",out unused),"default off retains diagnostic omission for zero roots");}
+        ordinary.Dispose();
+        bool invalid=false;try {new OverlayCanvasScope(camera,1,2,true,1.8,false,null,false,1024,(UiPanelClipping)999);}catch(ArgumentException){invalid=true;}
+        check(invalid,"zero roots do not suppress invalid clipping-mode refusal");
+        Refuses(()=>new UiPanelClipScope(new Fake {Count=0}),check,"explicit empty clip inventory still refuses");
+        try {new CanonicalUguiPanelClipAccess(new Canvas[65],typeof(Image).Assembly,g=>true);check(false,"excess roots must refuse");}
+        catch(InvalidOperationException error){check(error.Message=="panel_clip_root_limit_exceeded","excess-root refusal is bounded and distinct from empty roots");}
+        try {new CanonicalUguiPanelClipAccess(new Canvas[0],typeof(Image).Assembly,g=>true);check(false,"explicit empty adapter must refuse");}
+        catch(InvalidOperationException error){check(error.Message=="panel_clip_empty_roots","explicit empty adapter remains a distinct refusal");}
+
+        // A zero-root snapshot must not promise coverage of a later-born canvas.
+        var later=NativeRoot();
+        var emptySnapshot=new OverlayCanvasScope(camera,1,2,true,1.8,false,null,false,1024,UiPanelClipping.CanonicalUguiDefaultRootV1,
+            roots=>{++factoryCalls;throw new Exception();});
+        Canvas.Instances.Add(later);emptySnapshot.ApplyEye(0);emptySnapshot.RenderGameEye(0);emptySnapshot.Dispose();
+        check(emptySnapshot.SelectedCount==0&&factoryCalls==0&&later.Renderers[0].NativeQueries==0&&later.Renderers[0].ClipEnables==0,"later UI is outside the retained zero-root snapshot and untouched");
+        var next=new OverlayCanvasScope(camera,1,2,true,1.8,false,null,false,1024,UiPanelClipping.CanonicalUguiDefaultRootV1,
+            roots=>{++factoryCalls;check(roots.Length==1&&roots[0]==later,"fresh nonempty scope admits actual selected root");return new UiPanelClipScope(Adapter(roots[0]));});
+        check(next.SelectedCount==1&&factoryCalls==1,"zero-root exception does not skip later fresh admission");next.Dispose();
+        var bad=NativeRoot();bad.Renderers[0].Materials=new[]{new Material()};Canvas.Instances.Add(bad);
+        Refuses(()=>new OverlayCanvasScope(camera,1,2,true,1.8,false,null,false,1024,UiPanelClipping.CanonicalUguiDefaultRootV1,
+            roots=>{check(roots.Length==2,"all selected roots passed together to admission");return new UiPanelClipScope(new CanonicalUguiPanelClipAccess(roots,typeof(Image).Assembly,g=>true));}),check,"one unsupported nonempty root refuses the entire admission");
+        check(later.Renderers[0].ClipEnables==0&&bad.Renderers[0].ClipEnables==0,"nonempty refusal never crops a partial root subset");
+        Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();
     }
 }

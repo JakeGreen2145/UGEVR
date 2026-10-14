@@ -32,6 +32,7 @@ namespace Ugevr
         OverlayWallTiming wallTiming;
         readonly NativeUiStateDiagnostics nativeUiState;
         readonly UiPanelClipScope panelClip;
+        readonly bool panelClippingRequested;
         int reportedPanelClipConflicts;
         Camera uiCamera;
         readonly double unitsPerMeter;
@@ -188,8 +189,12 @@ namespace Ugevr
             if(panelClipping!=UiPanelClipping.None)
             {
                 if(panelClipping!=UiPanelClipping.CanonicalUguiDefaultRootV1)throw new ArgumentException("Unknown panel clipping mode.");
-                var roots=new Canvas[canvases.Count];for(int i=0;i<roots.Length;++i)roots[i]=canvases[i].Canvas;
-                panelClip=clipFactory==null?new UiPanelClipScope(roots):clipFactory(roots);
+                panelClippingRequested=true;
+                if(canvases.Count>0)
+                {
+                    var roots=new Canvas[canvases.Count];for(int i=0;i<roots.Length;++i)roots[i]=canvases[i].Canvas;
+                    panelClip=clipFactory==null?new UiPanelClipScope(roots):clipFactory(roots);
+                }
             }
         }
 
@@ -596,6 +601,7 @@ namespace Ugevr
             text.Append("],\"wallTiming\":").Append(wallTiming==null?"null":wallTiming.DiagnosticJson());
             text.Append(",\"nativeUiState\":").Append(nativeUiState==null?"null":nativeUiState.DiagnosticJson());
             if(panelClip!=null)text.Append(",\"panelClipping\":").Append(panelClip.DiagnosticJson());
+            else if(panelClippingRequested&&canvases.Count==0)text.Append(",\"panelClipping\":{\"mode\":\"canonical-ugui-default-root-v1\",\"status\":\"not_applicable_no_selected_roots\",\"admitted\":false,\"selectedRootCount\":0,\"clipSpecificQueriesPerformed\":false,\"clipSettersPerformed\":false,\"uiCoverageClaimed\":false}");
             text.Append(",\"currentCameraRestoration\":").Append(currentCameraRestoration==null?"null":currentCameraRestoration.DiagnosticJson());
             text.Append(",\"desktopLayoutFlush\":").Append(desktopLayoutFlush==null?"null":desktopLayoutFlush.DiagnosticJson());
             text.Append(",\"layoutInputDiagnostic\":");

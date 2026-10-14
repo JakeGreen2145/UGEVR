@@ -40,7 +40,8 @@ namespace Ugevr
         internal CanonicalUguiPanelClipAccess(Canvas[] roots,Assembly assembly,Func<Guid,bool> inspectedBuild)
         {
             if(!inspectedBuild(assembly.ManifestModule.ModuleVersionId))throw new InvalidOperationException("panel_clip_uninspected_ugui_build");
-            if(roots==null||roots.Length==0||roots.Length>64)throw new InvalidOperationException("panel_clip_empty_or_excess_roots");
+            if(roots==null||roots.Length==0)throw new InvalidOperationException("panel_clip_empty_roots");
+            if(roots.Length>64)throw new InvalidOperationException("panel_clip_root_limit_exceeded");
             image=PublicType(assembly,"Image");text=PublicType(assembly,"Text");graphicType=PublicType(assembly,"Graphic");
             mask=PublicType(assembly,"Mask");rectMask=PublicType(assembly,"RectMask2D");clippable=PublicType(assembly,"IClippable");materialModifier=PublicType(assembly,"IMaterialModifier");meshModifier=PublicType(assembly,"IMeshModifier");
             if(!graphicType.IsAssignableFrom(image)||!graphicType.IsAssignableFrom(text)||!typeof(Component).IsAssignableFrom(graphicType)||!clippable.IsInterface||!materialModifier.IsInterface||!meshModifier.IsInterface)throw new InvalidOperationException("panel_clip_public_type_shape_unknown");
