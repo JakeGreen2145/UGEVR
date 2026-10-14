@@ -177,7 +177,11 @@ namespace UnityEngine
     {
         static Camera savedCurrent;
         public static int CurrentQueries;
-        public static Camera current {get {++CurrentQueries;return savedCurrent;} set {savedCurrent=value;}}
+        public static System.Action CurrentGetterAction;
+        public static System.Action<Camera> SetupCurrentAction;
+        public static int SetupCurrentCalls;
+        public static Camera current {get {++CurrentQueries;if(CurrentGetterAction!=null) CurrentGetterAction();return savedCurrent;} set {savedCurrent=value;}}
+        public static void SetupCurrent(Camera value) {++SetupCurrentCalls;if(SetupCurrentAction!=null) SetupCurrentAction(value);else savedCurrent=value;}
         public Transform transform=new Transform();
         public RenderTexture targetTexture;
         Matrix4x4 projection,view;

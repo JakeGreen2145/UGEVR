@@ -19,6 +19,7 @@
     <Compile Include="../../src/OpenVrLegacyRightReader.cs" Link="OpenVrLegacyRightReader.cs" />
     <Compile Include="../../vendor/openvr_api.cs" Link="OpenVR.cs" />
     <Compile Include="../../src/CameraState.cs" Link="CameraState.cs" />
+    <Compile Include="../../src/CameraCurrentScope.cs" Link="CameraCurrentScope.cs" />
     <Compile Include="../../src/OverlayCanvasScope.cs" Link="OverlayCanvasScope.cs" />
     <Compile Include="../../src/UiLayoutDiagnostics.cs" Link="UiLayoutDiagnostics.cs" />
     <Compile Include="../../src/DesktopLayoutFlush.cs" Link="DesktopLayoutFlush.cs" />

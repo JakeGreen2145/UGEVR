@@ -23,6 +23,7 @@ class Program
         OverlayIsolationChecks.Run(Assert);
         HierarchyInventoryChecks.Run(Assert);
         NativeUiDiagnosticsChecks.Run(Assert);
+        CameraCurrentChecks.Run(Assert);
         EngineInputExperimentChecks.Run(Assert);
         OwnedGamepadChecks.Run(Assert);
         LegacyControllerChecks.Run(Assert);

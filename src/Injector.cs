@@ -61,6 +61,7 @@ public class Injector : BaseUnityPlugin
     int nativeUiRendererLimit=NativeUiStateDiagnostics.DefaultRendererLimit;
     bool compareHierarchyInventory;
     bool flushDesktopLayoutBeforeBorrow;
+    bool restoreBorrowedCameraCurrent;
     string layoutInputRootRectIds;
     Camera overlayCamera;
     double overlayPlaneMeters;
@@ -110,6 +111,7 @@ public class Injector : BaseUnityPlugin
             disableOcclusionCulling=Config.Bind("Rendering","DisableOcclusionCulling",false,"Explicit fidelity remedy: disable the selected camera's occlusion culling only during eye rendering.").Value;
             captureOverlayCanvases=Config.Bind("UI","CaptureOverlayCanvases",false,"Experimental: borrow active screen overlay canvases during eye rendering and restore desktop state.").Value;
             flushDesktopLayoutBeforeBorrow=Config.Bind("UI","FlushDesktopLayoutBeforeBorrow",false,"Explicit experimental fallback: flush pending desktop canvas layout once before current camera selection and all state snapshots. Runs game canvas callbacks; requires CaptureOverlayCanvases.").Value;
+            restoreBorrowedCameraCurrent=Config.Bind("Rendering","RestoreBorrowedCameraCurrent",false,"Explicit experiment: restore a live selected Camera.current after manual eye renders only from null or an owned rendered-camera context. Foreign current is preserved and reported; desktop fidelity remains unvalidated.").Value;
             includeOverlayLayers=Config.Bind("UI","IncludeOverlayLayers",false,"Explicitly include selected overlay canvas renderer layers in the borrowed camera mask; may also reveal other geometry on those layers.").Value;
             overlayPlaneMeters=Config.Bind("UI","OverlayPlaneDistanceMeters",2f,"Experimental overlay camera plane distance in physical meters; bounded by game camera clipping.").Value;
             overlayWidthMeters=Config.Bind("UI","OverlayPanelWidthMeters",1.8f,"Experimental common physical panel width; desktop aspect/layout retained independently of game FOV.").Value;
@@ -123,6 +125,7 @@ public class Injector : BaseUnityPlugin
             if (disableOcclusionCulling) Logger.LogWarning("EXPLICIT_FIDELITY_REMEDY DisableOcclusionCulling=true; game culling is restored after the eye pair.");
             if (captureOverlayCanvases) Logger.LogWarning("EXPERIMENTAL_UI_ADAPTER CaptureOverlayCanvases=true; only active root overlay canvases are borrowed; IncludeOverlayLayers="+includeOverlayLayers+". Layout, canvas callbacks and headset readability require validation.");
             if(captureOverlayCanvases && flushDesktopLayoutBeforeBorrow) Logger.LogInfo("EXPLICIT_UI_FALLBACK FlushDesktopLayoutBeforeBorrow=true; pending desktop layout is flushed before fresh camera selection and state snapshots.");
+            if(restoreBorrowedCameraCurrent) Logger.LogWarning("EXPLICIT_CAMERA_CONTEXT_EXPERIMENT RestoreBorrowedCameraCurrent=true; conditional current-camera restoration, desktop fidelity unknown.");
             string directory=Environment.GetEnvironmentVariable("UGEVR_SESSION_DIRECTORY");
             evidenceDir=Path.Combine(String.IsNullOrEmpty(directory)?Paths.GameRootPath:directory,"UnityVR-evidence");
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
@@ -387,8 +390,11 @@ public class Injector : BaseUnityPlugin
             try {overlays.UseAfterEffectsCamera(overlayCamera,overlayIsolationLayer,overlaySceneScanLimit);}
             catch(OverlayLayerSelectionException selectionError) {WriteLayerFailureDiagnostic(selectionError);overlays.Dispose();throw;}
         }
+        var currentContext=new CameraCurrentScope(camera,restoreBorrowedCameraCurrent);
         try
         {
+        if(overlays!=null && overlays.IsolatedMask!=0) currentContext.AllowUiCamera(overlayCamera);
+        if(currentContext.Conflict) throw new InvalidOperationException("Camera current experiment failed before borrow: "+currentContext.Outcome);
         using (var restore=new CameraState(camera))
         using (overlays)
         {
@@ -410,11 +416,13 @@ public class Injector : BaseUnityPlugin
                 bool isolatedUi=overlays!=null && overlays.IsolatedMask!=0;
                 if(isolatedUi) overlays.ValidateLayerExclusive(i==0?"before game left":"before game right");
                 if(isolatedUi) OverlayCameraPass.Prepare(camera,overlayCamera,overlays.IsolatedMask);
+                currentContext.MarkRender(camera);
                 if(overlays!=null) overlays.RenderGameEye(i);else camera.Render();
                 if(overlays!=null) overlays.ValidateInactiveCanvases("after game render");
                 if(isolatedUi)
                 {
                     overlays.ValidateLayerExclusive(i==0?"after game left":"after game right");
+                    currentContext.MarkRender(overlayCamera);
                     overlays.RenderUiEye(i);
                     overlays.ValidateLayerExclusive(i==0?"after UI left":"after UI right");
                 }
@@ -425,9 +433,20 @@ public class Injector : BaseUnityPlugin
         }
         finally
         {
-            if(overlayCamera!=null) overlayCamera.targetTexture=null;
-            if(overlays!=null) overlays.RebuildRestoredGeometry();
+            try
+            {
+                if(overlays!=null) overlays.Dispose();
+                if(overlayCamera!=null) overlayCamera.targetTexture=null;
+                if(overlays!=null) overlays.RebuildRestoredGeometry();
+            }
+            finally
+            {
+                currentContext.Dispose();
+                if(overlays!=null) overlays.SetCurrentCameraRestoration(currentContext);
+                if(currentContext.Conflict) Logger.LogError("CAMERA_CURRENT_OWNERSHIP_CONFLICT "+currentContext.Outcome+"; foreign state preserved or restoration unverified.");
+            }
             if(overlays!=null) overlays.CaptureNativeUiAfterRestoration();
+            if(currentContext.Conflict && overlays!=null) WriteUiFailureDiagnostic(overlays);
             if(overlays!=null)
                 try {overlays.ValidateInactiveCanvases("after desktop restoration");}
                 catch(InvalidOperationException inactiveError) {Logger.LogError(inactiveError.Message);}
@@ -438,6 +457,7 @@ public class Injector : BaseUnityPlugin
                 WriteUiFailureDiagnostic(overlays);
             }
         }
+        if(currentContext.Conflict) throw new InvalidOperationException("Camera current ownership experiment failed: "+currentContext.Outcome);
         if (overlays!=null && overlays.RestorationConflicts>0) throw new InvalidOperationException("UI state could not be fully restored: "+overlays.RestorationError);
         if (overlays!=null && overlays.UnexpectedGeometryChanges>0) Report("UI_RENDER_STATE_CHANGED count="+overlays.UnexpectedGeometryChanges+"; inspect appliedEyes/afterRenderEyes before claiming UI stereo correctness.");
         SetEyeTextures(eyes[0].GetNativeTexturePtr(),eyes[1].GetNativeTexturePtr());

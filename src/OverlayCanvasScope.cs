@@ -19,6 +19,7 @@ namespace Ugevr
         readonly List<string> rectMismatches=new List<string>();
         readonly UiLayoutDiagnostics layoutInputs;
         DesktopLayoutFlush desktopLayoutFlush;
+        CameraCurrentScope currentCameraRestoration;
         readonly List<int> layoutContextIds=new List<int>();
         string layoutDiagnosticError;
         readonly string[] appliedEyes=new string[2];
@@ -184,6 +185,7 @@ namespace Ugevr
         }
         public void ValidateLayerExclusive(string stage="validation") {if(layerLease!=null) layerLease.ValidateExclusive(stage);}
         public void CaptureNativeUiAfterRestoration() {if(nativeUiState!=null) nativeUiState.Capture(5);}
+        public void SetCurrentCameraRestoration(CameraCurrentScope scope) {currentCameraRestoration=scope;}
         public void ValidateInactiveCanvases(string stage)
         {
             foreach(CanvasState state in inactiveCanvases)
@@ -563,6 +565,7 @@ namespace Ugevr
             }
             text.Append("],\"wallTiming\":").Append(wallTiming==null?"null":wallTiming.DiagnosticJson());
             text.Append(",\"nativeUiState\":").Append(nativeUiState==null?"null":nativeUiState.DiagnosticJson());
+            text.Append(",\"currentCameraRestoration\":").Append(currentCameraRestoration==null?"null":currentCameraRestoration.DiagnosticJson());
             text.Append(",\"desktopLayoutFlush\":").Append(desktopLayoutFlush==null?"null":desktopLayoutFlush.DiagnosticJson());
             text.Append(",\"layoutInputDiagnostic\":");
             if(layoutInputs==null) text.Append("null");
