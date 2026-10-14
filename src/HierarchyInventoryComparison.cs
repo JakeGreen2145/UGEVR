@@ -24,6 +24,8 @@ namespace Ugevr
         public string ResourceError="",HierarchyError="",SceneStateError="",ScenesBefore="",ScenesAfter="";
         public bool Exact {get {return ResourceComplete && HierarchyComplete;}}
         public bool Equal {get {return Exact && MissingCount==0 && ExtraCount==0;}}
+        public bool ContainsResourceId(int id) {return resourceIds.Contains(id);}
+        public bool ContainsHierarchyId(int id) {return hierarchyIds.Contains(id);}
         public static HierarchyInventoryComparison Collect(GameObject persistentAnchor,int limit=MaximumInspections)
         {
             if(limit<1 || limit>MaximumInspections) throw new ArgumentOutOfRangeException("limit");

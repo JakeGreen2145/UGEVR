@@ -551,6 +551,12 @@ public class Injector : BaseUnityPlugin
     void StopOwnedWork()
     {
         if (inputProbe!=null) { inputProbe.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp()); inputProbe=null; }
+        if(hierarchyProbe!=null)
+        {
+            hierarchyProbe.Dispose();
+            if(hierarchyProbe.LastDiagnosticError!=null) Logger.LogWarning("Hierarchy diagnostic cleanup: "+hierarchyProbe.LastDiagnosticError);
+            hierarchyProbe=null;
+        }
         if(engineInputExperiment!=null) {engineInputExperiment.Cancel(DateTime.UtcNow,Stopwatch.GetTimestamp(),"game_lifecycle_end");engineInputExperiment=null;}
         active=false; renderingActive=false; RestoreBackground();
         if(overlayCamera!=null) {overlayCamera.enabled=false;overlayCamera.targetTexture=null;}

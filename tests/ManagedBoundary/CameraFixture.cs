@@ -14,6 +14,8 @@ namespace UnityEngine
         public HideFlags hideFlags;
         public int GetInstanceID() { ++InstanceIdQueries;return InstanceIdOverride ?? id; }
         public static Object[] FindObjectsOfType(System.Type type) { return type==typeof(Canvas)?Canvas.Instances.ToArray():new Object[0]; }
+        public static void DontDestroyOnLoad(Object value) {}
+        public static void Destroy(Object value) {value.Destroyed=true;}
         public static bool operator ==(Object a,Object b) { return (System.Object.ReferenceEquals(a,null) || a.Destroyed)?(System.Object.ReferenceEquals(b,null) || b.Destroyed):System.Object.ReferenceEquals(a,b); }
         public static bool operator !=(Object a,Object b) { return !(a==b); }
         public override bool Equals(object other) { return System.Object.ReferenceEquals(this,other); }
@@ -22,6 +24,12 @@ namespace UnityEngine
     public enum HideFlags {None=0,HideInHierarchy=1,DontSave=52,HideAndDontSave=61}
     public class GameObject : Object
     {
+        public GameObject() {}
+        public GameObject(string name) {this.name=name;}
+        Transform cachedTransform;
+        public Transform transform {get {if(cachedTransform==null) cachedTransform=new Transform {gameObject=this};return cachedTransform;}}
+        public Component[] AdditionalComponents=new Component[0];
+        public T[] GetComponents<T>() {var found=new System.Collections.Generic.List<T>();if(transform is T) found.Add((T)(object)transform);foreach(Component component in AdditionalComponents) if(component is T) found.Add((T)(object)component);return found.ToArray();}
         int savedLayer;
         public System.Action<int> LayerSetter;
         public bool activeSelf=true;
@@ -96,6 +104,7 @@ namespace UnityEngine
     public enum CameraClearFlags { Skybox=1, Color=2, Depth=3, Nothing=4 }
     public class Transform : Component
     {
+        public int childCount;
         public Vector3 localScale;
         public virtual Vector3 position {get {return localPosition;} set {localPosition=value;} }
         public virtual Vector3 localPosition {get;set;}
