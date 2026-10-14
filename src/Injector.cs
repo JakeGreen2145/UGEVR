@@ -319,11 +319,13 @@ public class Injector : BaseUnityPlugin
                 bool isolatedUi=overlays!=null && overlays.IsolatedMask!=0;
                 if(isolatedUi) OverlayCameraPass.Prepare(camera,overlayCamera,overlays.IsolatedMask);
                 camera.Render();
+                if(overlays!=null) overlays.ValidateInactiveCanvases("after game render");
                 if(isolatedUi)
                 {
                     overlays.ValidateLayerExclusive();
                     OverlayCameraPass.Render(overlayCamera);
                 }
+                if(overlays!=null) overlays.ValidateInactiveCanvases("after UI render");
                 if (overlays!=null) overlays.RecordAfterRender(i);
             }
         }
@@ -332,6 +334,9 @@ public class Injector : BaseUnityPlugin
         {
             if(overlayCamera!=null) overlayCamera.targetTexture=null;
             if(overlays!=null) overlays.RebuildRestoredGeometry();
+            if(overlays!=null)
+                try {overlays.ValidateInactiveCanvases("after desktop restoration");}
+                catch(InvalidOperationException inactiveError) {Logger.LogError(inactiveError.Message);}
             if (overlays!=null && overlays.RestorationConflicts>0)
             {
                 Logger.LogError("UI_RESTORATION_CONFLICT "+overlays.RestorationError);

@@ -13,6 +13,7 @@ namespace Ugevr
     {
         const int RootLimit=64,RectLimit=8192;
         readonly List<CanvasState> canvases=new List<CanvasState>();
+        readonly List<CanvasState> inactiveCanvases=new List<CanvasState>();
         readonly List<RectState> rects=new List<RectState>();
         readonly List<string> errors=new List<string>();
         readonly List<string> rectMismatches=new List<string>();
@@ -40,6 +41,7 @@ namespace Ugevr
         public int RotationRoundoff { get; private set; }
         public int UnexpectedGeometryChanges { get; private set; }
         public int SelectedCameraRectRestorations { get; private set; }
+        public int InactiveCanvasValidationPasses {get;private set;}
         public int SelectedCount { get { return canvases.Count; } }
         public int IsolatedMask {get {return layerLease==null?0:layerLease.Mask;}}
         public string RestorationError { get { return String.Join("; ",errors.ToArray()); } }
@@ -82,6 +84,7 @@ namespace Ugevr
             PlaneDistance=(float)Math.Max(near+margin,Math.Min(far-margin,planeDistanceMeters*unitsPerMeter));
             OverlayPanelGeometry.PixelScale(panelWidthMeters,1,1);
             var seen=new HashSet<int>();
+            var inactiveSeen=new HashSet<int>();
             foreach (Canvas canvas in UnityEngine.Object.FindObjectsOfType(typeof(Canvas)))
             {
                 if (canvas==null || !canvas.isActiveAndEnabled || !canvas.isRootCanvas || canvas.renderMode!=RenderMode.ScreenSpaceOverlay || canvas.targetDisplay!=camera.targetDisplay) continue;
@@ -110,9 +113,24 @@ namespace Ugevr
                 {
                     if(nested==null) continue;
                     if(nested!=canvas && nested.isRootCanvas)
-                        throw new InvalidOperationException("Overlay "+BoundedName(canvas.name)+" contains independent canvas "+BoundedName(nested.name)+
-                            " id="+nested.GetInstanceID()+" mode="+nested.renderMode+" active="+nested.isActiveAndEnabled+" display="+nested.targetDisplay+
-                            "; an explicit UI adapter is required before borrowing its hierarchy.");
+                    {
+                        if(!nested.isActiveAndEnabled)
+                        {
+                            if(inactiveSeen.Add(nested.GetInstanceID()))
+                            {
+                                if(inactiveCanvases.Count==RootLimit) throw new InvalidOperationException("Overlay UI exceeds 64 protected inactive canvas boundaries; use an explicit UI adapter.");
+                                if(HasActiveWorldRenderer(nested))
+                                    throw new InvalidOperationException("Inactive canvas "+BoundedName(nested.name)+" contains an active world renderer; its hierarchy needs an explicit UI adapter.");
+                                inactiveCanvases.Add(SnapshotInactiveCanvas(nested));
+                            }
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("Overlay "+BoundedName(canvas.name)+" contains independent canvas "+BoundedName(nested.name)+
+                                " id="+nested.GetInstanceID()+" mode="+nested.renderMode+" active="+nested.isActiveAndEnabled+" display="+nested.targetDisplay+
+                                "; an explicit UI adapter is required before borrowing its hierarchy.");
+                        }
+                    }
                     isolatedObjects.Add(nested.gameObject);
                 }
                 foreach (RectTransform rect in canvas.GetComponentsInChildren<RectTransform>(true))
@@ -141,6 +159,22 @@ namespace Ugevr
             layerLease=new OverlayLayerLease(isolatedObjects);uiCamera=ui;
         }
         public void ValidateLayerExclusive() {if(layerLease!=null) layerLease.ValidateExclusive();}
+        public void ValidateInactiveCanvases(string stage)
+        {
+            foreach(CanvasState state in inactiveCanvases)
+            {
+                Canvas canvas=state.Canvas;
+                if(canvas==null) continue;
+                string reason;
+                try {reason=canvas.isActiveAndEnabled?"became active":(!CanvasSettingsEqual(state)?"changed its protected settings":HasActiveWorldRenderer(canvas)?"contains an active world renderer":null);}
+                catch(Exception queryError) {reason="could not be validated: "+BoundedName(queryError.Message);}
+                if(reason==null) continue;
+                string error="Protected inactive canvas "+BoundedName(state.Name)+" id="+state.Id+" mode="+state.Mode+" "+reason+" during "+stage+"; the eye pair cannot be submitted. Its current activity is preserved.";
+                Conflict(error);
+                throw new InvalidOperationException(error);
+            }
+            ++InactiveCanvasValidationPasses;
+        }
         public void RecordAfterRender(int eye)
         {
             if (eye<0 || eye>1 || !applied) return;
@@ -154,6 +188,7 @@ namespace Ugevr
         void PrepareCommonPanel()
         {
             applied=true;
+            ValidateInactiveCanvases("before UI borrowing");
             if(layerLease!=null) layerLease.Apply();
             AppliedMask=layerLease!=null?OriginalMask & ~layerLease.Mask:(includeLayers?OriginalMask | OverlayLayerMask:OriginalMask);
             camera.cullingMask=AppliedMask;
@@ -256,6 +291,29 @@ namespace Ugevr
                 },state.Name+" verify restoration");
             }
             if (camera!=null) Attempt(delegate {camera.cullingMask=OriginalMask;},"restore camera UI layers");
+        }
+        static CanvasState SnapshotInactiveCanvas(Canvas canvas)
+        {
+            return new CanvasState {Canvas=canvas,Name=canvas.name,Id=canvas.GetInstanceID(),Mode=canvas.renderMode,
+                WorldCamera=canvas.worldCamera,Distance=canvas.planeDistance,ScaleFactor=canvas.scaleFactor,ReferencePixels=canvas.referencePixelsPerUnit,
+                SortingOrder=canvas.sortingOrder,SortingLayer=canvas.sortingLayerID,TargetDisplay=canvas.targetDisplay,
+                OverrideSorting=canvas.overrideSorting,PixelPerfect=canvas.pixelPerfect,OverridePixelPerfect=canvas.overridePixelPerfect,ShaderChannels=canvas.additionalShaderChannels};
+        }
+        static bool HasActiveWorldRenderer(Canvas canvas)
+        {
+            Renderer[] renderers=canvas.GetComponentsInChildren<Renderer>(true);
+            if(renderers.Length>RectLimit) throw new InvalidOperationException("Inactive canvas renderer query exceeds 8192 objects; use an explicit UI adapter.");
+            foreach(Renderer renderer in renderers)
+                if(renderer!=null && renderer.enabled && renderer.gameObject.activeInHierarchy) return true;
+            return false;
+        }
+        static bool CanvasSettingsEqual(CanvasState state)
+        {
+            Canvas canvas=state.Canvas;
+            return canvas.renderMode==state.Mode && canvas.worldCamera==state.WorldCamera && canvas.planeDistance==state.Distance &&
+                canvas.overrideSorting==state.OverrideSorting && canvas.sortingLayerID==state.SortingLayer && canvas.sortingOrder==state.SortingOrder &&
+                canvas.targetDisplay==state.TargetDisplay && canvas.pixelPerfect==state.PixelPerfect && canvas.overridePixelPerfect==state.OverridePixelPerfect &&
+                canvas.additionalShaderChannels==state.ShaderChannels && canvas.scaleFactor==state.ScaleFactor && canvas.referencePixelsPerUnit==state.ReferencePixels;
         }
         public void RebuildRestoredGeometry()
         {
@@ -440,6 +498,8 @@ namespace Ugevr
                 .Append(",\"afterImageEffects\":").Append(layerLease==null?"false":"true")
                 .Append(",\"isolatedLayer\":").Append(layerLease==null?-1:layerLease.Layer)
                 .Append(",\"isolatedObjectCount\":").Append(layerLease==null?0:layerLease.ObjectCount)
+                .Append(",\"protectedInactiveCanvasCount\":").Append(inactiveCanvases.Count)
+                .Append(",\"inactiveCanvasValidationPasses\":").Append(InactiveCanvasValidationPasses)
                 .Append(",\"originalMask\":").Append(OriginalMask).Append(",\"appliedMask\":").Append(AppliedMask)
                 .Append(",\"overlayLayerMask\":").Append(OverlayLayerMask).Append(",\"excludedOverlayLayers\":").Append(OverlayLayerMask & ~AppliedMask)
                 .Append(",\"includeOverlayLayers\":").Append(includeLayers?"true":"false").Append(",\"selectedCount\":").Append(canvases.Count)
@@ -458,6 +518,16 @@ namespace Ugevr
                     .Append(",\"originalMode\":").Append(Quote(state.Mode.ToString())).Append(",\"originalPlaneDistance\":").Append(Number(state.Distance))
                     .Append(",\"sortingOrder\":").Append(state.SortingOrder).Append(",\"originalEngineUiContext\":").Append(state.OriginalUiContext)
                     .Append(",\"restoredEngineUiContext\":").Append(state.Canvas==null?"null":UiContext(state.Canvas)).Append('}');
+            }
+            text.Append("],\"protectedInactiveCanvases\":[");
+            for(int i=0;i<inactiveCanvases.Count;++i)
+            {
+                if(i>0) text.Append(',');var state=inactiveCanvases[i];var canvas=state.Canvas;
+                text.Append("{\"name\":").Append(Quote(state.Name)).Append(",\"instanceId\":").Append(state.Id)
+                    .Append(",\"originalMode\":").Append(Quote(state.Mode.ToString())).Append(",\"activityPolicy\":\"must remain inactive; never toggled\"")
+                    .Append(",\"destroyed\":").Append(canvas==null?"true":"false")
+                    .Append(",\"activeAfterRestore\":").Append(canvas!=null && canvas.isActiveAndEnabled?"true":"false")
+                    .Append(",\"settingsRetained\":").Append(canvas==null?"null":CanvasSettingsEqual(state)?"true":"false").Append('}');
             }
             return text.Append("],\"appliedEyes\":[").Append(appliedEyes[0] ?? "null").Append(',').Append(appliedEyes[1] ?? "null")
                 .Append("],\"afterRenderEyes\":[").Append(afterRenderEyes[0] ?? "null").Append(',').Append(afterRenderEyes[1] ?? "null").Append("]}").ToString();

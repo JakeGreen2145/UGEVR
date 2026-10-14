@@ -22,9 +22,10 @@ namespace UnityEngine
         public System.Action<int> LayerSetter;
         public int layer {get {return savedLayer;} set {if(LayerSetter!=null) LayerSetter(value);savedLayer=value;}}
         public Scene scene=new Scene {Valid=true,isLoaded=true};
+        public bool activeInHierarchy=true;
     }
     public class Component : Object { public GameObject gameObject=new GameObject();public T[] GetComponents<T>() {return new T[0];} }
-    public class Renderer : Component { }
+    public class Renderer : Component {public bool enabled=true;}
     public static class Resources
     {
         public static System.Collections.Generic.List<Object> Extras=new System.Collections.Generic.List<Object>();
@@ -101,7 +102,8 @@ namespace UnityEngine
         public Rect pixelRect=new Rect {width=3840,height=2160};
         public CanvasRenderer[] Renderers=new CanvasRenderer[0];
         public Canvas[] NestedCanvases;
-        public T[] GetComponentsInChildren<T>(bool inactive) { return (T[])(object)(typeof(T)==typeof(Canvas)?(System.Array)(NestedCanvases??new[]{this}):typeof(T)==typeof(RectTransform)?(System.Array)Rects:Renderers); }
+        public Renderer[] WorldRenderers=new Renderer[0];
+        public T[] GetComponentsInChildren<T>(bool inactive) { return (T[])(object)(typeof(T)==typeof(Canvas)?(System.Array)(NestedCanvases??new[]{this}):typeof(T)==typeof(RectTransform)?(System.Array)Rects:typeof(T)==typeof(Renderer)?(System.Array)WorldRenderers:Renderers); }
     }
     public class Camera : Component
     {

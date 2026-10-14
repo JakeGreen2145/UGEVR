@@ -18,7 +18,7 @@ class Program
     {
         if (args.Length>0 && args[0]=="producer") { Produce(args[1],args[2]); return; }
         if (args.Length>0 && args[0]=="lock-status") { LockStatus(args[1],args[2]); return; }
-        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); SessionChecks();
+        MathChecks(); ProjectionChecks(); RestoreChecks(); TrackingReacquisitionChecks(); OverlayChecks(); PanelGeometryChecks(); RotationRoundoffChecks(); AfterEffectsChecks(); CameraRectOrderChecks(); InactiveCanvasChecks(); SessionChecks();
         Console.WriteLine("Managed boundary checks passed: "+checks);
     }
     static void ProjectionChecks()
@@ -479,6 +479,78 @@ class Program
         changed.RebuildRestoredGeometry();
         Assert(changed.RestorationConflicts==2 && changed.DiagnosticJson().Contains("\"verificationPhase\":\"after-camera-restore\""),"A final canvas rebuild changing the canonical near-zero position still fails strict restoration and identifies its phase");
         Canvas.Instances.Clear();Canvas.ForceAction=null;
+    }
+    static void InactiveCanvasChecks()
+    {
+        Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;
+        var root=Overlay("pause",5);var child=Overlay("Blocker",7);
+        child.renderMode=RenderMode.WorldSpace;child.isActiveAndEnabled=false;child.worldCamera=new Camera();
+        var originalChildCamera=child.worldCamera;var originalChildPosition=child.Rects[0].anchoredPosition3D;
+        root.NestedCanvases=new[]{root,child};root.Rects=new[]{root.Rects[0],child.Rects[0]};root.Renderers=new[]{root.Renderers[0],child.Renderers[0]};
+        var camera=new Camera();var ui=new Camera();
+        var scope=PanelScope(camera,1,2,false);scope.UseAfterEffectsCamera(ui);
+        using(scope)
+        {
+            scope.ApplyEye();scope.ValidateInactiveCanvases("after game render");scope.ValidateInactiveCanvases("after UI render");
+            Assert(scope.SelectedCount==1 && child.renderMode==RenderMode.WorldSpace && child.worldCamera==originalChildCamera && !child.isActiveAndEnabled,"Inactive independent canvas is protected without conversion, reassignment or activation");
+            Assert(child.gameObject.layer==31 && child.Renderers[0].gameObject.layer==31,"Inactive descendant objects share the selected ancestor's temporary layer ownership");
+            scope.ApplyEye(1);scope.RecordAfterRender(1);
+        }
+        scope.RebuildRestoredGeometry();scope.ValidateInactiveCanvases("after desktop restoration");
+        Assert(scope.RestorationConflicts==0 && child.gameObject.layer==7 && child.Renderers[0].gameObject.layer==7 && child.Rects[0].anchoredPosition3D.Equals(originalChildPosition),"Protected descendant layers and rectangle state restore exactly");
+        Assert(scope.InactiveCanvasValidationPasses==4 && scope.DiagnosticJson().Contains("\"protectedInactiveCanvasCount\":1") && scope.DiagnosticJson().Contains("\"settingsRetained\":true"),"Protected inactive boundaries and validation passes are recorded once");
+        foreach(string stage in new[]{"before UI borrowing","after game render","after UI render","after desktop restoration"})
+        {
+            child.isActiveAndEnabled=false;var activated=PanelScope(camera,1,2,false);activated.UseAfterEffectsCamera(ui);
+            bool submitted=false,rejected=false;
+            try
+            {
+                using(activated)
+                {
+                    if(stage=="before UI borrowing") child.isActiveAndEnabled=true;
+                    activated.ApplyEye();
+                    if(stage!="before UI borrowing" && stage!="after desktop restoration") child.isActiveAndEnabled=true;
+                    if(stage!="after desktop restoration") activated.ValidateInactiveCanvases(stage);
+                }
+                activated.RebuildRestoredGeometry();
+                if(stage=="after desktop restoration") child.isActiveAndEnabled=true;
+                activated.ValidateInactiveCanvases(stage);submitted=true;
+            }
+            catch(InvalidOperationException) {rejected=true;}
+            Assert(rejected && !submitted && activated.RestorationConflicts==1 && activated.RestorationError.Contains(stage),"Activation at "+stage+" rejects submission with a bounded diagnostic");
+            Assert(root.renderMode==RenderMode.ScreenSpaceOverlay && child.renderMode==RenderMode.WorldSpace && child.isActiveAndEnabled && child.gameObject.layer==7,"Activation rejection restores owned state while preserving the game's newer activity");
+        }
+        child.isActiveAndEnabled=false;
+        var settings=PanelScope(camera,1,2,false);
+        bool settingsRejected=false;
+        try {using(settings) {settings.ApplyEye();child.sortingOrder=11;settings.ValidateInactiveCanvases("after UI render");}} catch(InvalidOperationException) {settingsRejected=true;}
+        Assert(settingsRejected && child.sortingOrder==11 && settings.RestorationConflicts==1,"Protected settings change rejects submission without overwriting a game-owned change");
+        child.sortingOrder=10;
+        child.WorldRenderers=new[]{new Renderer()};
+        bool activeRendererRejected=false;
+        try {PanelScope(camera,1,2,false);} catch(InvalidOperationException) {activeRendererRejected=true;}
+        Assert(activeRendererRejected && root.renderMode==RenderMode.ScreenSpaceOverlay,"Disabled canvas with an active world renderer is rejected before borrowing");
+        child.WorldRenderers[0].enabled=false;var rendererRace=PanelScope(camera,1,2,false);
+        bool rendererRaceRejected=false;
+        try {using(rendererRace) {rendererRace.ApplyEye();child.WorldRenderers[0].enabled=true;rendererRace.ValidateInactiveCanvases("after game render");}} catch(InvalidOperationException) {rendererRaceRejected=true;}
+        Assert(rendererRaceRejected && child.WorldRenderers[0].enabled && root.renderMode==RenderMode.ScreenSpaceOverlay,"World renderer activation is rejected while preserving its newer enabled state");
+        child.WorldRenderers=new Renderer[0];child.renderMode=RenderMode.ScreenSpaceCamera;child.isActiveAndEnabled=true;
+        bool activeCameraRejected=false;
+        try {PanelScope(camera,1,2,false);} catch(InvalidOperationException) {activeCameraRejected=true;}
+        Assert(activeCameraRejected && child.renderMode==RenderMode.ScreenSpaceCamera,"Initially active camera-space nested canvas still requires an explicit adapter");
+        child.isActiveAndEnabled=false;var resized=PanelScope(camera,1,2,false);
+        bool lateQueryRejected=false;
+        try {using(resized) {resized.ApplyEye();child.WorldRenderers=new Renderer[8193];resized.ValidateInactiveCanvases("after UI render");}} catch(InvalidOperationException) {lateQueryRejected=true;}
+        Assert(lateQueryRejected && resized.RestorationConflicts==1 && root.renderMode==RenderMode.ScreenSpaceOverlay,"A renderer query growing beyond the bound after render rejects submission and records the validation failure");
+        bool queryRejected=false;
+        try {PanelScope(camera,1,2,false);} catch(InvalidOperationException) {queryRejected=true;}
+        Assert(queryRejected && root.renderMode==RenderMode.ScreenSpaceOverlay,"Oversized inactive renderer inventory fails before mutation");
+        root.NestedCanvases=new Canvas[66];root.NestedCanvases[0]=root;
+        for(int i=1;i<66;++i) root.NestedCanvases[i]=new Canvas {name="inactive "+i,renderMode=RenderMode.WorldSpace,isActiveAndEnabled=false};
+        bool boundaryLimit=false;
+        try {PanelScope(camera,1,2,false);} catch(InvalidOperationException error) {boundaryLimit=error.Message.Contains("64 protected inactive canvas");}
+        Assert(boundaryLimit && root.renderMode==RenderMode.ScreenSpaceOverlay,"More than 64 protected inactive boundaries fail before mutation");
+        Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;
     }
     static void ExternalProducer(string directory,string content)
     {
