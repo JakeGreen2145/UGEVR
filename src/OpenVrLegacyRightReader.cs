@@ -37,12 +37,13 @@ namespace Ugevr
             }
             var state=new VRControllerState_t();var pose=new TrackedDevicePose_t();
             sample.UnavailableReason="controller_pose_state_unavailable";
-            if(!system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose) ||
-                !pose.bDeviceIsConnected || !pose.bPoseIsValid) return sample;
+            if(!system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose)) {sample.UnavailableReason="controller_state_read_failed";return sample;}
+            if(!pose.bDeviceIsConnected) {sample.UnavailableReason="controller_disconnected";return sample;}
+            if(!pose.bPoseIsValid) {sample.UnavailableReason="controller_pose_invalid";return sample;}
             var m=pose.mDeviceToAbsoluteTracking;
             foreach(double v in new double[]{m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11})
-                if(Double.IsNaN(v) || Double.IsInfinity(v)) return sample;
-            if(system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand)!=index || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) return sample;
+                if(Double.IsNaN(v) || Double.IsInfinity(v)) {sample.UnavailableReason="controller_pose_nonfinite";return sample;}
+            if(system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand)!=index || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) {sample.UnavailableReason="right_role_changed";return sample;}
             // Recheck the pinned properties too, so an observed device replacement cannot be adopted.
             sample.UnavailableReason=prefix+"_controller_identity_changed";
             if(ReadIdentity(system,index,ETrackedDeviceProperty.Prop_SerialNumber_String)!=serial || ReadIdentity(system,index,ETrackedDeviceProperty.Prop_ModelNumber_String)!=model) return sample;
@@ -83,13 +84,14 @@ namespace Ugevr
             if(error!=ETrackedPropertyError.TrackedProp_Success || needed==0 || needed>257 || serial.Length==0 || serial.Length>256) return sample;
             var state=new VRControllerState_t();var pose=new TrackedDevicePose_t();
             sample.UnavailableReason="controller_pose_state_unavailable";
-            if(!system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose) ||
-                !pose.bDeviceIsConnected || !pose.bPoseIsValid) return sample;
+            if(!system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose)) {sample.UnavailableReason="controller_state_read_failed";return sample;}
+            if(!pose.bDeviceIsConnected) {sample.UnavailableReason="controller_disconnected";return sample;}
+            if(!pose.bPoseIsValid) {sample.UnavailableReason="controller_pose_invalid";return sample;}
             var m=pose.mDeviceToAbsoluteTracking;
             foreach(double v in new double[]{m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11})
-                if(Double.IsNaN(v) || Double.IsInfinity(v)) return sample;
+                if(Double.IsNaN(v) || Double.IsInfinity(v)) {sample.UnavailableReason="controller_pose_nonfinite";return sample;}
             // Recheck the role after the joint pose/state sample to reject an observed hand reassignment.
-            if(system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand)!=index || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) return sample;
+            if(system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand)!=index || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) {sample.UnavailableReason="right_role_changed";return sample;}
             sample.Available=true;sample.UnavailableReason="";sample.Index=index;sample.Identity=serial.ToString();sample.Packet=state.unPacketNum;
             sample.A=(state.ulButtonPressed & (1UL<<(int)EVRButtonId.k_EButton_A))!=0;
             sample.AxesAvailable=true;sample.AxesSource="axis0_joystick";sample.X=state.rAxis0.x;sample.Y=state.rAxis0.y;return sample;

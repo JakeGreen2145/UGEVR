@@ -25,7 +25,7 @@ static class OwnedGamepadChecks
         check(west.Read().ButtonDown && westOwned.buttonWest.isPressed && !westOwned.buttonSouth.isPressed && west.Read().X==0.25,"West readback observes the selected public control after normal update without mislabeling South");
         west.Queue(false,0,0);Hub.NormalUpdate();
         check(west.Read().Neutral && !westOwned.buttonWest.isPressed && !westOwned.buttonSouth.isPressed,"Neutral release clears the selected West state through normal update");west.Remove();
-        Hub.Reset();var westPolicy=new OpenVrGamepadDiagnostic(delegate {return Backend(OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.WakeName));},5,0.2,"refuse");var aSample=Neutral();
+        Hub.Reset();var westPolicy=new OpenVrGamepadDiagnostic(delegate {return Backend(OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.WakeName));},5,0.2,"refuse",1);var aSample=Neutral();
         westPolicy.Tick(true,true,1,aSample,0);aSample.A=true;aSample.X=1;westPolicy.Tick(true,true,1,aSample,0.1);Hub.NormalUpdate();westPolicy.Tick(true,true,1,aSample,0.2);
         check(Pad.current.buttonWest.isPressed && !Pad.current.buttonSouth.isPressed && westPolicy.AppliedSamples==1 && westPolicy.Queues==1,"The explicit wake profile forwards right A and movement once and acknowledges West through the real backend");
         westPolicy.Tick(true,false,1,aSample,0.3);Hub.NormalUpdate();westPolicy.Tick(true,false,1,aSample,0.4);
@@ -71,7 +71,7 @@ static class OwnedGamepadChecks
         foreach(string pauseReason in new[]{"session_disabled","vr_failure"})
         {
             Hub.Reset();int waitingFactories=0;
-            var waiting=new OpenVrGamepadDiagnostic(delegate {++waitingFactories;return Backend();},5,0.2,"refuse");
+            var waiting=new OpenVrGamepadDiagnostic(delegate {++waitingFactories;return Backend();},5,0.2,"refuse",1);
             waiting.Tick(false,true,1,Neutral(),0);waiting.Pause(pauseReason,0.1);waiting.Tick(false,true,1,Neutral(),0.2);
             check(!waiting.Complete && waiting.Status=="waiting_neutral" && waiting.Reason==pauseReason && waitingFactories==0 && Hub.Adds==0 && Hub.Registers==0,"A reversible pause before activation preserves the first window without any owned resources: "+pauseReason);
             var pendingInput=Neutral();pendingInput.A=true;waiting.Tick(true,true,2,pendingInput,0.3);
@@ -83,23 +83,62 @@ static class OwnedGamepadChecks
         }
         foreach(string lifecycle in new[]{"component_disabled","game_lifecycle_end"})
         {
-            Hub.Reset();var terminal=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");terminal.Cancel(lifecycle,0);terminal.Tick(true,true,1,Neutral(),1);
+            Hub.Reset();var terminal=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);terminal.Cancel(lifecycle,0);terminal.Tick(true,true,1,Neutral(),1);
             check(terminal.Complete && Hub.Adds==0 && Hub.Registers==0,"Terminal lifecycle cancellation remains final even when the first window never started: "+lifecycle);
         }
-        Hub.Reset();int factories=0;var p=new OpenVrGamepadDiagnostic(delegate {++factories;return Backend();},5,0.2,"refuse");var input=Neutral();
+        Hub.Reset();var stable=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");var stableInput=Neutral();
+        stable.Tick(true,true,1,stableInput,0);stable.Tick(true,true,1,stableInput,0.1);
+        check(stable.RequiredNeutralReads==3 && stable.NeutralReads==2 && Hub.Registers==0 && Hub.Adds==0,"Production default admission waits for three successive valid neutral samples before any registry/device mutation");
+        stable.Tick(true,true,1,stableInput,0.2);
+        check(stable.Status=="active" && stable.NeutralReads==3 && Hub.Adds==1 && Hub.Registers==1,"Third stable valid neutral read starts exactly the first authorized window");stable.Cancel("test_end",0.3);
+        foreach(string reset in new[]{"fault","focus","disabled","pause","held","axis","index","identity","generation","metadata","axis_type","axis_source","role_fault"})
+        {
+            Hub.Reset();stable=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");stableInput=Neutral();stable.Tick(true,true,1,stableInput,0);stable.Tick(true,true,1,stableInput,0.1);
+            bool available=true,focus=true;ulong gen=1;
+            if(reset=="fault" || reset=="role_fault") {stableInput.Available=false;stableInput.UnavailableReason=reset=="fault"?"controller_state_read_failed":"right_role_changed";}
+            if(reset=="focus") focus=false;if(reset=="disabled") available=false;if(reset=="pause") {stable.Pause("session_disabled",0.15);available=false;}
+            if(reset=="held") stableInput.A=true;if(reset=="axis") stableInput.X=0.3;
+            if(reset=="index") ++stableInput.Index;if(reset=="identity") stableInput.Identity="replacement";if(reset=="generation") ++gen;
+            if(reset=="metadata") stableInput.Axis0Metadata="TrackedProp_UnknownProperty";if(reset=="axis_type") stableInput.Axis0Type=2;if(reset=="axis_source") {stableInput.AxesAvailable=true;stableInput.AxesSource="observed_transport_axis0";}
+            stable.Tick(available,focus,gen,stableInput,0.2);
+            check(Hub.Adds==0 && Hub.Registers==0 && !stable.Complete && stable.NeutralReads<=1,"Admission reset or new context cannot reuse earlier successful samples: "+reset);
+            stableInput.Available=true;stableInput.UnavailableReason=null;stableInput.A=false;stableInput.X=0;
+            stable.Tick(true,true,gen,stableInput,0.3);
+            check(Hub.Adds==0 && stable.NeutralReads<=2,"Resume still requires all remaining consecutive neutral samples after reset: "+reset);
+            stable.Tick(true,true,gen,stableInput,0.4);stable.Tick(true,true,gen,stableInput,0.5);
+            check(Hub.Adds==1 && stable.Status=="active","Stable replacement context may start only the first window after fresh admission: "+reset);stable.Cancel("test_end",0.6);
+        }
+        foreach(int required in new[]{1,2,10})
+        {
+            Hub.Reset();stable=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",required);
+            for(int i=0;i<required-1;++i) stable.Tick(true,true,1,Neutral(),i*0.01);
+            check(Hub.Adds==0,"Configured admission performs no early device creation: "+required);
+            stable.Tick(true,true,1,Neutral(),required*0.01);check(Hub.Adds==1 && stable.RequiredNeutralReads==required,"Configured bounded admission counts the selected number of reads: "+required);stable.Cancel("test_end",1);
+        }
+        foreach(int required in new[]{0,11})
+        {
+            Hub.Reset();bool bad=false;try {new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",required);} catch(ArgumentOutOfRangeException) {bad=true;}
+            check(bad && Hub.Adds==0 && Hub.Registers==0,"Out-of-range admission cannot mutate global input state: "+required);
+        }
+        Hub.Reset();stable=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");stableInput=Neutral();stableInput.Available=false;stableInput.UnavailableReason="reader_exception:System.NullReferenceException";stable.Tick(true,true,1,stableInput,0);
+        stableInput=Neutral();stable.Tick(true,true,1,stableInput,0.1);
+        check(stable.NativeUnavailableReason=="reader_exception:System.NullReferenceException" && Hub.Adds==0 && stable.NeutralReads==1,"Reader exception category survives subsequent valid bootstrap samples without weakening admission");
+        stable.Tick(true,true,1,stableInput,0.2);stable.Tick(true,true,1,stableInput,0.3);stableInput.Available=false;stableInput.UnavailableReason="controller_pose_invalid";stable.Tick(true,true,1,stableInput,0.4);Hub.NormalUpdate();stable.Tick(true,true,1,Neutral(),0.5);
+        check(stable.Complete && stable.Reason=="controller_unavailable" && stable.NativeUnavailableReason=="controller_pose_invalid" && stable.Queues==0 && Hub.Adds==1 && Hub.Removes==1,"The terminating source category stays visible after guarded release/cleanup and cannot start another window");
+        Hub.Reset();int factories=0;var p=new OpenVrGamepadDiagnostic(delegate {++factories;return Backend();},5,0.2,"refuse",1);var input=Neutral();
         p.Tick(false,true,1,input,0);p.Tick(true,false,1,input,1);input.A=true;p.Tick(true,true,1,input,2);
         check(factories==0 && Hub.Adds==0,"Default-off, focus and neutral-controller activation gates precede all device creation");
-        Hub.Reset();var diagonal=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");var diagonalInput=Neutral();diagonalInput.X=diagonalInput.Y=0.19;
+        Hub.Reset();var diagonal=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);var diagonalInput=Neutral();diagonalInput.X=diagonalInput.Y=0.19;
         diagonal.Tick(true,true,1,diagonalInput,0);
         check(Hub.Adds==0 && Hub.Registers==0 && diagonal.Reason=="right_controller_not_neutral","A diagonal outside the configured radial deadzone cannot arm even when each component is below 0.2");
         diagonalInput.X=diagonalInput.Y=0.14;diagonal.Tick(true,true,1,diagonalInput,0.1);diagonal.Tick(true,true,1,diagonalInput,0.2);
         check(Hub.Adds==1 && Hub.Queues==0,"An accepted diagonal inside the same radial mapping stays output-neutral after activation");diagonal.Cancel("test_end",0.3);
-        Hub.Reset();var narrow=new OpenVrGamepadDiagnostic(Backend,5,0.1,"refuse");var narrowInput=Neutral();narrowInput.X=0.15;
+        Hub.Reset();var narrow=new OpenVrGamepadDiagnostic(Backend,5,0.1,"refuse",1);var narrowInput=Neutral();narrowInput.X=0.15;
         narrow.Tick(true,true,1,narrowInput,0);
         check(Hub.Adds==0 && Hub.Registers==0,"A nondefault narrower deadzone rejects an activation sample that would produce movement");
         narrowInput.X=0.1;narrow.Tick(true,true,1,narrowInput,0.1);narrow.Tick(true,true,1,narrowInput,0.2);
         check(Hub.Adds==1 && Hub.Queues==0,"The configured radial boundary is accepted only when the output mapping also produces zero");narrow.Cancel("test_end",0.3);
-        Hub.Reset();p=new OpenVrGamepadDiagnostic(delegate {++factories;return Backend();},5,0.2,"refuse");
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(delegate {++factories;return Backend();},5,0.2,"refuse",1);
         input=Neutral();p.Tick(true,true,1,input,3);input.A=true;input.X=1;p.Tick(true,true,1,input,3.1);
         check(Hub.Pending.Count==1 && p.Queues==1,"Explicit test profile maps one received A edge and axis sample to one owned state queue");
         Hub.NormalUpdate();p.Tick(true,true,1,input,3.2);
@@ -107,26 +146,26 @@ static class OwnedGamepadChecks
         p.Tick(false,true,1,input,3.3);
         check(p.ReleaseAttempts==1 && !p.Complete,"Session disable queues neutral state without claiming completion");Hub.NormalUpdate();p.Tick(false,true,1,input,3.4);
         check(p.Complete && p.ReleaseObserved && p.RemoveAttempts==1 && Hub.Devices.Count==1,"Subsequent normal neutral state permits owned cleanup");
-        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();p.Tick(true,true,1,input,0);input.A=true;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);input=Neutral();p.Tick(true,true,1,input,0);input.A=true;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();
         external=new Pad {added=true,enabled=true,layout="physical-new"};Hub.Devices.Add(external);external.MakeCurrent();p.Tick(true,false,1,input,0.2);Hub.NormalUpdate();
         check(p.Complete && Object.ReferenceEquals(Pad.current,external) && external.added,"Focus-loss release preserves an already observed external current and cannot let its neutral event reclaim current");
-        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();input.Packet=10;p.Tick(true,true,1,input,0);input.A=true;input.Packet=9;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();p.Tick(true,true,1,input,0.2);
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);input=Neutral();input.Packet=10;p.Tick(true,true,1,input,0);input.A=true;input.Packet=9;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();p.Tick(true,true,1,input,0.2);
         check(p.Complete && p.Reason=="controller_packet_regressed" && p.Queues==0,"Observed packet regression releases context without replaying the source state");
-        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();input.Packet=UInt32.MaxValue;p.Tick(true,true,1,input,0);input.A=true;input.Packet=0;p.Tick(true,true,1,input,0.1);
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);input=Neutral();input.Packet=UInt32.MaxValue;p.Tick(true,true,1,input,0);input.A=true;input.Packet=0;p.Tick(true,true,1,input,0.1);
         check(!p.Complete && p.Queues==1,"Documented unsigned packet wrap does not become a false controller reset");p.Cancel("test_end",0.2);
         foreach(string reason in new[]{"focus","generation","identity","disconnect","deadline","clock"})
         {
-            Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();p.Tick(true,true,1,input,0);input.A=true;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();
+            Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);input=Neutral();p.Tick(true,true,1,input,0);input.A=true;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();
             ulong gen=1;bool focus=true;double now=0.2;
             if(reason=="focus") focus=false;if(reason=="generation") gen=2;if(reason=="identity") input.Identity="different";if(reason=="disconnect") input.Available=false;if(reason=="deadline") now=5;if(reason=="clock") now=-1;
             p.Tick(true,focus,gen,input,now);Hub.NormalUpdate();p.Tick(true,focus,gen,input,6);
             check(p.Complete && p.ReleaseAttempts>=1 && Hub.Devices.Count==1,"Lifecycle change releases and removes only the owned device: "+reason);
         }
-        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();p.Tick(true,true,1,input,0);input.A=true;Hub.QueueThenThrow=true;p.Tick(true,true,1,input,0.1);
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);input=Neutral();p.Tick(true,true,1,input,0);input.A=true;Hub.QueueThenThrow=true;p.Tick(true,true,1,input,0.1);
         check(p.Complete && p.ReleaseAttempts==1 && Hub.Queues==2 && Hub.Devices.Count==1,"Uncertain throwing down queue still attempts release and removes the captured device");
-        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");p.Tick(true,true,1,Neutral(),0);Hub.RemoveAlwaysThrow=true;p.Cancel("teardown",1);
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);p.Tick(true,true,1,Neutral(),0);Hub.RemoveAlwaysThrow=true;p.Cancel("teardown",1);
         check(p.Status=="cleanup_unconfirmed" && p.RemoveAttempts==2 && Hub.Removes==2,"Teardown failures remain unconfirmed after bounded removal attempts");
-        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse");input=Neutral();p.Tick(true,true,1,input,0);input.X=Double.NaN;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();p.Tick(true,true,1,input,0.2);
+        Hub.Reset();p=new OpenVrGamepadDiagnostic(Backend,5,0.2,"refuse",1);input=Neutral();p.Tick(true,true,1,input,0);input.X=Double.NaN;p.Tick(true,true,1,input,0.1);Hub.NormalUpdate();p.Tick(true,true,1,input,0.2);
         check(p.Complete && p.Queues==0,"Nonfinite controller state never reaches the public queue");
     }
 }

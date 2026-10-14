@@ -11,7 +11,7 @@ static class LegacyControllerChecks
     {
         public int AxisKind=2,StateCalls,RoleCalls,AxisCalls,StringCalls;
         public string Serial="fixture",Model="fixture-model";
-        public bool StringError,IdentityChange,ModelError,ModelChange,NonfinitePose;
+        public bool StringError,IdentityChange,ModelError,ModelChange,NonfinitePose,MissingStringReader;
         public ETrackedPropertyError AxisError=ETrackedPropertyError.TrackedProp_Success;
         public bool PoseValid=true,Connected=true,RoleChange,StateSuccess=true,PropertyError;
         public ulong Pressed=1UL<<7,Touched;
@@ -36,13 +36,13 @@ static class LegacyControllerChecks
                 ++StateCalls;if(size!=(uint)Marshal.SizeOf(typeof(VRControllerState_t)) || origin!=ETrackingUniverseOrigin.TrackingUniverseStanding) throw new Exception("Incorrect public ABI arguments.");
                 state=new VRControllerState_t {unPacketNum=17,ulButtonPressed=Pressed,ulButtonTouched=Touched,rAxis0=new VRControllerAxis_t {x=X,y=Y}};
                 pose=new TrackedDevicePose_t {bDeviceIsConnected=Connected,bPoseIsValid=PoseValid,mDeviceToAbsoluteTracking=new HmdMatrix34_t {m0=1,m5=1,m10=1,m3=NonfinitePose?float.NaN:0}};return StateSuccess;
-            };return t;
+            };if(MissingStringReader) t.GetStringTrackedDeviceProperty=null;return t;
         }
     }
     static LegacyRightSample Read(Runtime runtime,bool buttonOnly=false,bool observedAxis=false)
     {
         var table=runtime.Table();IntPtr pointer=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(IVRSystem)));
-        try {Marshal.StructureToPtr(table,pointer,false);var system=new CVRSystem(pointer);var sample=observedAxis?OuterGamepadCompatibilityProfile.Read(system,OuterGamepadCompatibilityProfile.ObservedAxis0Name):buttonOnly?OuterGamepadCompatibilityProfile.Read(system,OuterGamepadCompatibilityProfile.ButtonOnlyWakeName):OpenVrLegacyRightReader.Read(system);GC.KeepAlive(table);return sample;}
+        try {Marshal.StructureToPtr(table,pointer,false);var system=new CVRSystem(pointer);var sample=OuterGamepadCompatibilityProfile.ReadSafely(system,observedAxis?OuterGamepadCompatibilityProfile.ObservedAxis0Name:buttonOnly?OuterGamepadCompatibilityProfile.ButtonOnlyWakeName:OuterGamepadCompatibilityProfile.WakeName);GC.KeepAlive(table);return sample;}
         finally {Marshal.DestroyStructure(pointer,typeof(IVRSystem));Marshal.FreeHGlobal(pointer);}
     }
     public static void Run(Action<bool,string> check)
@@ -59,7 +59,7 @@ static class LegacyControllerChecks
         r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,Pressed=0,Touched=128};s=Read(r,true);
         check(s.Available && !s.A && s.X==0 && s.Y==0,"Observed PC touched128 without pressed128 never substitutes for A in the button-only profile");
         UnityEngine.InputSystem.InputSystem.Reset();
-        var diagnostic=new OpenVrGamepadDiagnostic(delegate {return new PublicOwnedGamepad(Assembly.GetExecutingAssembly(),false,OuterGamepadCompatibilityProfile.LayoutPrefix,OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.ButtonOnlyWakeName));},5,0.2,"refuse");
+        var diagnostic=new OpenVrGamepadDiagnostic(delegate {return new PublicOwnedGamepad(Assembly.GetExecutingAssembly(),false,OuterGamepadCompatibilityProfile.LayoutPrefix,OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.ButtonOnlyWakeName));},5,0.2,"refuse",1);
         r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true,Pressed=0,X=float.NaN,Y=float.PositiveInfinity};
         diagnostic.Tick(true,true,1,Read(r,true),0);r.Pressed=128;diagnostic.Tick(true,true,1,Read(r,true),0.1);UnityEngine.InputSystem.InputSystem.NormalUpdate();
         var owned=UnityEngine.InputSystem.Gamepad.current;
@@ -106,7 +106,7 @@ static class LegacyControllerChecks
             s=Read(r,false,true);check(!s.Available && !s.AxesAvailable,"Observed raw axis evidence never bypasses identity, role or valid pose guards: "+fault);
         }
         UnityEngine.InputSystem.InputSystem.Reset();
-        diagnostic=new OpenVrGamepadDiagnostic(delegate {return new PublicOwnedGamepad(Assembly.GetExecutingAssembly(),false,OuterGamepadCompatibilityProfile.LayoutPrefix,OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.ObservedAxis0Name));},5,0.2,"refuse");
+        diagnostic=new OpenVrGamepadDiagnostic(delegate {return new PublicOwnedGamepad(Assembly.GetExecutingAssembly(),false,OuterGamepadCompatibilityProfile.LayoutPrefix,OuterGamepadCompatibilityProfile.ButtonFor(OuterGamepadCompatibilityProfile.ObservedAxis0Name));},5,0.2,"refuse",1);
         r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,PropertyError=true,Pressed=0,X=0.3464567f,Y=0.5984252f};
         diagnostic.Tick(true,true,1,Read(r,false,true),0);
         check(UnityEngine.InputSystem.InputSystem.Adds==0 && diagnostic.Reason=="right_controller_not_neutral","An observed transported nonneutral axis cannot arm the first owned window");
@@ -118,6 +118,15 @@ static class LegacyControllerChecks
         check(!owned.buttonWest.isPressed && owned.leftStick.Value.x==0 && owned.leftStick.Value.y==0 && diagnostic.Queues==2,"Observed transport zero releases the owned West and movement state once");
         r.PropertyError=false;r.AxisKind=1;diagnostic.Tick(true,true,1,Read(r,false,true),0.4);UnityEngine.InputSystem.InputSystem.NormalUpdate();diagnostic.Tick(true,true,1,Read(r,false,true),0.5);
         check(diagnostic.Complete && diagnostic.ReleaseObserved && !owned.added && UnityEngine.InputSystem.InputSystem.Removes==1,"A newly conflicting metadata declaration ends and cleans up the started transport window");
+        r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel,MissingStringReader=true};s=Read(r,true);
+        check(!s.Available && s.UnavailableReason=="reader_exception:System.NullReferenceException" && r.StateCalls==0,"The actual shipping safe-read boundary categorizes a missing SDK callback instead of silently returning an unexplained invalid sample");
+        foreach(string fault in new[]{"invalid_pose","disconnected","sdk_false","role_changed","nonfinite_pose"})
+        {
+            r=new Runtime {Serial=OuterGamepadCompatibilityProfile.ButtonOnlySerial,Model=OuterGamepadCompatibilityProfile.ButtonOnlyModel};
+            if(fault=="invalid_pose") r.PoseValid=false;if(fault=="disconnected") r.Connected=false;if(fault=="sdk_false") r.StateSuccess=false;if(fault=="role_changed") r.RoleChange=true;if(fault=="nonfinite_pose") r.NonfinitePose=true;
+            s=Read(r,true);string expected=fault=="invalid_pose"?"controller_pose_invalid":fault=="disconnected"?"controller_disconnected":fault=="sdk_false"?"controller_state_read_failed":fault=="role_changed"?"right_role_changed":"controller_pose_nonfinite";
+            check(!s.Available && s.UnavailableReason==expected,"Shipping reader distinguishes the exact guarded source failure: "+fault);
+        }
         foreach(string reason in new[]{"invalid_pose","disconnected","sdk_false","role_changed"})
         {
             r=new Runtime();if(reason=="invalid_pose") r.PoseValid=false;if(reason=="disconnected") r.Connected=false;if(reason=="sdk_false") r.StateSuccess=false;if(reason=="role_changed") r.RoleChange=true;

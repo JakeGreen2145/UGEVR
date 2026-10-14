@@ -94,6 +94,7 @@ public class Injector : BaseUnityPlugin
             string inputConflict=Config.Bind("Input","CurrentGamepadConflictPolicy","refuse","refuse leaves an existing current gamepad untouched. prefer-owned explicitly permits the owned diagnostic pad to become current, with conditional restoration.").Value;
             float inputSeconds=Config.Bind("Input","DiagnosticDurationSeconds",15f,"Bounded 5..300 second diagnostic window, starting only with a neutral valid right controller and focused active VR.").Value;
             float inputDeadzone=Config.Bind("Input","DiagnosticDeadzone",0.2f,"Explicit radial left-stick deadzone, 0.1..0.8.").Value;
+            int inputNeutralReads=Config.Bind("Input","DiagnosticNeutralReads",3,"Require 1..10 consecutive valid neutral reads with stable controller, runtime generation and metadata before creating the first owned device. Default 3.").Value;
             if(allowGamepad)
             {
                 try
@@ -101,7 +102,7 @@ public class Injector : BaseUnityPlugin
                     if(!session.Available || allowEngineInputExperiment || !OuterGamepadCompatibilityProfile.Supports(inputProfile))
                         throw new InvalidOperationException("Select a valid session, the explicit diagnostic profile and disable the separate E experiment.");
                     gamepadDiagnosticProfile=inputProfile;
-                    gamepadDiagnostic=new OpenVrGamepadDiagnostic(delegate {return OuterGamepadCompatibilityProfile.Create(inputProfile);},inputSeconds,inputDeadzone,inputConflict);
+                    gamepadDiagnostic=new OpenVrGamepadDiagnostic(delegate {return OuterGamepadCompatibilityProfile.Create(inputProfile);},inputSeconds,inputDeadzone,inputConflict,inputNeutralReads);
                     Logger.LogWarning("EXPLICIT_INPUT_DIAGNOSTIC profile="+inputProfile+" currentConflict="+inputConflict+" duration="+inputSeconds+"; synthetic owned gamepad, game consumption unknown.");
                 }
                 catch(Exception inputError) {Logger.LogWarning("INPUT_DIAGNOSTIC unavailable: "+inputError.Message);}
@@ -211,12 +212,12 @@ public class Injector : BaseUnityPlugin
         double now=InputClock();bool enabled=!quitting && active && runtimeReady && !draining && renderingActive && !tracking.Paused;
         var input=new LegacyRightSample();
         if(enabled && Application.isFocused && !gamepadDiagnostic.Complete)
-            try {input=OuterGamepadCompatibilityProfile.Read(system,gamepadDiagnosticProfile);} catch { }
+            input=OuterGamepadCompatibilityProfile.ReadSafely(system,gamepadDiagnosticProfile);
         gamepadDiagnostic.Tick(enabled,Application.isFocused,generation,input,now);
         if(now>=nextInputReport)
         {
             nextInputReport=now+1;
-            Logger.LogInfo("INPUT_DIAGNOSTIC profile="+gamepadDiagnosticProfile+" sourceAxes="+(input.AxesSource ?? "unavailable")+" axis0Metadata="+(input.Axis0Metadata ?? "not_queried")+" axis0Type="+(input.Axis0Type.HasValue?input.Axis0Type.Value.ToString():"unavailable")+" status="+gamepadDiagnostic.Status+" reason="+gamepadDiagnostic.Reason+" addAttempts="+gamepadDiagnostic.AddAttempts+
+            Logger.LogInfo("INPUT_DIAGNOSTIC profile="+gamepadDiagnosticProfile+" sourceAxes="+(input.AxesSource ?? "unavailable")+" axis0Metadata="+(input.Axis0Metadata ?? "not_queried")+" axis0Type="+(input.Axis0Type.HasValue?input.Axis0Type.Value.ToString():"unavailable")+" status="+gamepadDiagnostic.Status+" reason="+gamepadDiagnostic.Reason+" nativeUnavailableReason="+gamepadDiagnostic.NativeUnavailableReason+" neutralReads="+gamepadDiagnostic.NeutralReads+" requiredNeutralReads="+gamepadDiagnostic.RequiredNeutralReads+" addAttempts="+gamepadDiagnostic.AddAttempts+
                 " queues="+gamepadDiagnostic.Queues+" appliedStateSamples="+gamepadDiagnostic.AppliedSamples+" releaseAttempts="+gamepadDiagnostic.ReleaseAttempts+
                 " neutralObserved="+gamepadDiagnostic.ReleaseObserved+" removeAttempts="+gamepadDiagnostic.RemoveAttempts+" cleanup="+gamepadDiagnostic.CleanupStatus+" gameConsumption=unknown");
         }

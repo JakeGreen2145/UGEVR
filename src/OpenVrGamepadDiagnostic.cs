@@ -36,13 +36,17 @@ namespace Ugevr
         readonly double duration,deadzone;
         readonly bool preferOwned;
         IOwnedGamepad pad;
-        LegacyRightSample source;
+        LegacyRightSample source,candidate;
+        ulong candidateGeneration;
         ulong generation;
         double start,lastTick,releaseDeadline;
         bool started,ending,finished,lastButton;
         double lastX,lastY;
         public string Status {get;private set;}
         public string Reason {get;private set;}
+        public string NativeUnavailableReason {get;private set;}
+        public int NeutralReads {get;private set;}
+        public int RequiredNeutralReads {get;private set;}
         public int AddAttempts {get;private set;}
         public int Queues {get;private set;}
         public int ReleaseAttempts {get;private set;}
@@ -52,7 +56,11 @@ namespace Ugevr
         public string CleanupStatus {get {return pad==null?"not_created":pad.CleanupStatus;}}
         public bool Complete {get {return finished;}}
         public OpenVrGamepadDiagnostic(Func<IOwnedGamepad> factory,double seconds,double deadzone,string conflictPolicy)
+            :this(factory,seconds,deadzone,conflictPolicy,3) {}
+        public OpenVrGamepadDiagnostic(Func<IOwnedGamepad> factory,double seconds,double deadzone,string conflictPolicy,int requiredNeutralReads)
         {
+            if(requiredNeutralReads<1 || requiredNeutralReads>10) throw new ArgumentOutOfRangeException("requiredNeutralReads","Select 1 through 10 consecutive neutral reads.");
+            RequiredNeutralReads=requiredNeutralReads;NativeUnavailableReason="";
             if(factory==null || !Finite(seconds) || seconds<5 || seconds>300 || !Finite(deadzone) || deadzone<0.1 || deadzone>0.8)
                 throw new ArgumentException("Invalid bounded gamepad diagnostic profile.");
             if(conflictPolicy!="refuse" && conflictPolicy!="prefer-owned") throw new ArgumentException("Select refuse or prefer-owned explicitly.");
@@ -60,6 +68,15 @@ namespace Ugevr
         }
         static bool Finite(double x) {return !Double.IsNaN(x) && !Double.IsInfinity(x);}
         static bool Valid(LegacyRightSample s) {return s.Available && !String.IsNullOrEmpty(s.Identity) && Finite(s.X) && Finite(s.Y) && Math.Abs(s.X)<=1 && Math.Abs(s.Y)<=1;}
+        static bool SameAdmission(LegacyRightSample a,LegacyRightSample b)
+        {return a.Index==b.Index && a.Identity==b.Identity && a.AxesAvailable==b.AxesAvailable && a.AxesSource==b.AxesSource && a.Axis0Metadata==b.Axis0Metadata && a.Axis0Type==b.Axis0Type;}
+        void ResetAdmission() {NeutralReads=0;candidate=new LegacyRightSample();candidateGeneration=0;}
+        string RecordUnavailable(LegacyRightSample input)
+        {
+            NativeUnavailableReason=!String.IsNullOrEmpty(input.UnavailableReason)?input.UnavailableReason:
+                !input.Available?"source_sample_unavailable":String.IsNullOrEmpty(input.Identity)?"controller_identity_unavailable":"controller_axis_invalid";
+            return NativeUnavailableReason;
+        }
         public void Tick(bool enabled,bool focused,ulong runtimeGeneration,LegacyRightSample input,double now)
         {
             if(finished) return;
@@ -69,14 +86,18 @@ namespace Ugevr
             if(ending) {Drain(now);return;}
             if(!enabled || !focused)
             {
-                if(started) End(!enabled?"session_disabled":"focus_lost",now,false);
+                if(started) End(!enabled?"session_disabled":"focus_lost",now,false);else ResetAdmission();
                 return;
             }
             if(!started)
             {
-                if(!Valid(input)) {Reason=input.UnavailableReason ?? "right_controller_unavailable";return;}
+                if(!Valid(input)) {Reason=RecordUnavailable(input);ResetAdmission();return;}
                 // Activation must be zero under the same radial mapping used below.
-                if(input.A || Math.Sqrt(input.X*input.X+input.Y*input.Y)>deadzone) {Reason="right_controller_not_neutral";return;}
+                if(input.A || Math.Sqrt(input.X*input.X+input.Y*input.Y)>deadzone) {Reason="right_controller_not_neutral";ResetAdmission();return;}
+                if(NeutralReads==0 || candidateGeneration!=runtimeGeneration || !SameAdmission(candidate,input))
+                {candidate=input;candidateGeneration=runtimeGeneration;NeutralReads=1;}
+                else ++NeutralReads;
+                if(NeutralReads<RequiredNeutralReads) {Reason="neutral_admission_pending";return;}
                 started=true;start=now;source=input;generation=runtimeGeneration;
                 try
                 {
@@ -93,7 +114,7 @@ namespace Ugevr
             }
             if(now-start>=duration) {End("window_deadline",now,false);return;}
             if(runtimeGeneration!=generation) {End("runtime_generation_changed",now,false);return;}
-            if(!Valid(input)) {End("controller_unavailable",now,false);return;}
+            if(!Valid(input)) {RecordUnavailable(input);End("controller_unavailable",now,false);return;}
             if(input.Index!=source.Index || input.Identity!=source.Identity) {End("controller_identity_changed",now,false);return;}
             if(unchecked(input.Packet-source.Packet)>0x7fffffffu) {End("controller_packet_regressed",now,false);return;}
             source.Packet=input.Packet;
@@ -162,7 +183,7 @@ namespace Ugevr
         {
             if(finished) return;
             if(started) End(reason,now,true);
-            else {Reason=reason;Status="waiting_neutral";}
+            else {ResetAdmission();Reason=reason;Status="waiting_neutral";}
         }
         public void Cancel(string reason,double now) {if(!finished && started) End(reason,now,true);else if(!started) {Reason=reason;finished=true;Status="complete";}}
     }

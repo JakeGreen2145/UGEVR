@@ -13,6 +13,11 @@ namespace Ugevr
         public const string ObservedAxis0Name="outer-1.4.1-deckardmp-right-a-west-observed-axis0-leftstick-v1";
         public const string ButtonOnlySerial="frame_testbench_right";
         public const string ButtonOnlyModel="Deckard MP";
+        public static LegacyRightSample ReadSafely(CVRSystem system,string profile)
+        {
+            try {return Read(system,profile);}
+            catch(Exception error) {return new LegacyRightSample {UnavailableReason="reader_exception:"+error.GetType().FullName};}
+        }
         public static LegacyRightSample Read(CVRSystem system,string profile)
         {
             if(profile==ObservedAxis0Name) return OpenVrLegacyRightReader.ReadObservedTransportAxis0(system,ButtonOnlySerial,ButtonOnlyModel);
