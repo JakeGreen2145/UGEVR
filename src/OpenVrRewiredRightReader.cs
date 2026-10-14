@@ -13,6 +13,12 @@ namespace Ugevr
             uint index=system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand);
             sample.UnavailableReason="right_role_unavailable";
             if(index>=OpenVR.k_unMaxTrackedDeviceCount || system.GetTrackedDeviceClass(index)!=ETrackedDeviceClass.Controller || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) return sample;
+            // Query joint state before properties that some application contexts expose only after a poll.
+            // No sample is published until all metadata, identity and post-poll role guards pass.
+            var state=new VRControllerState_t();var pose=new TrackedDevicePose_t();sample.UnavailableReason="joint_pose_state_unavailable";
+            if(!system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose) || !pose.bDeviceIsConnected || !pose.bPoseIsValid) return sample;
+            var m=pose.mDeviceToAbsoluteTracking;
+            foreach(float poseValue in new[]{m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11}) if(Single.IsNaN(poseValue) || Single.IsInfinity(poseValue)) return sample;
             int trigger=-1;
             for(int axis=0;axis<5;++axis)
             {
@@ -27,10 +33,6 @@ namespace Ugevr
             var serial=new StringBuilder(257);ETrackedPropertyError serialError=ETrackedPropertyError.TrackedProp_Success;
             uint needed=system.GetStringTrackedDeviceProperty(index,ETrackedDeviceProperty.Prop_SerialNumber_String,serial,257,ref serialError);
             sample.UnavailableReason="identity_unavailable";if(serialError!=ETrackedPropertyError.TrackedProp_Success || needed==0 || needed>257 || serial.Length==0 || serial.Length>256) return sample;
-            var state=new VRControllerState_t();var pose=new TrackedDevicePose_t();sample.UnavailableReason="joint_pose_state_unavailable";
-            if(!system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose) || !pose.bDeviceIsConnected || !pose.bPoseIsValid) return sample;
-            var m=pose.mDeviceToAbsoluteTracking;
-            foreach(float poseValue in new[]{m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11}) if(Single.IsNaN(poseValue) || Single.IsInfinity(poseValue)) return sample;
             if(system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand)!=index || system.GetControllerRoleForTrackedDeviceIndex(index)!=ETrackedControllerRole.RightHand) return sample;
             double value=trigger==1?state.rAxis1.x:trigger==2?state.rAxis2.x:trigger==3?state.rAxis3.x:state.rAxis4.x;
             sample.UnavailableReason="analog_state_invalid";

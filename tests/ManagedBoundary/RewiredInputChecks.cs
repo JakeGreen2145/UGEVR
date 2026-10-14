@@ -36,19 +36,20 @@ static class RewiredInputChecks
     sealed class Runtime
     {
         public int[] Kinds={2,3,0,0,0};
-        public int MetadataCalls,StateCalls,RoleCalls;
-        public bool Valid=true,Connected=true,RoleChange,MetadataError;
+        public int MetadataCalls,StateCalls,RoleCalls,IdentityCalls;
+        public bool Valid=true,Connected=true,StateResult=true,RoleChange,MetadataError,RequireJointPoll,InitialRoleMissing,WrongClass,IdentityError,EmptyIdentity,NonfinitePose;
+        public readonly System.Collections.Generic.List<string> Calls=new System.Collections.Generic.List<string>();
         public float Trigger=.7f,X=.3f,Y=-.4f;
         public IVRSystem Table()
         {
             var t=new IVRSystem();
-            t.GetTrackedDeviceIndexForControllerRole=delegate(ETrackedControllerRole role){++RoleCalls;return RoleChange && RoleCalls>1?4u:3u;};
+            t.GetTrackedDeviceIndexForControllerRole=delegate(ETrackedControllerRole role){++RoleCalls;return InitialRoleMissing?OpenVR.k_unMaxTrackedDeviceCount:RoleChange && RoleCalls>1?4u:3u;};
             t.GetControllerRoleForTrackedDeviceIndex=delegate(uint index){return ETrackedControllerRole.RightHand;};
-            t.GetTrackedDeviceClass=delegate(uint index){return ETrackedDeviceClass.Controller;};
-            t.GetInt32TrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,ref ETrackedPropertyError error){++MetadataCalls;error=MetadataError?ETrackedPropertyError.TrackedProp_UnknownProperty:ETrackedPropertyError.TrackedProp_Success;int axis=(int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32;if(axis<0 || axis>=5) throw new Exception("Unexpected axis property.");return Kinds[axis];};
-            t.GetStringTrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,StringBuilder value,uint capacity,ref ETrackedPropertyError error){error=ETrackedPropertyError.TrackedProp_Success;value.Append("rewired-fixture");return 16;};
+            t.GetTrackedDeviceClass=delegate(uint index){return WrongClass?ETrackedDeviceClass.HMD:ETrackedDeviceClass.Controller;};
+            t.GetInt32TrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,ref ETrackedPropertyError error){++MetadataCalls;Calls.Add("metadata");error=MetadataError || RequireJointPoll && StateCalls==0?ETrackedPropertyError.TrackedProp_UnknownProperty:ETrackedPropertyError.TrackedProp_Success;int axis=(int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32;if(axis<0 || axis>=5) throw new Exception("Unexpected axis property.");return Kinds[axis];};
+            t.GetStringTrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,StringBuilder value,uint capacity,ref ETrackedPropertyError error){++IdentityCalls;Calls.Add("identity");error=IdentityError || RequireJointPoll && StateCalls==0?ETrackedPropertyError.TrackedProp_UnknownProperty:ETrackedPropertyError.TrackedProp_Success;if(!EmptyIdentity)value.Append("rewired-fixture");return 16;};
             t.GetControllerStateWithPose=delegate(ETrackingUniverseOrigin origin,uint index,ref VRControllerState_t state,uint size,ref TrackedDevicePose_t pose)
-            {++StateCalls;if(size!=(uint)Marshal.SizeOf(typeof(VRControllerState_t))) throw new Exception("State ABI size.");state=new VRControllerState_t {unPacketNum=11,ulButtonPressed=1UL<<7,rAxis0=new VRControllerAxis_t {x=X,y=Y},rAxis1=new VRControllerAxis_t {x=Trigger},rAxis2=new VRControllerAxis_t {x=Trigger},rAxis3=new VRControllerAxis_t {x=Trigger},rAxis4=new VRControllerAxis_t {x=Trigger}};pose=new TrackedDevicePose_t {bDeviceIsConnected=Connected,bPoseIsValid=Valid,mDeviceToAbsoluteTracking=new HmdMatrix34_t {m0=1,m5=1,m10=1}};return true;};return t;
+            {++StateCalls;Calls.Add("joint");if(size!=(uint)Marshal.SizeOf(typeof(VRControllerState_t))) throw new Exception("State ABI size.");state=new VRControllerState_t {unPacketNum=11,ulButtonPressed=1UL<<7,rAxis0=new VRControllerAxis_t {x=X,y=Y},rAxis1=new VRControllerAxis_t {x=Trigger},rAxis2=new VRControllerAxis_t {x=Trigger},rAxis3=new VRControllerAxis_t {x=Trigger},rAxis4=new VRControllerAxis_t {x=Trigger}};pose=new TrackedDevicePose_t {bDeviceIsConnected=Connected,bPoseIsValid=Valid,mDeviceToAbsoluteTracking=new HmdMatrix34_t {m0=1,m5=1,m10=NonfinitePose?Single.NaN:1}};return StateResult;};return t;
         }
     }
     static RewiredRightSample Read(Runtime runtime)
@@ -101,7 +102,19 @@ static class RewiredInputChecks
         Guid id=Guid.NewGuid();check(!PublicOwnedRewiredInput.MatchesIdentity("Rewired_Core",id,"a","Rewired_Core",id,"b") && !PublicOwnedRewiredInput.MatchesIdentity("other",id,"a","Rewired_Core",id,"a") && !PublicOwnedRewiredInput.MatchesIdentity("Rewired_Core",Guid.NewGuid(),"a","Rewired_Core",id,"a"),"A same-named unpinned assembly cannot activate the Rewired profile");
         check(!String.IsNullOrEmpty(PublicOwnedRewiredInput.Create().UnavailableReason),"Shipped Rewired profile refuses missing/unpinned assemblies without target loading");
         PublicLifecycleChecks(check);
-        var runtime=new Runtime();var read=Read(runtime);check(read.Available && read.TriggerAxis==1 && Math.Abs(read.Trigger-.7)<1e-6 && runtime.MetadataCalls==5 && runtime.StateCalls==1 && runtime.RoleCalls==2,"Vendored OpenVR ABI jointly reads state/pose only after bounded axis metadata and role checks");
+        var runtime=new Runtime();var read=Read(runtime);check(read.Available && read.TriggerAxis==1 && Math.Abs(read.Trigger-.7)<1e-6 && runtime.MetadataCalls==5 && runtime.StateCalls==1 && runtime.RoleCalls==2 && runtime.Calls[0]=="joint","Vendored OpenVR ABI polls joint state after initial role/class guards and before bounded axis metadata");
+        runtime=new Runtime {RequireJointPoll=true};read=Read(runtime);
+        check(read.Available && runtime.StateCalls==1 && runtime.IdentityCalls==1 && String.Join(",",runtime.Calls)=="joint,metadata,metadata,metadata,metadata,metadata,identity","Properties exposed only after a joint poll are validated in that same public SDK context before publication");
+        foreach(string reason in new[]{"sdk-false","disconnected","pose-invalid","pose-nonfinite","initial-role","initial-class"})
+        {
+            runtime=new Runtime {RequireJointPoll=true};if(reason=="sdk-false")runtime.StateResult=false;if(reason=="disconnected")runtime.Connected=false;if(reason=="pose-invalid")runtime.Valid=false;if(reason=="pose-nonfinite")runtime.NonfinitePose=true;if(reason=="initial-role")runtime.InitialRoleMissing=true;if(reason=="initial-class")runtime.WrongClass=true;
+            read=Read(runtime);check(!read.Available && runtime.MetadataCalls==0 && runtime.IdentityCalls==0 && runtime.StateCalls==(reason.StartsWith("initial-")?0:1),"Rejected initial context or joint state cannot reach metadata, identity or output: "+reason);
+        }
+        foreach(string reason in new[]{"metadata-still-unknown","duplicate-trigger","identity-error","identity-empty","post-role-change"})
+        {
+            runtime=new Runtime {RequireJointPoll=true};if(reason=="metadata-still-unknown")runtime.MetadataError=true;if(reason=="duplicate-trigger")runtime.Kinds[2]=3;if(reason=="identity-error")runtime.IdentityError=true;if(reason=="identity-empty")runtime.EmptyIdentity=true;if(reason=="post-role-change")runtime.RoleChange=true;
+            read=Read(runtime);check(!read.Available && runtime.StateCalls==1,"A successful first joint poll never bypasses the remaining source guard: "+reason);
+        }
         foreach(int axis in new[]{2,3,4}) {runtime=new Runtime {Kinds=new[]{2,0,0,0,0}};runtime.Kinds[axis]=3;read=Read(runtime);check(read.Available && read.TriggerAxis==axis,"Trigger selection follows public metadata rather than assuming a fixed index");}
         foreach(string reason in new[]{"missing","duplicate","trackpad","metadata","unknown-kind","pose","role","analog"})
         {
