@@ -12,12 +12,16 @@ static class LegacyControllerChecks
     {
         public int AxisKind=2,StateCalls,RoleCalls,AxisCalls,StringCalls;
         public string Serial="fixture",Model="fixture-model";
-        public bool StringError,IdentityChange,ModelError,ModelChange,NonfinitePose,MissingStringReader;
+        public bool StringError,IdentityChange,ModelError,ModelChange,NonfinitePose,MissingStringReader,MissingStateReader,MissingAxisReader;
         public ETrackedPropertyError AxisError=ETrackedPropertyError.TrackedProp_Success;
         public bool PoseValid=true,Connected=true,RoleChange,StateSuccess=true,PropertyError;
         public ulong Pressed=1UL<<7,Touched;
         public uint StringLength=8;
         public float X=0.3f,Y=-0.4f;
+        public float PoseX,PoseY,PoseZ;
+        public VRControllerAxis_t[] ExtraAxes=new VRControllerAxis_t[4];
+        public int[] AxisKinds;
+        public ETrackedPropertyError[] AxisPropertyErrors;
         public IVRSystem Table()
         {
             var t=new IVRSystem();
@@ -25,7 +29,7 @@ static class LegacyControllerChecks
             t.GetControllerRoleForTrackedDeviceIndex=delegate(uint index) {return ETrackedControllerRole.RightHand;};
             t.GetTrackedDeviceClass=delegate(uint index) {return ETrackedDeviceClass.Controller;};
             t.GetInt32TrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,ref ETrackedPropertyError error)
-            {++AxisCalls;error=PropertyError?ETrackedPropertyError.TrackedProp_UnknownProperty:AxisError;return AxisKind;};
+            {++AxisCalls;error=AxisPropertyErrors!=null?AxisPropertyErrors[(int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32]:PropertyError?ETrackedPropertyError.TrackedProp_UnknownProperty:AxisError;return AxisKinds==null?AxisKind:AxisKinds[(int)property-(int)ETrackedDeviceProperty.Prop_Axis0Type_Int32];};
             t.GetStringTrackedDeviceProperty=delegate(uint index,ETrackedDeviceProperty property,StringBuilder value,uint capacity,ref ETrackedPropertyError error)
             {
                 ++StringCalls;bool model=property==ETrackedDeviceProperty.Prop_ModelNumber_String;
@@ -35,15 +39,15 @@ static class LegacyControllerChecks
             t.GetControllerStateWithPose=delegate(ETrackingUniverseOrigin origin,uint index,ref VRControllerState_t state,uint size,ref TrackedDevicePose_t pose)
             {
                 ++StateCalls;if(size!=(uint)Marshal.SizeOf(typeof(VRControllerState_t)) || origin!=ETrackingUniverseOrigin.TrackingUniverseStanding) throw new Exception("Incorrect public ABI arguments.");
-                state=new VRControllerState_t {unPacketNum=17,ulButtonPressed=Pressed,ulButtonTouched=Touched,rAxis0=new VRControllerAxis_t {x=X,y=Y}};
-                pose=new TrackedDevicePose_t {bDeviceIsConnected=Connected,bPoseIsValid=PoseValid,mDeviceToAbsoluteTracking=new HmdMatrix34_t {m0=1,m5=1,m10=1,m3=NonfinitePose?float.NaN:0}};return StateSuccess;
-            };if(MissingStringReader) t.GetStringTrackedDeviceProperty=null;return t;
+                state=new VRControllerState_t {unPacketNum=17,ulButtonPressed=Pressed,ulButtonTouched=Touched,rAxis0=new VRControllerAxis_t {x=X,y=Y},rAxis1=ExtraAxes[0],rAxis2=ExtraAxes[1],rAxis3=ExtraAxes[2],rAxis4=ExtraAxes[3]};
+                pose=new TrackedDevicePose_t {bDeviceIsConnected=Connected,bPoseIsValid=PoseValid,mDeviceToAbsoluteTracking=new HmdMatrix34_t {m0=1,m5=1,m10=1,m3=NonfinitePose?float.NaN:PoseX,m7=PoseY,m11=PoseZ}};return StateSuccess;
+            };if(MissingStringReader) t.GetStringTrackedDeviceProperty=null;if(MissingStateReader) t.GetControllerStateWithPose=null;if(MissingAxisReader) t.GetInt32TrackedDeviceProperty=null;return t;
         }
     }
-    static LegacyRightSample Read(Runtime runtime,bool buttonOnly=false,bool observedAxis=false)
+    static LegacyRightSample Read(Runtime runtime,bool buttonOnly=false,bool observedAxis=false,ControllerIdentityCapture capture=null)
     {
         var table=runtime.Table();IntPtr pointer=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(IVRSystem)));
-        try {Marshal.StructureToPtr(table,pointer,false);var system=new CVRSystem(pointer);var sample=OuterGamepadCompatibilityProfile.ReadSafely(system,observedAxis?OuterGamepadCompatibilityProfile.ObservedAxis0Name:buttonOnly?OuterGamepadCompatibilityProfile.ButtonOnlyWakeName:OuterGamepadCompatibilityProfile.WakeName);GC.KeepAlive(table);return sample;}
+        try {Marshal.StructureToPtr(table,pointer,false);var system=new CVRSystem(pointer);var sample=OuterGamepadCompatibilityProfile.ReadSafely(system,observedAxis?OuterGamepadCompatibilityProfile.ObservedAxis0Name:buttonOnly?OuterGamepadCompatibilityProfile.ButtonOnlyWakeName:OuterGamepadCompatibilityProfile.WakeName);if(capture!=null) capture.Capture(sample.IdentityDiagnostics,sample.Available,false,system);GC.KeepAlive(table);return sample;}
         finally {Marshal.DestroyStructure(pointer,typeof(IVRSystem));Marshal.FreeHGlobal(pointer);}
     }
     public static void Run(Action<bool,string> check)
@@ -167,6 +171,39 @@ static class LegacyControllerChecks
         var escaped=new ControllerIdentitySnapshot {InitialSerial=new StringPropertyObservation {RawValue="private\nidentity\0value",Returned=true,RequiredBytes=23,Length=22,InitialCapacity=257,ReturnedCapacity=257}};
         string escapedText=escaped.ToPrivateYaml();
         check(escapedText.Contains("private\\u000aidentity\\u0000value") && escapedText.Contains("private_device_identity: true") && !escapedText.Contains("private\nidentity"),"Private raw identity text is explicitly marked and escaped without injecting YAML/log structure");
+        r=new Runtime {Serial="app-view-controller",Model="app-view-model"};s=Read(r,false,true);
+        check(!s.Available && s.IdentityDiagnostics.IdentityRejected && s.IdentityDiagnostics.RejectedState==null && r.StateCalls==0 && r.AxisCalls==0 && r.StringCalls==2,"Identity rejection with private capture disabled performs zero passive state or axis-type reads");
+        string passiveDirectory=Path.Combine(Path.GetFullPath(".local-tools/identity-checks"),Guid.NewGuid().ToString("N"));capture=new ControllerIdentityCapture(passiveDirectory);
+        r=new Runtime {Serial="app-view-controller",Model="app-view-model",PoseX=0.27f,PoseY=1.23f,PoseZ=-0.41f,Pressed=128,Touched=256,X=0.35f,Y=0.6f,AxisKinds=new[]{2,3,0,1,99},AxisPropertyErrors=new[]{ETrackedPropertyError.TrackedProp_Success,ETrackedPropertyError.TrackedProp_Success,ETrackedPropertyError.TrackedProp_UnknownProperty,ETrackedPropertyError.TrackedProp_WrongDataType,ETrackedPropertyError.TrackedProp_Success}};
+        for(int i=0;i<4;++i) r.ExtraAxes[i]=new VRControllerAxis_t {x=i+0.1f,y=-i-0.2f};
+        s=Read(r,false,true,capture);var passive=s.IdentityDiagnostics.RejectedState;
+        check(!s.Available && s.UnavailableReason=="observed_transport_controller_identity_mismatch" && s.X==0 && s.Y==0 && !s.A && s.IdentityDiagnostics.Verdict=="identity_disagreement" && passive.StateResult==true && passive.Connected==true && passive.PoseValid==true,"Opt-in passive SDK output never becomes accepted input or changes the original identity rejection");
+        check(passive.Matrix.Length==12 && passive.MatrixFinite==true && Math.Abs(passive.Matrix[3]-0.27)<1e-6 && Math.Abs(passive.Matrix[7]-1.23)<1e-6 && Math.Abs(passive.Matrix[11]+0.41)<1e-6 && passive.Packet==17 && passive.Pressed==128 && passive.Touched==256 && passive.Axes.Length==10 && Math.Abs(passive.Axes[0]-0.35)<1e-6 && Math.Abs(passive.Axes[9]+3.2)<1e-6,"A rejected controller's entire matrix, packet, masks and all five raw XY axes remain independently inspectable");
+        check(r.StateCalls==1 && r.AxisCalls==5 && r.StringCalls==4 && passive.PostRightIndex==3 && passive.PostClass==ETrackedDeviceClass.Controller && passive.PostRole==ETrackedControllerRole.RightHand && passive.PostSerial.RawValue==r.Serial && passive.PostModel.RawValue==r.Model,"One captured rejection performs one joint read, five metadata reads and complete post-state public context/identity rechecks");
+        check(passive.AxisTypes[0]==2 && passive.AxisTypes[1]==3 && !passive.AxisTypes[2].HasValue && !passive.AxisTypes[3].HasValue && passive.AxisTypes[4]==99 && passive.AxisRawReturns[2]==0 && passive.AxisErrors[2]==ETrackedPropertyError.TrackedProp_UnknownProperty,"Passive metadata preserves all raw returns/errors while successful unknown enum integers remain raw and failed properties never imply a type");
+        string passiveText=File.ReadAllText(Path.Combine(passiveDirectory,"input-identity-1.yaml"));
+        check(passiveText.Contains("diagnostic_only: true") && passiveText.Contains("authorizes_input: false") && passiveText.Contains("raw_outputs_valid: true") && passiveText.Contains("raw_axes_0_to_4_xy:") && passiveText.Contains("passive_axis_type_properties:"),"Private passive evidence explicitly states its nonauthorizing role and contains the complete raw SDK fields");
+        for(int i=0;i<20;++i) s=Read(r,false,true,capture);
+        check(capture.Attempts==7 && r.StateCalls==7 && r.AxisCalls==35 && r.StringCalls==56,"Exhausted capture slots cannot continue passive API reads despite continued rejected polling");
+        capture=new ControllerIdentityCapture(Path.Combine(Path.GetFullPath(".local-tools/identity-checks"),Guid.NewGuid().ToString("N")));
+        r=new Runtime {Serial="app-view-controller",Model="app-view-model",Pressed=ulong.MaxValue,Touched=1UL<<63};s=Read(r,false,true,capture);
+        check(s.IdentityDiagnostics.ToPrivateYaml().Contains("pressed: 18446744073709551615") && s.IdentityDiagnostics.ToPrivateYaml().Contains("touched: 9223372036854775808"),"Passive button masks preserve all unsigned64 bits without overflow or lossy signed conversion");
+        foreach(string fault in new[]{"sdk_false","invalid_pose","disconnected","nonfinite","index_changed","identity_changed","state_exception","axis_exception"})
+        {
+            capture=new ControllerIdentityCapture(Path.Combine(Path.GetFullPath(".local-tools/identity-checks"),Guid.NewGuid().ToString("N")));
+            r=new Runtime {Serial="app-view-controller",Model="app-view-model"};
+            if(fault=="sdk_false") r.StateSuccess=false;if(fault=="invalid_pose") r.PoseValid=false;if(fault=="disconnected") r.Connected=false;if(fault=="nonfinite") r.NonfinitePose=true;
+            if(fault=="index_changed") r.RoleChange=true;if(fault=="identity_changed") r.IdentityChange=true;if(fault=="state_exception") r.MissingStateReader=true;if(fault=="axis_exception") r.MissingAxisReader=true;
+            s=Read(r,false,true,capture);passive=s.IdentityDiagnostics.RejectedState;
+            check(!s.Available && s.IdentityDiagnostics.IdentityRejected && passive!=null && passive.PostSerial!=null && passive.PostModel!=null,"Passive failures or context changes preserve original rejection and independent post-state results: "+fault);
+            if(fault=="sdk_false") check(passive.StateResult==false && s.IdentityDiagnostics.ToPrivateYaml().Contains("raw_outputs_valid: false"),"SDK false is recorded honestly and raw outputs are never marked valid");
+            if(fault=="invalid_pose") check(passive.PoseValid==false,"Passive invalid-pose flag remains invalid");if(fault=="disconnected") check(passive.Connected==false,"Passive disconnected flag is not promoted");
+            if(fault=="nonfinite") check(passive.MatrixFinite==false && s.IdentityDiagnostics.ToPrivateYaml().Contains("\"NaN\""),"Nonfinite passive matrix elements remain visible and are serialized without replacing them by zero");
+            if(fault=="index_changed") check(passive.PostRightIndex==4 && passive.QueriedIndex==3,"Post-role index change is distinguished from the index actually queried for state");
+            if(fault=="identity_changed") check(passive.PostSerial.RawValue=="replacement" && s.IdentityDiagnostics.InitialSerial.RawValue=="app-view-controller","Passive post-state identity cannot erase the original mismatch evidence");
+            if(fault=="state_exception") check(!passive.StateResult.HasValue && passive.StateException=="System.NullReferenceException" && passive.Matrix==null && passive.Packet==null,"A passive SDK wrapper exception has no fabricated successful state or pose payload");
+            if(fault=="axis_exception") check(!passive.AxisRawReturns[0].HasValue && passive.AxisExceptions[0]=="System.NullReferenceException" && passive.AxisTypes[0]==null,"Passive axis exceptions are recorded separately from metadata returns and types");
+        }
         foreach(string reason in new[]{"invalid_pose","disconnected","sdk_false","role_changed"})
         {
             r=new Runtime();if(reason=="invalid_pose") r.PoseValid=false;if(reason=="disconnected") r.Connected=false;if(reason=="sdk_false") r.StateSuccess=false;if(reason=="role_changed") r.RoleChange=true;

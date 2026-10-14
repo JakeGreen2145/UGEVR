@@ -239,13 +239,13 @@ public class Injector : BaseUnityPlugin
         gamepadDiagnostic.Tick(enabled,Application.isFocused,generation,input,now);
         if(inputIdentityCapture!=null)
         {
-            if(input.Available && !inputIdentityCapture.FirstSuccessAttempted) inputIdentityCapture.Capture(input.IdentityDiagnostics,true,false);
-            if(gamepadDiagnostic.Complete && !inputIdentityCapture.TerminalAttempted) inputIdentityCapture.Capture(gamepadDiagnostic.LastIdentitySnapshot,false,true);
+            if(input.Available && !inputIdentityCapture.FirstSuccessAttempted) inputIdentityCapture.Capture(input.IdentityDiagnostics,true,false,system);
+            if(gamepadDiagnostic.Complete && !inputIdentityCapture.TerminalAttempted) inputIdentityCapture.Capture(gamepadDiagnostic.LastIdentitySnapshot,false,true,system);
         }
         if(now>=nextInputReport)
         {
             nextInputReport=now+1;
-            if(inputIdentityCapture!=null && !gamepadDiagnostic.Complete) inputIdentityCapture.Capture(gamepadDiagnostic.LastIdentitySnapshot,false,false);
+            if(inputIdentityCapture!=null && !gamepadDiagnostic.Complete) inputIdentityCapture.Capture(gamepadDiagnostic.LastIdentitySnapshot,false,false,system);
             var identitySnapshot=gamepadDiagnostic.LastIdentitySnapshot;
             Logger.LogInfo("INPUT_DIAGNOSTIC profile="+gamepadDiagnosticProfile+" sourceAxes="+(input.AxesSource ?? "unavailable")+" axis0Metadata="+(input.Axis0Metadata ?? "not_queried")+" axis0Type="+(input.Axis0Type.HasValue?input.Axis0Type.Value.ToString():"unavailable")+" status="+gamepadDiagnostic.Status+" reason="+gamepadDiagnostic.Reason+" identityStage="+(identitySnapshot==null?"not_read":identitySnapshot.Stage)+" identityVerdict="+(identitySnapshot==null?"not_read":identitySnapshot.Verdict)+" identityCaptureAttempts="+(inputIdentityCapture==null?0:inputIdentityCapture.Attempts)+" identityCaptureError="+(inputIdentityCapture==null?"":inputIdentityCapture.LastError)+" nativeUnavailableReason="+gamepadDiagnostic.NativeUnavailableReason+" neutralReads="+gamepadDiagnostic.NeutralReads+" requiredNeutralReads="+gamepadDiagnostic.RequiredNeutralReads+" addAttempts="+gamepadDiagnostic.AddAttempts+
                 " queues="+gamepadDiagnostic.Queues+" appliedStateSamples="+gamepadDiagnostic.AppliedSamples+" releaseAttempts="+gamepadDiagnostic.ReleaseAttempts+

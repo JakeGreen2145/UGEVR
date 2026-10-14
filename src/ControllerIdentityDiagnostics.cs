@@ -1,11 +1,62 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using Valve.VR;
 
 namespace Ugevr
 {
+    // Separate passive output. It never supplies LegacyRightSample or authorizes input.
+    public sealed class RejectedControllerObservation
+    {
+        public string CapturedUtc,StateException,IndexException,ClassException,RoleException;
+        public uint QueriedIndex;
+        public bool? StateResult,Connected,PoseValid,MatrixFinite;
+        public uint? Packet,PostRightIndex;
+        public ulong? Pressed,Touched;
+        public double[] Matrix,Axes;
+        public readonly int?[] AxisRawReturns=new int?[5],AxisTypes=new int?[5];
+        public readonly ETrackedPropertyError?[] AxisErrors=new ETrackedPropertyError?[5];
+        public readonly string[] AxisExceptions=new string[5];
+        public ETrackedDeviceClass? PostClass;
+        public ETrackedControllerRole? PostRole;
+        public StringPropertyObservation PostSerial,PostModel;
+        public static RejectedControllerObservation Read(CVRSystem system,uint index)
+        {
+            var result=new RejectedControllerObservation {QueriedIndex=index,CapturedUtc=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture)};
+            var state=new VRControllerState_t();var pose=new TrackedDevicePose_t();
+            try
+            {
+                result.StateResult=system.GetControllerStateWithPose(ETrackingUniverseOrigin.TrackingUniverseStanding,index,ref state,(uint)Marshal.SizeOf(typeof(VRControllerState_t)),ref pose);
+                result.Connected=pose.bDeviceIsConnected;result.PoseValid=pose.bPoseIsValid;
+                var m=pose.mDeviceToAbsoluteTracking;
+                result.Matrix=new double[]{m.m0,m.m1,m.m2,m.m3,m.m4,m.m5,m.m6,m.m7,m.m8,m.m9,m.m10,m.m11};
+                result.MatrixFinite=true;foreach(double value in result.Matrix) if(Double.IsNaN(value) || Double.IsInfinity(value)) result.MatrixFinite=false;
+                result.Packet=state.unPacketNum;result.Pressed=state.ulButtonPressed;result.Touched=state.ulButtonTouched;
+                result.Axes=new double[]{state.rAxis0.x,state.rAxis0.y,state.rAxis1.x,state.rAxis1.y,state.rAxis2.x,state.rAxis2.y,state.rAxis3.x,state.rAxis3.y,state.rAxis4.x,state.rAxis4.y};
+            }
+            catch(Exception error) {result.StateException=error.GetType().FullName;}
+            for(int axis=0;axis<5;++axis)
+            {
+                var error=ETrackedPropertyError.TrackedProp_Success;
+                try
+                {
+                    int raw=system.GetInt32TrackedDeviceProperty(index,(ETrackedDeviceProperty)((int)ETrackedDeviceProperty.Prop_Axis0Type_Int32+axis),ref error);
+                    result.AxisRawReturns[axis]=raw;
+                    if(error==ETrackedPropertyError.TrackedProp_Success) result.AxisTypes[axis]=raw;
+                }
+                catch(Exception failure) {result.AxisExceptions[axis]=failure.GetType().FullName;}
+                result.AxisErrors[axis]=error;
+            }
+            try {result.PostRightIndex=system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand);} catch(Exception error) {result.IndexException=error.GetType().FullName;}
+            try {result.PostClass=system.GetTrackedDeviceClass(index);} catch(Exception error) {result.ClassException=error.GetType().FullName;}
+            try {result.PostRole=system.GetControllerRoleForTrackedDeviceIndex(index);} catch(Exception error) {result.RoleException=error.GetType().FullName;}
+            result.PostSerial=StringPropertyObservation.Read(system,index,ETrackedDeviceProperty.Prop_SerialNumber_String,"passive_post_serial");
+            result.PostModel=StringPropertyObservation.Read(system,index,ETrackedDeviceProperty.Prop_ModelNumber_String,"passive_post_model");
+            return result;
+        }
+    }
     public sealed class StringPropertyObservation
     {
         public string Stage,RawValue,ExceptionType;
@@ -52,6 +103,8 @@ namespace Ugevr
         public ETrackedDeviceClass? DeviceClass,PostClass;
         public ETrackedControllerRole? Role,PostRole;
         public StringPropertyObservation InitialSerial,InitialModel,PostSerial,PostModel;
+        public bool IdentityRejected;
+        public RejectedControllerObservation RejectedState;
         static string Scalar(string value)
         {
             var b=new StringBuilder("\"");value=value??"";
@@ -65,6 +118,19 @@ namespace Ugevr
             return b.Append('"').ToString();
         }
         static string Number<T>(T? value) where T:struct {return value.HasValue?Convert.ToInt64(value.Value,CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture):"null";}
+        static string Unsigned<T>(T? value) where T:struct {return value.HasValue?Convert.ToUInt64(value.Value,CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture):"null";}
+        static string Boolean(bool? value) {return value.HasValue?value.Value.ToString().ToLowerInvariant():"null";}
+        static string Array(double[] values)
+        {
+            if(values==null) return "null";
+            var b=new StringBuilder("[");
+            for(int i=0;i<values.Length;++i)
+            {
+                if(i>0) b.Append(", ");string value=values[i].ToString("R",CultureInfo.InvariantCulture);
+                b.Append(Double.IsNaN(values[i]) || Double.IsInfinity(values[i])?Scalar(value):value);
+            }
+            return b.Append(']').ToString();
+        }
         static void Property(StringBuilder b,string name,StringPropertyObservation value)
         {
             if(value==null) {b.Append(name+": null\n");return;}
@@ -86,6 +152,29 @@ namespace Ugevr
                 "\npost_role_name: "+Scalar(PostRole.HasValue?PostRole.Value.ToString():null)+"\npost_role_code: "+Number(PostRole)+"\n");
             Property(b,"initial_serial",InitialSerial);Property(b,"initial_model",InitialModel);
             Property(b,"post_serial",PostSerial);Property(b,"post_model",PostModel);
+            var passive=RejectedState;
+            b.Append("identity_rejected: "+IdentityRejected.ToString().ToLowerInvariant()+"\npassive_rejected_state: "+(passive==null?"null\n":"\n"));
+            if(passive!=null)
+            {
+                b.Append("  diagnostic_only: true\n  authorizes_input: false\n  capture_time_utc: "+Scalar(passive.CapturedUtc)+
+                    "\n  queried_index: "+passive.QueriedIndex+"\n  origin: standing\n  state_result: "+Boolean(passive.StateResult)+
+                    "\n  raw_outputs_valid: "+(passive.StateResult==true).ToString().ToLowerInvariant()+"\n  state_exception: "+Scalar(passive.StateException)+
+                    "\n  connected: "+Boolean(passive.Connected)+"\n  pose_valid: "+Boolean(passive.PoseValid)+"\n  matrix_finite: "+Boolean(passive.MatrixFinite)+
+                    "\n  matrix_3x4_row_major: "+Array(passive.Matrix)+"\n  packet: "+Unsigned(passive.Packet)+"\n  pressed: "+Unsigned(passive.Pressed)+
+                    "\n  touched: "+Unsigned(passive.Touched)+"\n  raw_axes_0_to_4_xy: "+Array(passive.Axes)+
+                    "\n  post_right_index: "+Number(passive.PostRightIndex)+"\n  post_class_at_queried_index: "+Number(passive.PostClass)+
+                    "\n  post_role_at_queried_index: "+Number(passive.PostRole)+"\n  post_index_exception: "+Scalar(passive.IndexException)+
+                    "\n  post_class_exception: "+Scalar(passive.ClassException)+"\n  post_role_exception: "+Scalar(passive.RoleException)+"\n");
+                Property(b,"passive_post_serial",passive.PostSerial);Property(b,"passive_post_model",passive.PostModel);
+                b.Append("passive_axis_type_properties:\n");
+                for(int axis=0;axis<5;++axis)
+                {
+                    b.Append("  axis"+axis+":\n    returned: "+passive.AxisRawReturns[axis].HasValue.ToString().ToLowerInvariant()+
+                        "\n    raw_return: "+Number(passive.AxisRawReturns[axis])+"\n    type_value: "+Number(passive.AxisTypes[axis])+
+                        "\n    error_name: "+Scalar(passive.AxisErrors[axis].HasValue?passive.AxisErrors[axis].Value.ToString():null)+
+                        "\n    error_code: "+Number(passive.AxisErrors[axis])+"\n    exception_type: "+Scalar(passive.AxisExceptions[axis])+"\n");
+                }
+            }
             return b.ToString();
         }
     }
@@ -103,6 +192,8 @@ namespace Ugevr
             directory=Path.GetFullPath(evidenceDirectory);LastError="";
         }
         public void Capture(ControllerIdentitySnapshot snapshot,bool successful,bool terminal)
+        {Capture(snapshot,successful,terminal,null);}
+        public void Capture(ControllerIdentitySnapshot snapshot,bool successful,bool terminal,CVRSystem system)
         {
             if(snapshot==null) return;
             if(!terminal && !successful && snapshot.InitialSerial==null && snapshot.InitialModel==null && snapshot.PostSerial==null && snapshot.PostModel==null) return;
@@ -113,6 +204,9 @@ namespace Ugevr
             ++Attempts;
             try
             {
+                // Only an opted-in capture with an available record slot performs extra reads.
+                if(system!=null && snapshot.IdentityRejected && snapshot.RejectedState==null && snapshot.Index.HasValue && snapshot.Index.Value<OpenVR.k_unMaxTrackedDeviceCount)
+                    snapshot.RejectedState=RejectedControllerObservation.Read(system,snapshot.Index.Value);
                 byte[] bytes=new UTF8Encoding(false).GetBytes(snapshot.ToPrivateYaml());
                 if(bytes.Length>16384) throw new InvalidOperationException("Identity evidence exceeds 16384 bytes.");
                 Directory.CreateDirectory(directory);

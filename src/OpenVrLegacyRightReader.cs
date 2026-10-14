@@ -38,13 +38,13 @@ namespace Ugevr
             sample.UnavailableReason=prefix+"_controller_identity_mismatch";
             snapshot.Stage="initial_serial";snapshot.InitialSerial=StringPropertyObservation.Read(system,index,ETrackedDeviceProperty.Prop_SerialNumber_String,snapshot.Stage);
             snapshot.Stage="initial_model";snapshot.InitialModel=StringPropertyObservation.Read(system,index,ETrackedDeviceProperty.Prop_ModelNumber_String,snapshot.Stage);
-            snapshot.Stage="initial_identity_validation";
+            snapshot.Stage="initial_identity_validation";snapshot.IdentityRejected=true;
             string serial=snapshot.InitialSerial.AcceptedValue,model=snapshot.InitialModel.AcceptedValue;
             if(!snapshot.InitialSerial.Returned || !snapshot.InitialModel.Returned)
             {snapshot.Verdict="reader_exception";sample.UnavailableReason="reader_exception:"+(snapshot.InitialSerial.ExceptionType??snapshot.InitialModel.ExceptionType);return sample;}
             if(!snapshot.InitialSerial.Accepted || !snapshot.InitialModel.Accepted) {snapshot.Verdict="property_result_rejected";return sample;}
             if(!String.Equals(serial,expectedSerial,StringComparison.Ordinal) || !String.Equals(model,expectedModel,StringComparison.Ordinal)) {snapshot.Verdict="identity_disagreement";return sample;}
-            snapshot.Verdict="initial_identity_matched";
+            snapshot.IdentityRejected=false;snapshot.Verdict="initial_identity_matched";
             if(includeAxes)
             {
                 snapshot.Stage="axis0_metadata";
@@ -73,11 +73,12 @@ namespace Ugevr
             sample.UnavailableReason=prefix+"_controller_identity_changed";
             snapshot.Stage="post_serial";snapshot.PostSerial=StringPropertyObservation.Read(system,index,ETrackedDeviceProperty.Prop_SerialNumber_String,snapshot.Stage);
             snapshot.Stage="post_model";snapshot.PostModel=StringPropertyObservation.Read(system,index,ETrackedDeviceProperty.Prop_ModelNumber_String,snapshot.Stage);
-            snapshot.Stage="post_identity_validation";
+            snapshot.Stage="post_identity_validation";snapshot.IdentityRejected=true;
             if(!snapshot.PostSerial.Returned || !snapshot.PostModel.Returned)
             {snapshot.Verdict="reader_exception";sample.UnavailableReason="reader_exception:"+(snapshot.PostSerial.ExceptionType??snapshot.PostModel.ExceptionType);return sample;}
             if(!snapshot.PostSerial.Accepted || !snapshot.PostModel.Accepted) {snapshot.Verdict="property_result_rejected";return sample;}
             if(snapshot.PostSerial.AcceptedValue!=serial || snapshot.PostModel.AcceptedValue!=model) {snapshot.Verdict="identity_disagreement";return sample;}
+            snapshot.IdentityRejected=false;
             if(includeAxes)
             {
                 snapshot.Stage="axis0_state_validation";
