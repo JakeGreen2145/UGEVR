@@ -179,3 +179,27 @@ capture request or recording was admitted. Zero failure files were collected,
 which means no retained diagnostic rather than proof of no possible failure.
 This supports the configured startup path through the camera transition. It does
 not prove native stereo/UI image correctness or the 3–5 minute gameplay gate.
+
+## First matched host images after the correction
+
+A fresh automated Firewatch launch used the same distribution and configuration.
+After a ten-second passive title-menu settling interval, one capture request
+produced both 1399 by 1399 eye images, capture and camera diagnostics, and a
+complete restoration record. Pair 594 joined native frame 610, generation 1.
+The guarded result applied local restoration without refusal, and both actual
+Unity position and rotation comparisons passed.
+
+Root inspected both decoded images. Each shows the Firewatch logo, lookout scene
+and Continue, New Game, Load Game, Settings, Special Features and Quit options.
+Some white labels have limited contrast against clouds. Rectangular sky-edge
+discontinuities and substantial eye-to-eye placement differences remain visible;
+this observation does not establish their cause or correct binocular geometry.
+
+The trial refused at a headset process-context query before dispatching its Frame
+screenshot client. That query did not retain its failing stdout or stderr, so its
+native cause remains unclassified. No headset image or delivery claim follows
+from this run. Unconditional owned cleanup completed with exit 0, restoring the
+deployment, baseline configuration, stream and lease. Save metadata was unchanged
+and its contents remained unread. No gameplay or input was attempted. This is
+host-image evidence for the title UI; headset validation and the gameplay gate
+remain open.
