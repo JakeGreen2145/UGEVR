@@ -132,11 +132,16 @@ namespace Rewired
         public class ControllerHelper
         {
             public List<CustomController> CustomControllers {get;private set;}
-            public List<Controller> Joysticks {get;private set;}
+            public List<Controller> JoystickContent {get;private set;}
+            public Func<object> JoystickResult;
+            public int JoystickQueries;
+            // Reflection consumes an object. This override permits malformed
+            // collection results without executing any game code.
+            public object Joysticks {get {++JoystickQueries;return JoystickResult==null?JoystickContent:JoystickResult();}}
             public bool ThrowCreateAfter,ForeignCreateNull,ForeignCreateThrow,CreateDisabled;
             public int Destroys;
             public Action DestroyAction;
-            public ControllerHelper() {CustomControllers=new List<CustomController>();Joysticks=new List<Controller>();}
+            public ControllerHelper() {CustomControllers=new List<CustomController>();JoystickContent=new List<Controller>();}
             public CustomController CreateCustomController(int definitionId,string tag)
             {if(Data.GetCustomControllerById(definitionId)==null)return null;var controller=new CustomController(40,definitionId,Data.GetCustomControllerById(definitionId).axisCount){tag=ForeignCreateNull||ForeignCreateThrow?"game-owned":tag,enabled=!CreateDisabled};CustomControllers.Add(controller);if(ThrowCreateAfter||ForeignCreateThrow)throw new Exception("Creation after mutation");return ForeignCreateNull?null:controller;}
             public Controller LastActive;

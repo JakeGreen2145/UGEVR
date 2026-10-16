@@ -49,6 +49,7 @@ namespace Ugevr
         public RewiredFailureInfo LastFailure {get;private set;}
         public RewiredFailureInfo LastCleanupFailure {get;private set;}
         string snapshotDomain="not_started";
+        JoystickInventory snapshotJoysticks;
         string addStage;
         bool? preflightReady;
         int? preflightDefinitions,preflightCustomDevices,preflightJoysticks;
@@ -185,6 +186,59 @@ namespace Ugevr
         {
             IEnumerable source=values as IEnumerable;if(source==null) throw new InvalidOperationException("Public collection unavailable.");
             var result=new List<object>();foreach(object value in source) {if(value==null || result.Count==bound) throw new InvalidOperationException("Public collection bound/null exceeded.");result.Add(value);}return result.ToArray();
+        }
+        // Specialized observation of the ONE existing runtime joystick query.
+        // This spells out foreach's disposal semantics so a Dispose exception
+        // still supersedes a body/MoveNext/Current exception, just as before.
+        sealed class JoystickInventory
+        {
+            bool started;
+            string verdict="not_started",operation="collection";
+            int observed;
+            public object[] CompletedItems {get;private set;}
+            public RewiredJoystickInventoryInfo Info
+            {get {return !started?null:new RewiredJoystickInventoryInfo(verdict,operation,observed,CompletedItems==null?(int?)null:CompletedItems.Length);}}
+            public object[] Read(object values)
+            {
+                started=true;
+                if(values==null){verdict="collection_null";throw new InvalidOperationException("Public collection unavailable.");}
+                IEnumerable source=values as IEnumerable;
+                if(source==null){verdict="collection_not_enumerable";throw new InvalidOperationException("Public collection unavailable.");}
+                var result=new List<object>();IEnumerator enumerator;
+                operation="get_enumerator";
+                try {enumerator=source.GetEnumerator();}
+                catch {verdict="enumerator_exception";throw;}
+                try
+                {
+                    while(true)
+                    {
+                        bool more;operation="move_next";
+                        try {more=enumerator.MoveNext();}catch {verdict="enumerator_exception";throw;}
+                        if(!more)break;
+                        object value;operation="current";
+                        try {value=enumerator.Current;}catch {verdict="enumerator_exception";throw;}
+                        operation="entry";
+                        if(value==null){verdict="null_entry";throw new InvalidOperationException("Public collection bound/null exceeded.");}
+                        ++observed;
+                        if(result.Count==64){verdict="bound_exceeded";throw new InvalidOperationException("Public collection bound/null exceeded.");}
+                        try {result.Add(value);}catch {operation="append";verdict="materialization_exception";throw;}
+                    }
+                }
+                finally
+                {
+                    IDisposable disposable=enumerator as IDisposable;
+                    if(disposable!=null)
+                    {
+                        // Successful disposal must not erase a pending body's
+                        // category; only an actual disposal exception replaces it.
+                        try {disposable.Dispose();}catch {operation="dispose";verdict="enumerator_exception";throw;}
+                    }
+                }
+                operation="materialize";
+                try {CompletedItems=result.ToArray();}catch {verdict="materialization_exception";throw;}
+                operation="completed";verdict=CompletedItems.Length==0?"completed_empty":"completed_nonempty";
+                return CompletedItems;
+            }
         }
         static bool Contains(object[] values,object value) {foreach(object item in values) if(System.Object.ReferenceEquals(item,value)) return true;return false;}
         static int References(object[] values,object value) {int count=0;foreach(object item in values) if(System.Object.ReferenceEquals(item,value)) ++count;return count;}
@@ -429,7 +483,8 @@ namespace Ugevr
         RewiredOwnershipSnapshot Snapshot(bool excludeMapEnabled=false)
         {
             snapshotDomain="physical_joysticks";
-            if(Bounded(PublicValue(global,"Joysticks"),64).Length!=0) throw new InvalidOperationException("Physical joystick conflict appeared.");
+            snapshotJoysticks=new JoystickInventory();
+            if(snapshotJoysticks.Read(PublicValue(global,"Joysticks")).Length!=0) throw new InvalidOperationException("Physical joystick conflict appeared.");
             snapshotDomain="definition";
             RewiredOwnershipSnapshot original=DefinitionSnapshot();var nodes=new List<object>(original.Nodes);var text=new StringBuilder(original.Values);
             snapshotDomain="runtime_channels";
@@ -576,9 +631,11 @@ namespace Ugevr
             }
         }
         void RememberFailure(Exception error,string stage)
-        {try {if(LastFailure==null)LastFailure=RewiredFailureInfo.Capture(error,stage,"public_callback_failed");}catch { }}
+        {try {if(LastFailure==null){var inventory=stage=="callback_snapshot_physical_joysticks" && snapshotJoysticks!=null?snapshotJoysticks.Info:null;
+            LastFailure=RewiredFailureInfo.Capture(error,stage,inventory==null?"public_callback_failed":"joystick_"+inventory.Verdict,inventory:inventory);}}catch { }}
         void RememberCleanupFailure(Exception error,string stage)
-        {try {if(LastCleanupFailure==null)LastCleanupFailure=RewiredFailureInfo.Capture(error,stage,"public_cleanup_failed");}catch { }}
+        {try {if(LastCleanupFailure==null){var inventory=stage=="cleanup_snapshot_physical_joysticks" && snapshotJoysticks!=null?snapshotJoysticks.Info:null;
+            LastCleanupFailure=RewiredFailureInfo.Capture(error,stage,inventory==null?"public_cleanup_failed":"joystick_"+inventory.Verdict,inventory:inventory);}}catch { }}
         public void Remove()
         {
             string stage="cleanup_thread";

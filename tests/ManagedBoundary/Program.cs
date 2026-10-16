@@ -47,6 +47,7 @@ class Program
         RewiredMapFactoryChecks.Run(Assert);
         RewiredRuntimeChecks.Run(Assert);
         RewiredCallbackFailureChecks.Run(Assert);
+        RewiredJoystickInventoryChecks.Run(Assert);
         RewiredMapActivationChecks.Run(Assert);
         RewiredPairSourceChecks.Run(Assert);
         PairReadinessChecks.Run(Assert);
