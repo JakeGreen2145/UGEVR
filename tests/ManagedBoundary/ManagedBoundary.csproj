@@ -37,6 +37,7 @@
     <Compile Include="../../src/CameraRestorationComparison.cs" Link="CameraRestorationComparison.cs" />
     <Compile Include="../../src/CameraLocalRestoration.cs" Link="CameraLocalRestoration.cs" />
     <Compile Include="../../src/CameraState.cs" Link="CameraState.cs" />
+    <Compile Include="../../src/GuardedCameraFailureDiagnostics.cs" Link="GuardedCameraFailureDiagnostics.cs" />
     <Compile Include="../../src/CameraPoseCaptureRequests.cs" Link="CameraPoseCaptureRequests.cs" />
     <Compile Include="../../src/CameraRestorationPoseDiagnostics.cs" Link="CameraRestorationPoseDiagnostics.cs" />
     <Compile Include="../../src/CameraCurrentScope.cs" Link="CameraCurrentScope.cs" />

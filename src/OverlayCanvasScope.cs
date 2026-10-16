@@ -15,6 +15,71 @@ namespace Ugevr
         readonly List<CanvasState> canvases=new List<CanvasState>();
         readonly List<CanvasState> inactiveCanvases=new List<CanvasState>();
         readonly List<RectState> rects=new List<RectState>();
+        CameraLocalRestoration guardedCache;
+        RectState guardedCameraRect,guardedParentRect;
+        int guardedCameraWriteAttempts,guardedParentWriteAttempts,guardedFinalWriteAttempts,guardedCameraLayoutAttempts,guardedParentLayoutAttempts;
+        int guardedCameraWritesReturned,guardedParentWritesReturned,guardedFinalWritesReturned,guardedCameraLayoutReturned,guardedParentLayoutReturned;
+        internal void TrackGuardedCameraOverlap(CameraLocalRestoration cache)
+        {
+            if(guardedCache!=null)return;
+            guardedCache=cache;
+            foreach(var state in rects)
+            {
+                if(System.Object.ReferenceEquals(state.Rect,cache.CachedTransform))guardedCameraRect=state;
+                if(System.Object.ReferenceEquals(state.Rect,cache.CachedParent))guardedParentRect=state;
+            }
+        }
+        void NoteGuardedWrite(RectState state,bool final)
+        {
+            if(guardedCache==null)return;
+            if(System.Object.ReferenceEquals(state,guardedCameraRect)) {if(final)++guardedFinalWriteAttempts;else ++guardedCameraWriteAttempts;}
+            if(!final && System.Object.ReferenceEquals(state,guardedParentRect))++guardedParentWriteAttempts;
+        }
+        void NoteGuardedLayoutWrite(RectState state)
+        {
+            if(guardedCache==null)return;
+            if(System.Object.ReferenceEquals(state,guardedCameraRect))++guardedCameraLayoutAttempts;
+            if(System.Object.ReferenceEquals(state,guardedParentRect))++guardedParentLayoutAttempts;
+        }
+        void NoteGuardedWriteReturned(RectState state,bool final)
+        {
+            if(guardedCache==null)return;
+            if(System.Object.ReferenceEquals(state,guardedCameraRect)) {if(final)++guardedFinalWritesReturned;else ++guardedCameraWritesReturned;}
+            if(!final && System.Object.ReferenceEquals(state,guardedParentRect))++guardedParentWritesReturned;
+        }
+        void NoteGuardedLayoutReturned(RectState state)
+        {
+            if(guardedCache==null)return;
+            if(System.Object.ReferenceEquals(state,guardedCameraRect))++guardedCameraLayoutReturned;
+            if(System.Object.ReferenceEquals(state,guardedParentRect))++guardedParentLayoutReturned;
+        }
+        internal string CachedGuardedCameraHandover()
+        {
+            var b=new StringBuilder("overlay_handover:\n  source: cached_rect_inventory_and_attempted_writes\n  attempts_are_not_successes: true\n  higher_ancestor_overlap: unavailable\n");
+            b.Append("  tracked: "+(guardedCache!=null).ToString().ToLowerInvariant()+"\n");
+            b.Append("  camera_rect_id: "+(guardedCameraRect==null?"null":guardedCameraRect.Id.ToString(CultureInfo.InvariantCulture))+"\n");
+            b.Append("  direct_parent_rect_id: "+(guardedParentRect==null?"null":guardedParentRect.Id.ToString(CultureInfo.InvariantCulture))+"\n");
+            b.Append("  camera_dispose_pose_write_attempts: "+guardedCameraWriteAttempts+"\n  parent_dispose_pose_write_attempts: "+guardedParentWriteAttempts+"\n  camera_final_rebuild_write_attempts: "+guardedFinalWriteAttempts+"\n");
+            b.Append("  camera_dispose_pose_setters_returned: "+guardedCameraWritesReturned+"\n  parent_dispose_pose_setters_returned: "+guardedParentWritesReturned+"\n  camera_final_rebuild_setters_returned: "+guardedFinalWritesReturned+"\n");
+            b.Append("  dispose_pose_fields: localRotation_localScale_anchoredPosition3D\n  dispose_layout_fields: anchorMin_anchorMax_pivot_sizeDelta\n  camera_dispose_layout_write_attempts: "+guardedCameraLayoutAttempts+"\n  parent_dispose_layout_write_attempts: "+guardedParentLayoutAttempts+"\n");
+            b.Append("  camera_dispose_layout_setters_returned: "+guardedCameraLayoutReturned+"\n  parent_dispose_layout_setters_returned: "+guardedParentLayoutReturned+"\n  setter_return_does_not_prove_retained_value: true\n");
+            b.Append("  scope_dispose_entered: "+disposed.ToString().ToLowerInvariant()+"\n  restoration_conflicts_at_publication: "+RestorationConflicts+"\n  selected_camera_rect_restorations_at_publication: "+SelectedCameraRectRestorations+"\n");
+            CachedRect(b,"camera",guardedCameraRect);CachedRect(b,"direct_parent",guardedParentRect);return b.ToString();
+        }
+        static void CachedRect(StringBuilder b,string label,RectState state)
+        {
+            b.Append("  "+label+"_original_rect_values:");
+            if(state==null){b.Append(" null\n");return;}
+            b.Append("\n");
+            CachedArray(b,"anchor_min",Values(state.AnchorMin));CachedArray(b,"anchor_max",Values(state.AnchorMax));CachedArray(b,"pivot",Values(state.Pivot));CachedArray(b,"size_delta",Values(state.Size));
+            CachedArray(b,"local_position",Values(state.LocalPosition));CachedArray(b,"local_rotation_xyzw",Values(state.LocalRotation));
+            CachedArray(b,"local_scale",Values(state.LocalScale));CachedArray(b,"anchored_position",Values(state.AnchoredPosition));
+        }
+        static void CachedArray(StringBuilder b,string label,float[] values)
+        {
+            b.Append("    "+label+": [");
+            for(int i=0;i<values.Length;++i){if(i>0)b.Append(", ");float v=values[i];string text=((double)v).ToString("R",CultureInfo.InvariantCulture);b.Append(Single.IsNaN(v)||Single.IsInfinity(v)?"'"+text+"'":text);}b.Append("]\n");
+        }
         readonly List<string> errors=new List<string>();
         readonly List<string> rectMismatches=new List<string>();
         readonly UiLayoutDiagnostics layoutInputs;
@@ -319,16 +384,16 @@ namespace Ugevr
             {
                 RectTransform rect=state.Rect;
                 if (rect==null) { ++DestroyedObjects; continue; }
-                Attempt(delegate {rect.anchorMin=state.AnchorMin;},"rect anchor min");
-                Attempt(delegate {rect.anchorMax=state.AnchorMax;},"rect anchor max");
-                Attempt(delegate {rect.pivot=state.Pivot;},"rect pivot");
-                Attempt(delegate {rect.sizeDelta=state.Size;},"rect size");
-                Attempt(delegate {rect.localRotation=state.LocalRotation;},"rect rotation");
-                Attempt(delegate {rect.localScale=state.LocalScale;},"rect scale");
+                Attempt(delegate {NoteGuardedLayoutWrite(state);rect.anchorMin=state.AnchorMin;NoteGuardedLayoutReturned(state);},"rect anchor min");
+                Attempt(delegate {NoteGuardedLayoutWrite(state);rect.anchorMax=state.AnchorMax;NoteGuardedLayoutReturned(state);},"rect anchor max");
+                Attempt(delegate {NoteGuardedLayoutWrite(state);rect.pivot=state.Pivot;NoteGuardedLayoutReturned(state);},"rect pivot");
+                Attempt(delegate {NoteGuardedLayoutWrite(state);rect.sizeDelta=state.Size;NoteGuardedLayoutReturned(state);},"rect size");
+                Attempt(delegate {NoteGuardedWrite(state,false);rect.localRotation=state.LocalRotation;NoteGuardedWriteReturned(state,false);},"rect rotation");
+                Attempt(delegate {NoteGuardedWrite(state,false);rect.localScale=state.LocalScale;NoteGuardedWriteReturned(state,false);},"rect scale");
                 // Anchored and local position are coupled. Assigning local XY after
                 // anchored XY subtracts the anchor reference again and loses bits.
                 // Restore the authoritative anchored value once, including Z.
-                Attempt(delegate {rect.anchoredPosition3D=state.AnchoredPosition;},"rect anchored position");
+                Attempt(delegate {NoteGuardedWrite(state,false);rect.anchoredPosition3D=state.AnchoredPosition;NoteGuardedWriteReturned(state,false);},"rect anchored position");
                 Attempt(delegate {
                     Verify(state,"anchorMin",Values(state.AnchorMin),Values(rect.anchorMin));
                     Verify(state,"anchorMax",Values(state.AnchorMax),Values(rect.anchorMax));
@@ -403,8 +468,8 @@ namespace Ugevr
                     // restored local UI values. World-to-local float cancellation
                     // can lose a small anchored offset. Restore its saved canonical
                     // local pose last; no changed local value is accepted as roundoff.
-                    Attempt(delegate {cameraRect.localRotation=state.LocalRotation;},"final selected camera rect rotation "+state.Name);
-                    Attempt(delegate {cameraRect.anchoredPosition3D=state.AnchoredPosition;},"final selected camera rect anchored position "+state.Name);
+                    Attempt(delegate {NoteGuardedWrite(state,true);cameraRect.localRotation=state.LocalRotation;NoteGuardedWriteReturned(state,true);},"final selected camera rect rotation "+state.Name);
+                    Attempt(delegate {NoteGuardedWrite(state,true);cameraRect.anchoredPosition3D=state.AnchoredPosition;NoteGuardedWriteReturned(state,true);},"final selected camera rect anchored position "+state.Name);
                     ++SelectedCameraRectRestorations;
                     break;
                 }

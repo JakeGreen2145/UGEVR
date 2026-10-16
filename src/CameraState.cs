@@ -21,12 +21,17 @@ namespace Ugevr
         bool restored;
         readonly CameraLocalRestoration localRestoration;
         readonly bool guardedLocal;
+        readonly GuardedCameraFailureRecord failureEvidence;
+        internal CameraLocalRestoration CachedLocalRestoration {get {return localRestoration;}}
         public CameraState(Camera camera) : this(camera,null) {}
         public CameraState(Camera camera,CameraRestorationPoseRecord diagnostic) : this(camera,diagnostic,CameraTransformRestoration.World) {}
         public CameraState(Camera camera,CameraRestorationPoseRecord diagnostic,CameraTransformRestoration mode)
+            : this(camera,diagnostic,mode,null) {}
+        public CameraState(Camera camera,CameraRestorationPoseRecord diagnostic,CameraTransformRestoration mode,GuardedCameraFailureRecord failureEvidence)
         {
             this.camera=camera;
             this.diagnostic=diagnostic;
+            this.failureEvidence=failureEvidence;
             guardedLocal=mode==CameraTransformRestoration.GuardedLocal;
             if(mode!=CameraTransformRestoration.World && diagnostic!=null)diagnostic.SelectLocalMode(guardedLocal?"guarded-local":"local-with-world-fallback");
             position=camera.transform.position; rotation=camera.transform.rotation;
@@ -35,7 +40,10 @@ namespace Ugevr
                 localRestoration=new CameraLocalRestoration(camera,position,rotation,guardedLocal);
                 if(diagnostic!=null)diagnostic.SelectLocalRestoration(localRestoration);
                 if(guardedLocal && localRestoration.AdmissionRefusal!=null)
+                {
+                    NoteFailure(localRestoration.AdmissionRefusal,"constructor_admission");
                     throw new InvalidOperationException("Guarded camera restoration admission refused: "+localRestoration.AdmissionRefusal);
+                }
             }
             if(diagnostic!=null)diagnostic.ObserveSavedWorld(position,rotation);
             target=camera.targetTexture; projection=camera.projectionMatrix;
@@ -68,15 +76,17 @@ namespace Ugevr
                     if (automaticView) camera.ResetWorldToCameraMatrix(); else camera.worldToCameraMatrix=view;
                 }
             }
-            if(snapshotFailure!=null)throw new InvalidOperationException("Guarded camera restoration admission failed: matrix_snapshot_or_restore_exception",snapshotFailure);
+            if(snapshotFailure!=null) {NoteFailure("matrix_snapshot_or_restore_exception","constructor_matrix_admission");throw new InvalidOperationException("Guarded camera restoration admission failed: matrix_snapshot_or_restore_exception",snapshotFailure);}
         }
+        void NoteFailure(string reason,string phase="guarded_dispose")
+        {if(failureEvidence!=null)try {failureEvidence.Failed(localRestoration,reason,phase);}catch {}}
         public void RecordOwnedEyePose() {if(localRestoration!=null)localRestoration.RecordOwnedEyePose();}
         public void Dispose()
         {
             if (restored) return;
             if(camera==null)
             {
-                if(guardedLocal) {restored=true;throw new InvalidOperationException("Guarded camera restoration failed: camera_unavailable");}
+                if(guardedLocal) {restored=true;NoteFailure("camera_unavailable");throw new InvalidOperationException("Guarded camera restoration failed: camera_unavailable");}
                 return;
             }
             restored=true;
@@ -128,7 +138,10 @@ namespace Ugevr
             // Dispose runs before SetEyeTextures/Submit in the injector. Refusal
             // or partial cleanup therefore prevents this pair from submission.
             if(first!=null || conflict!=null)
+            {
+                NoteFailure(conflict??"restoration_setter_or_query_exception");
                 throw new InvalidOperationException("Guarded camera restoration failed: "+(conflict??"restoration_setter_or_query_exception"),first);
+            }
         }
         static bool Equal(Matrix4x4 a,Matrix4x4 b)
         {

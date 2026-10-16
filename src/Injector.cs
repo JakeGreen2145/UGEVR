@@ -51,6 +51,7 @@ public class Injector : BaseUnityPlugin
     double nextRewiredPairSourceReport;
     bool captureRewiredPairSourceDetails;
     CameraRestorationPoseDiagnostics cameraPoseDiagnostics;
+    GuardedCameraFailureDiagnostics guardedFailureDiagnostics;
     CameraPoseCaptureRequests cameraPoseCaptureRequests;
     string cameraPoseAdmissionError;
     bool captureInputIdentityDetails;
@@ -101,7 +102,7 @@ public class Injector : BaseUnityPlugin
             unitsPerMeter=Config.Bind("Tracking","UnitsPerMeter",1f,"Game world units per physical meter.").Value;
             retainGameTilt=Config.Bind("Tracking","RetainGamePitchAndRoll",false,"Keep game camera pitch and roll in the tracking anchor.").Value;
             capturesEnabled=Config.Bind("Diagnostics","CaptureImages",false,"Allow explicitly requested eye and compositor images.").Value;
-            bool captureCameraRestorationPose=Config.Bind("Diagnostics","CaptureCameraRestorationPoseDetails",false,"Private passive transform evidence for at most eight capture requests admitted before an eye pair. Requires CaptureImages and a controller session; late requests defer to the next pair and exhausted capacity preserves requests without image capture. Records world/local pose and parent instance identity; does not change restoration or its aggregate comparison.").Value && capturesEnabled;
+            bool captureCameraRestorationPose=Config.Bind("Diagnostics","CaptureCameraRestorationPoseDetails",false,"Private passive transform evidence for at most eight capture requests admitted before an eye pair. Requires CaptureImages and a controller session; late requests defer to the next pair and exhausted capacity preserves requests without image capture. Also emits at most eight cached guarded-failure records without a capture request. Records world/local pose and parent instance identity; does not change restoration or its aggregate comparison.").Value && capturesEnabled;
             captureNativeUiState=Config.Bind("Diagnostics","CaptureNativeUiState",false,"Opt-in cached CanvasRenderer cull/clipping/alpha and render-context observations only for capture requests admitted before the eye pair. No native UI state is restored; requires CaptureImages.").Value && capturesEnabled;
             nativeUiRendererLimit=Config.Bind("Diagnostics","NativeUiRendererLimit",NativeUiStateDiagnostics.DefaultRendererLimit,"Explicit native UI diagnostic renderer bound 1024..8192; default 1024. Identity-query occurrences are bounded to eight times this limit. Validated only when CaptureNativeUiState and CaptureImages are enabled.").Value;
             nativeUiRendererLimit=NativeUiStateDiagnostics.ResolveRendererLimit(captureNativeUiState,capturesEnabled,nativeUiRendererLimit);
@@ -174,7 +175,7 @@ public class Injector : BaseUnityPlugin
             if (capturesEnabled) Directory.CreateDirectory(evidenceDir);
             if(captureInputIdentityDetails && gamepadBinding!=null && gamepadBinding.SupportsIdentityCapture && session.Available) inputIdentityCapture=new ControllerIdentityCapture(evidenceDir);
             if(captureCameraRestorationPose && session.Available)
-            {cameraPoseDiagnostics=new CameraRestorationPoseDiagnostics(evidenceDir);cameraPoseCaptureRequests=new CameraPoseCaptureRequests(evidenceDir);}
+            {cameraPoseDiagnostics=new CameraRestorationPoseDiagnostics(evidenceDir);cameraPoseCaptureRequests=new CameraPoseCaptureRequests(evidenceDir);guardedFailureDiagnostics=GuardedCameraFailureDiagnostics.Create(capturesEnabled,captureCameraRestorationPose,session.Available,evidenceDir,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"));}
             if(captureRewiredSourceDetails && session.Available)
             {
                 try {rewiredSourceObservation=new RewiredSourceObservation(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,delegate {return RewiredSourceReader.Read(system);});}
@@ -507,6 +508,7 @@ public class Injector : BaseUnityPlugin
         var poseDiagnostics=cameraPoseDiagnostics;
         CameraPoseCaptureRequest poseRequest=null;
         CameraRestorationPoseRecord cameraPoseDetails=null;
+        GuardedCameraFailureRecord guardedFailure=guardedFailureDiagnostics!=null && cameraTransformRestoration==CameraTransformRestoration.GuardedLocal?guardedFailureDiagnostics.Begin(frameId,generation,rendered+1):null;
         try
         {
         poseRequest=poseRequests==null?null:poseRequests.BeforePair(capturesEnabled,poseDiagnostics.Attempts<CameraRestorationPoseDiagnostics.MaximumCaptures);
@@ -520,6 +522,7 @@ public class Injector : BaseUnityPlugin
             if(!String.IsNullOrEmpty(cameraPoseAdmissionError)) Logger.LogWarning("CAMERA_POSE_CAPTURE_ADMISSION "+cameraPoseAdmissionError+"; request retained, image capture deferred.");
         }
         OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureAdmission.CaptureNativeUiState,nativeUiRendererLimit,panelClipping):null;
+        if(guardedFailure!=null)guardedFailure.Bind(null,overlays);
         if(overlays!=null && capturesEnabled) overlays.EnableWallTiming();
         if(overlays!=null) overlays.SetDesktopLayoutFlush(desktopFlush);
         if (overlays!=null) overlays.SetCommonHead(TrackingMath.ComposeEye(anchor,head,new RigidPose(new Position(0,0,0),Orientation.Identity),origin,unitsPerMeter,retainGameTilt));
@@ -538,9 +541,10 @@ public class Injector : BaseUnityPlugin
         {
         if(overlays!=null && overlays.IsolatedMask!=0) currentContext.AllowUiCamera(overlayCamera);
         if(currentContext.Conflict) throw new InvalidOperationException("Camera current experiment failed before borrow: "+currentContext.Outcome);
-        using (var restore=new CameraState(camera,cameraPoseDetails,cameraTransformRestoration))
+        using (var restore=new CameraState(camera,cameraPoseDetails,cameraTransformRestoration,guardedFailure))
         using (overlays)
         {
+            if(guardedFailure!=null)guardedFailure.Bind(restore.CachedLocalRestoration,overlays);
             for (int i=0;i<2;++i)
             {
                 actualEyes[i]=TrackingMath.ComposeEye(anchor,head,Pose(system.GetEyeToHeadTransform((EVREye)i)),origin,unitsPerMeter,retainGameTilt);
@@ -638,6 +642,11 @@ public class Injector : BaseUnityPlugin
         }
         finally
         {
+            if(guardedFailure!=null)
+            {
+                guardedFailure.PublishAfterPairUnwind();
+                if(!String.IsNullOrEmpty(guardedFailureDiagnostics.LastError))Logger.LogWarning("GUARDED_CAMERA_FAILURE_EVIDENCE "+guardedFailureDiagnostics.LastError);
+            }
             try
             {
                 if(cameraPoseDetails!=null)

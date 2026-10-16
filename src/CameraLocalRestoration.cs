@@ -35,6 +35,10 @@ namespace Ugevr
         public string Failure {get;private set;}
         public bool RestoreReturned {get;private set;}
         public bool Guarded {get {return guarded;}}
+        internal Transform CachedTransform {get {return saved.Transform;}}
+        internal Transform CachedParent {get {return saved.Parent;}}
+        internal int? CachedTransformId {get {return saved.TransformId;}}
+        internal int? CachedParentId {get {return saved.ParentId;}}
         public static CameraTransformRestoration Parse(string value)
         {
             if(value=="world")return CameraTransformRestoration.World;
