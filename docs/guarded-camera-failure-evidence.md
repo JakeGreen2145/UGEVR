@@ -203,3 +203,37 @@ deployment, baseline configuration, stream and lease. Save metadata was unchange
 and its contents remained unread. No gameplay or input was attempted. This is
 host-image evidence for the title UI; headset validation and the gameplay gate
 remain open.
+
+## Frame title-image confirmation
+
+A subsequent fresh run kept the same `619a322` injector distribution and selected
+settings. One host request produced pair 580, native frame 597, generation 1,
+with both 1399 by 1399 eye images and successful guarded local restoration.
+One separate headset client then produced a 960 by 1080 preview and a 1920 by
+1080 stereo screenshot. Root inspected both host eyes and both side-by-side
+headset panels. Each headset panel shows the intended Firewatch lookout scene,
+logo and title-menu options, with recognizable correspondence to the host images.
+No dashboard, desktop or On-Screen Keyboard content is visible in these images.
+
+The screenshot has right-edge title/menu cropping and limited white-text contrast
+over clouds. Peripheral sky seams remain visible in the host images. This is
+static intended-game delivery evidence for the configured title view, not a
+complete menu-coverage, interaction or binocular-geometry pass. The headset API
+supplies no shared host frame ID, so exact cross-host frame identity is unavailable.
+The screenshot is cropped runtime output, not an observation through the lenses.
+
+The separate capture helper needed a filesystem identity correction. A read-only,
+nonexecuting file mapping reproduced pathname/fstat device 30 versus mapping device
+29, with the same inode, size and before/after file hash. The revised helper keeps
+the pathname/FD identity and compares the resolved SDK symbol's mapping against a
+read-only reference mapping of that held FD. The successful native result records
+both mapping devices as 29 while retaining pathname/FD device 30. This is a sampled
+binding observation, not continuous integrity or full dependency attestation.
+The injector package and its runtime library were unchanged.
+
+The capture returned after SDK shutdown, and its acknowledged process was observed
+absent before session end. Startup, image phase, owned cleanup and collection all
+exited zero. Deployment, baseline configuration, stream and headset lease were
+restored, and save metadata stayed unchanged without reading save contents. Root
+verified all 119 retained artifact hashes and read the complete original log.
+No input or gameplay was attempted; the 3–5 minute functional gate remains open.
