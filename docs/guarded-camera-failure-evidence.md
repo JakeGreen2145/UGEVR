@@ -56,3 +56,28 @@ pose or exclude ABA changes. An overlap can support a controlled ownership
 handover investigation; an error named `owned_eye_position_changed` alone does
 not identify a foreign game callback. No already-restored/no-write remedy or
 ownership relaxation is included.
+
+## First physical publication attempt
+
+An automated Firewatch startup on October 16 used clean source `69ab26f` and
+distribution `0.2.0-dev.guarded-failure-inspect`, ZIP SHA-256
+`d2ab6ca5e0d9f20444b5881ecd7fba16bd825d001b1a960026909fb65685a683`.
+Both initial owned rendering gates passed. At the first passive follow-up,
+observed at 17:17:18 UTC, rendering was inactive at 114 submitted pairs with
+`owned_eye_position_changed`. The complete original log also recorded
+`GUARDED_CAMERA_FAILURE_EVIDENCE diagnostic_query_or_serialization_failure`.
+The most recent camera selection named LoadingCamera; its failing instance
+identity and actual guard operands were not retained.
+
+The trial stopped before GUI, save loading, controller input, active observers,
+recordings or capture requests. Owned cleanup exited zero and confirmed process,
+deployment, configuration, stream and lease cleanup. The bounded collector then
+confirmed owned-process absence and found zero exact-run failure files. Root
+verified all 84 frozen artifact sizes and hashes. No gameplay time qualified.
+
+This is a known failure of diagnostic publication on that physical route as well
+as a repeated camera-restoration refusal. The generic warning does not identify
+the failed serialization or filesystem operation. The expected destination was
+254 characters and its temporary name 291 characters, but those lengths alone
+do not establish the cause. The camera policy remains unchanged while offline
+reproduction investigates publication under the shipped Mono runtime.
