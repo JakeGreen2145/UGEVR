@@ -22,3 +22,9 @@ Capture/failure JSON adds `panelClipping` only when selected. It retains up to e
 
 Controlled managed checks verify admission refusals, rotated/scaled coordinate conversion, inside/outside geometry data, setter/render failures, changed context, preservation of unrelated alpha changes, default-off behavior, query limits and cleanup ordering. These checks model public APIs and do not prove native shader output. A later owned physical trial needs a neutral same-state baseline and cropped pair, visible off-panel removal with retained inside-panel HUD/menu content, and original desktop rendering after cleanup. Clip flags and rectangle arithmetic alone cannot establish that result.
 
+## Physical admission result
+
+The `f92b2e3` distribution was tested in a fresh Firewatch launch with clipping explicitly selected and game-input adapters disabled. World rendering initially became active; the first retained frame report selected zero UI roots. A later nonempty selection refused with `panel_clip_inactive_descendant`, and submission stopped at 113 pairs. The failing component/root identity and its native failure time were not captured. No crop comparison or readable-menu evidence was obtained. This is a known failing selection, not evidence that inactive descendants can safely be ignored.
+
+The first archived game log already contained the refusal. The operator initially inspected only its frame reports and attempted mouse interaction afterward; those actions should have stopped. Their delivery was unverified and contributes no menu or gameplay credit. The raw trial and its correction remain preserved. Owned game, deployment, configuration, stream and lease cleanup completed. Complete in-process native restoration remains unproved. See the [issue's physical result and correction](https://github.com/JakeGreen2145/UGEVR/issues/32#issuecomment-6176291131).
+
