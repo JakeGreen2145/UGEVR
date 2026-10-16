@@ -545,6 +545,7 @@ public class Injector : BaseUnityPlugin
         using (overlays)
         {
             if(guardedFailure!=null)guardedFailure.Bind(restore.CachedLocalRestoration,overlays);
+            if(overlays!=null) overlays.PrepareForPair();
             for (int i=0;i<2;++i)
             {
                 actualEyes[i]=TrackingMath.ComposeEye(anchor,head,Pose(system.GetEyeToHeadTransform((EVREye)i)),origin,unitsPerMeter,retainGameTilt);

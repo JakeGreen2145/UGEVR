@@ -263,12 +263,21 @@ namespace Ugevr
             }
         }
 
-        public void ApplyEye(int eye=0)
+        // Prepare shared hierarchy/layout before either camera eye pose is set.
+        // A borrowed root may be an ancestor of the selected camera.
+        public void PrepareForPair()
         {
             if (disposed) throw new ObjectDisposedException("OverlayCanvasScope");
             if (canvases.Count==0) return;
             if (!commonHeadSet) throw new InvalidOperationException("Common UI head pose must be set before rendering either eye.");
             if (!applied) PrepareCommonPanel();
+        }
+        public void ApplyEye(int eye=0)
+        {
+            // Retain lazy preparation for existing standalone callers. The
+            // injector prepares explicitly before assigning the first eye.
+            PrepareForPair();
+            if (canvases.Count==0) return;
             if(panelClip!=null)panelClip.RecordPanelPlacement();
             if(eye>=0 && eye<2) CaptureLayoutPhase(eye==0?1:3);
             if (eye>=0 && eye<2) appliedEyes[eye]=AppliedCanvasJson();
