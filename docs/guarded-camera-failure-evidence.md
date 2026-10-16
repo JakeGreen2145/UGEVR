@@ -237,3 +237,43 @@ exited zero. Deployment, baseline configuration, stream and headset lease were
 restored, and save metadata stayed unchanged without reading save contents. Root
 verified all 119 retained artifact hashes and read the complete original log.
 No input or gameplay was attempted; the 3–5 minute functional gate remains open.
+
+## Loaded-world registration and baseline refusal
+
+A fresh automated run kept the same `619a322` distribution. Ordinary desktop
+controls loaded the existing Firewatch save before synthetic controllers were
+connected. The original view showed the elevator interior, and the complete
+injector log records LoadingCamera followed by ActualCamera, continuing paired
+submissions and an acknowledged disable without a camera restoration refusal.
+This run requested no host or headset images.
+
+Combined controller registration passed with 300 headset-source samples and 240
+Windows samples. Both hands had confirmed selected, valid neutral tails. The two
+500 ms activation workers and both observers exited zero, with release and SDK
+shutdown evidence. The final proxy snapshot was neutral with retained poses.
+The game input profile remained disabled. Registration proves readiness of these
+observation and activation paths, rather than game action consumption.
+
+The next strict neutral baseline refused `passive_not_observed`. Its first
+game-side sample changed the left controller's serial and model between the
+pre-state and post-state identity reads. The following 236 samples reported
+consistent identities. All 237 samples retained valid neutral state, stable
+role/index context and successful axis metadata. The strict validator correctly
+rejected the whole window. No row was dropped, and the cause of the native
+identity transition is unproven. The recorder and subsequent windows never
+started, so recorder coexistence remains unverified.
+
+Owned cleanup exited zero in 5.156 seconds. Deployment, baseline configuration,
+stream and lease restoration were confirmed; all four owned processes were
+absent. Save metadata was unchanged and save contents remained unread. The later
+cached-diagnostic collector exited 2 because its inherited startup-only policy
+rejects registration artifacts. Its enclosing collection wrapper exited zero
+after catching that failure. These are separate results; collection success is
+not claimed. The eight exact owned cached-failure paths were checked separately
+and were absent.
+
+Root verified all 143 retained artifact hashes, the complete original log and
+the raw identity transition. The preparation also passed 106 controlled checks,
+including the new keeper/guardian deadline coverage and compatible private
+cleanup helper. These checks do not replace the failed physical baseline.
+No gameplay time is credited, and the functional gate remains open.
