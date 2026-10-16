@@ -8,19 +8,32 @@ using UnityEngine;
 
 namespace Ugevr
 {
+    internal enum CameraEvidenceFailureStage
+    {
+        DiagnosticProcessing, CaptureAdmission, DestinationPath, CachedSerialization,
+        OwnerThread, Utf8Encoding, ByteBound, PathBeforeCreate, DirectoryCreate,
+        PathAfterCreate, TemporaryPath, TemporaryFileCreate, TemporaryFileWrite,
+        TemporaryFileClose, PathBeforeMove, Move
+    }
     // Passive evidence only. No comparison here changes the restoration policy.
     public sealed class CameraRestorationPoseDiagnostics
     {
         public const int MaximumCaptures=8,MaximumStages=8,MaximumBytes=32768;
         readonly string directory;
+        readonly Func<string> temporaryName;
         readonly int ownerThread=Thread.CurrentThread.ManagedThreadId;
         int attempts;
         public int Attempts {get {return attempts;}}
         public string LastError {get;private set;}
-        public CameraRestorationPoseDiagnostics(string evidenceDirectory)
+        public string LastFailureStage {get;private set;}
+        public string LastExceptionKind {get;private set;}
+        public CameraRestorationPoseDiagnostics(string evidenceDirectory) : this(evidenceDirectory,null) {}
+        // Internal deterministic-name seam exercises real CreateNew collision ownership.
+        internal CameraRestorationPoseDiagnostics(string evidenceDirectory,Func<string> temporaryName)
         {
+            this.temporaryName=temporaryName;
             if(String.IsNullOrEmpty(evidenceDirectory) || !Path.IsPathRooted(evidenceDirectory))throw new ArgumentException("An absolute private evidence directory is required.");
-            directory=Path.GetFullPath(evidenceDirectory);LastError="";
+            directory=Path.GetFullPath(evidenceDirectory);LastError="";LastFailureStage="";LastExceptionKind="";
         }
         internal static void CheckPath(string path)
         {
@@ -39,25 +52,116 @@ namespace Ugevr
                 var record=new CameraRestorationPoseRecord(this,camera,frame,generation,renderedPairOrdinal,Path.Combine(directory,"camera-restoration-pose-"+attempts+".yaml"));
                 record.ObserveAnchor(anchorPosition,anchorRotation);return record;
             }
-            catch(Exception error){LastError=Failure(error);return null;}
+            catch(Exception error){Failed(error,CameraEvidenceFailureStage.CaptureAdmission);return null;}
         }
         internal static string Failure(Exception error) {return error is IOException?"io_failure":error is UnauthorizedAccessException?"access_failure":"diagnostic_query_or_serialization_failure";}
-        internal void Failed(Exception error) {LastError=Failure(error);}
+        // Closed vocabulary only. Never retain messages, paths or runtime type names.
+        internal static string ExceptionKind(Exception error)
+        {
+            if(error is EncoderFallbackException)return "encoder_fallback";
+            if(error is PathTooLongException)return "path_too_long";
+            if(error is FileNotFoundException)return "file_not_found";
+            if(error is DirectoryNotFoundException)return "directory_not_found";
+            if(error is UnauthorizedAccessException)return "unauthorized_access";
+            if(error is System.IO.IsolatedStorage.IsolatedStorageException)return "isolated_storage";
+            if(error is IOException)return "io_exception";
+            if(error is ArgumentNullException)return "argument_null";
+            if(error is ArgumentOutOfRangeException)return "argument_out_of_range";
+            if(error is ArgumentException)return "argument_exception";
+            if(error is MissingMethodException)return "missing_method";
+            if(error is MissingFieldException)return "missing_field";
+            if(error is TypeLoadException)return "type_load";
+            if(error is TypeInitializationException)return "type_initialization";
+            if(error is System.Reflection.TargetInvocationException)return "target_invocation";
+            if(error is System.Security.SecurityException)return "security_exception";
+            if(error is InvalidOperationException)return "invalid_operation";
+            if(error is NotSupportedException)return "not_supported";
+            if(error is FormatException)return "format_exception";
+            if(error is OverflowException)return "overflow_exception";
+            if(error is NullReferenceException)return "null_reference";
+            if(error is IndexOutOfRangeException)return "index_out_of_range";
+            if(error is OutOfMemoryException)return "out_of_memory";
+            return "other_exception";
+        }
+        internal static string StageName(CameraEvidenceFailureStage stage)
+        {
+            switch(stage)
+            {
+                case CameraEvidenceFailureStage.CaptureAdmission:return "capture_admission";
+                case CameraEvidenceFailureStage.DestinationPath:return "destination_path";
+                case CameraEvidenceFailureStage.CachedSerialization:return "cached_serialization";
+                case CameraEvidenceFailureStage.OwnerThread:return "owner_thread";
+                case CameraEvidenceFailureStage.Utf8Encoding:return "utf8_encoding";
+                case CameraEvidenceFailureStage.ByteBound:return "byte_bound";
+                case CameraEvidenceFailureStage.PathBeforeCreate:return "path_before_create";
+                case CameraEvidenceFailureStage.DirectoryCreate:return "directory_create";
+                case CameraEvidenceFailureStage.PathAfterCreate:return "path_after_create";
+                case CameraEvidenceFailureStage.TemporaryPath:return "temporary_path";
+                case CameraEvidenceFailureStage.TemporaryFileCreate:return "temporary_file_create";
+                case CameraEvidenceFailureStage.TemporaryFileWrite:return "temporary_file_write";
+                case CameraEvidenceFailureStage.TemporaryFileClose:return "temporary_file_close";
+                case CameraEvidenceFailureStage.PathBeforeMove:return "path_before_move";
+                case CameraEvidenceFailureStage.Move:return "move";
+                default:return "diagnostic_processing";
+            }
+        }
+        internal void Failed(Exception error,CameraEvidenceFailureStage stage=CameraEvidenceFailureStage.DiagnosticProcessing)
+        {LastError=Failure(error);LastFailureStage=StageName(stage);LastExceptionKind=ExceptionKind(error);}
+        static void ValidateUtf16(string text)
+        {
+            if(text==null)return; // GetBytes retains its normal ArgumentNullException.
+            for(int i=0;i<text.Length;++i)
+            {
+                char c=text[i];
+                if(c>='\ud800' && c<='\udbff')
+                {
+                    if(i+1>=text.Length || text[i+1]<'\udc00' || text[i+1]>'\udfff')throw new EncoderFallbackException("Invalid evidence UTF16 sequence.");
+                    ++i;
+                }
+                else if(c>='\udc00' && c<='\udfff')throw new EncoderFallbackException("Invalid evidence UTF16 sequence.");
+            }
+        }
+        internal static void WriteAndClose(Stream stream,byte[] bytes,ref CameraEvidenceFailureStage stage)
+        {
+            try
+            {
+                stage=CameraEvidenceFailureStage.TemporaryFileWrite;stream.Write(bytes,0,bytes.Length);
+            }
+            finally
+            {
+                var interrupted=stage;stage=CameraEvidenceFailureStage.TemporaryFileClose;
+                stream.Dispose(); // Preserve using's precedence if Write and Dispose both throw.
+                stage=interrupted; // Successful close must not relabel a propagating Write failure.
+            }
+        }
         internal void Publish(string destination,string text)
         {
-            string temporary=null;
+            string temporary=null;bool temporaryCreated=false;var stage=CameraEvidenceFailureStage.OwnerThread;
             try
             {
                 if(ownerThread!=Thread.CurrentThread.ManagedThreadId)throw new InvalidOperationException("Wrong evidence owner thread.");
+                stage=CameraEvidenceFailureStage.Utf8Encoding;
+                ValidateUtf16(text);
                 byte[] bytes=new UTF8Encoding(false,true).GetBytes(text);
+                stage=CameraEvidenceFailureStage.ByteBound;
                 if(bytes.Length>MaximumBytes)throw new InvalidOperationException("Camera evidence exceeds its byte bound.");
-                CheckPath(directory);Directory.CreateDirectory(directory);CheckPath(directory);
-                temporary=destination+"."+Guid.NewGuid().ToString("N")+".tmp";
-                using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None))stream.Write(bytes,0,bytes.Length);
-                CheckPath(directory);File.Move(temporary,destination);temporary=null;LastError="";
+                stage=CameraEvidenceFailureStage.PathBeforeCreate;CheckPath(directory);
+                stage=CameraEvidenceFailureStage.DirectoryCreate;Directory.CreateDirectory(directory);
+                stage=CameraEvidenceFailureStage.PathAfterCreate;CheckPath(directory);
+                stage=CameraEvidenceFailureStage.TemporaryPath;
+                string basename=temporaryName==null?Guid.NewGuid().ToString("N").Substring(0,24)+".tmp":temporaryName();
+                if(basename==null || basename.Length!=28 || !basename.EndsWith(".tmp",StringComparison.Ordinal))throw new InvalidOperationException("Invalid temporary evidence basename.");
+                for(int i=0;i<24;++i)if(!(basename[i]>='0'&&basename[i]<='9')&&!(basename[i]>='a'&&basename[i]<='f'))throw new InvalidOperationException("Invalid temporary evidence basename.");
+                temporary=Path.Combine(directory,basename);
+                stage=CameraEvidenceFailureStage.TemporaryFileCreate;
+                var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None);
+                temporaryCreated=true;WriteAndClose(stream,bytes,ref stage);
+                stage=CameraEvidenceFailureStage.PathBeforeMove;CheckPath(directory);
+                stage=CameraEvidenceFailureStage.Move;File.Move(temporary,destination);
+                temporary=null;LastError="";LastFailureStage="";LastExceptionKind="";
             }
-            catch(Exception error){LastError=Failure(error);}
-            finally {if(temporary!=null)try {CheckPath(directory);File.Delete(temporary);}catch {}}
+            catch(Exception error){Failed(error,stage);}
+            finally {if(temporaryCreated && temporary!=null)try {CheckPath(directory);File.Delete(temporary);}catch {}}
         }
     }
     public sealed class CameraRestorationPoseRecord
@@ -201,7 +305,7 @@ namespace Ugevr
         public void Publish()
         {
             if(published || ownerThread!=Thread.CurrentThread.ManagedThreadId)return;
-            published=true;try {owner.Publish(destination,ToPrivateYaml());}catch(Exception error){owner.Failed(error);}
+            published=true;try {owner.Publish(destination,ToPrivateYaml());}catch(Exception error){owner.Failed(error,CameraEvidenceFailureStage.CachedSerialization);}
         }
     }
 }

@@ -18,7 +18,7 @@ The owned session's private `UnityVR-evidence` directory receives at most eight
 `guarded-camera-failure-<run>-<attempt>.yaml` files per launch. An attempt, including
 a serialization, byte-limit, or I/O failure, consumes capacity. Each whole UTF-8
 file is limited to 32 KiB, published by same-directory temporary file and
-non-overwriting move. Path reparse points, collisions, and oversized records
+non-overwriting move. The temporary basename is 24 random hexadecimal characters plus `.tmp`, in the same directory. It is shorter than both fixed evidence destination names and does not append to a long destination. Cleanup removes a temporary file only after this writer successfully opened it with `CreateNew`; an existing temporary-name collision is preserved. Path reparse points, collisions, and oversized records
 refuse publication; diagnostic errors do not replace the original guard refusal.
 
 Each record associates the run, VR frame, resource generation, pair ordinal,
@@ -81,3 +81,32 @@ the failed serialization or filesystem operation. The expected destination was
 254 characters and its temporary name 291 characters, but those lengths alone
 do not establish the cause. The camera policy remains unchanged while offline
 reproduction investigates publication under the shipped Mono runtime.
+
+When publication fails, the existing `LastError` category remains unchanged.
+The guarded warning adds fixed `stage` and `exception_kind` labels only while
+that category is nonempty. Stages distinguish cached serialization, strict UTF-8
+encoding, the byte bound, owner-thread admission, destination/temporary path
+construction, directory checks/creation, temporary creation/write/close and the
+final move. They identify the operation in progress, not an inferred cause.
+Final temporary-file deletion failures cannot replace the publication failure label. Write and stream-disposal exceptions retain the original `using` precedence, with the stage identifying the exception that propagates. A successful
+publication clears the category and both labels.
+
+Exception kinds come from a fixed System exception whitelist, including
+`isolated_storage`, `path_too_long`, `io_exception`, `unauthorized_access`,
+`encoder_fallback`, argument failures and runtime member/type failures. All other
+exceptions become `other_exception`. No message, filesystem path, arbitrary
+runtime type name or inner exception enters these labels.
+
+A controlled host carrying Firewatch's legacy manifest reproduced an embedded
+Mono `IsolatedStorageException` for the old appended temporary path at 291
+characters, while the 254-character destination was writable. This establishes
+a controlled path failure, not the exception from the earlier physical run.
+The short-name publisher and exact cached serializer are checked separately
+under that host before release. Camera ownership/restoration predicates and
+capture flags/limits are unchanged.
+Before UTF-8 conversion, primitive UTF-16 code-unit checks reject lone high or
+low surrogates with a fixed `EncoderFallbackException`. Supported legacy Mono
+can otherwise encode an unpaired surrogate despite requesting a throwing UTF-8
+encoder. Valid BMP text and valid surrogate pairs retain their expected bytes.
+This preserves the strict encoding contract across runtimes and does not
+attribute the physical failure to Unicode.

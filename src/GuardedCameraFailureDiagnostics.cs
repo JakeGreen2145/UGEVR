@@ -14,6 +14,8 @@ namespace Ugevr
         int attempts;
         public int Attempts {get {return attempts;}}
         public string LastError {get {return publisher.LastError;}}
+        public string LastFailureStage {get {return publisher.LastFailureStage;}}
+        public string LastExceptionKind {get {return publisher.LastExceptionKind;}}
         public static GuardedCameraFailureDiagnostics Create(bool captureImages,bool poseDetails,bool ownedSession,string directory,string run)
         {return captureImages && poseDetails && ownedSession?new GuardedCameraFailureDiagnostics(directory,run):null;}
         public GuardedCameraFailureDiagnostics(string directory,string run)
@@ -33,8 +35,14 @@ namespace Ugevr
             if(thread!=Thread.CurrentThread.ManagedThreadId || attempts>=MaximumFailures)return;
             // Failures and collisions consume the bounded launch allowance too.
             ++attempts;
-            try {publisher.Publish(Path.Combine(directory,"guarded-camera-failure-"+run+"-"+attempts+".yaml"),record.Serialize(publisher,run));}
-            catch(Exception error){publisher.Failed(error);}
+            var stage=CameraEvidenceFailureStage.DestinationPath;
+            try
+            {
+                string destination=Path.Combine(directory,"guarded-camera-failure-"+run+"-"+attempts+".yaml");
+                stage=CameraEvidenceFailureStage.CachedSerialization;string text=record.Serialize(publisher,run);
+                publisher.Publish(destination,text);
+            }
+            catch(Exception error){publisher.Failed(error,stage);}
         }
     }
     public sealed class GuardedCameraFailureRecord

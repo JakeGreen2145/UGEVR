@@ -645,7 +645,7 @@ public class Injector : BaseUnityPlugin
             if(guardedFailure!=null)
             {
                 guardedFailure.PublishAfterPairUnwind();
-                if(!String.IsNullOrEmpty(guardedFailureDiagnostics.LastError))Logger.LogWarning("GUARDED_CAMERA_FAILURE_EVIDENCE "+guardedFailureDiagnostics.LastError);
+                if(!String.IsNullOrEmpty(guardedFailureDiagnostics.LastError))Logger.LogWarning("GUARDED_CAMERA_FAILURE_EVIDENCE "+guardedFailureDiagnostics.LastError+" stage="+guardedFailureDiagnostics.LastFailureStage+" exception_kind="+guardedFailureDiagnostics.LastExceptionKind);
             }
             try
             {
