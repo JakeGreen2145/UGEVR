@@ -152,3 +152,30 @@ both eyes, including the combined guarded no-write path. These checks do not
 reproduce native Unity layout or establish physical image correctness. A camera
 that is itself a panel root still moves that panel when its eye pose is assigned;
 independent UI placement for that case remains unresolved.
+
+## Physical startup follow-up
+
+The 2026-10-16 follow-up used distribution
+`0.2.0-dev.guarded-ready-state`, source
+`619a322f056cc0055db659f1cc60a86b20231303`, with the explicit guarded-local,
+overlay-capture and no-input configuration. The launch receipt and all recorded
+status samples were active, fresh and rendering, with empty injector and
+initialization errors. The original log records Main Camera, LoadingCamera,
+then Main Camera again. The last admitted passive status reported 1,254 submitted
+pairs. The previous guarded restoration refusal did not recur in those observations.
+Root independently verified all 83 retained artifacts and read the complete log.
+
+The last passive sample ended 23.886268 seconds after startup admission. A local
+observation-end bookkeeping assertion later refused and prevented its shell
+command from dispatching cleanup. The one actual cleanup began 40.854309 seconds
+after admission and completed with exit 0. No additional game observation or SDK
+phase followed the last passive sample. The guardian reserve remained available;
+no deadline was extended. The timing deviation is retained separately, and neither
+a full 30-second observation nor early cleanup dispatch is claimed.
+
+Owned game, stream and headset cleanup was verified; the original config and
+save metadata were unchanged, without reading save contents. No input, GUI action,
+capture request or recording was admitted. Zero failure files were collected,
+which means no retained diagnostic rather than proof of no possible failure.
+This supports the configured startup path through the camera transition. It does
+not prove native stereo/UI image correctness or the 3–5 minute gameplay gate.
