@@ -92,6 +92,35 @@ The existing three strict 15-second paired windows are unchanged and consume no 
 
 Startup logs the readiness opt-in, owned-session availability and instance creation. When an instance exists, its once-per-second private status also reports whether it was disposed, whether the tick is on its owner thread, the exact evidence directory and request-file presence, including before an attempt. Component disable logs cancellation after calling it, so logging cannot prevent that cancellation. These observations distinguish an unclaimed request from an attempted refusal without changing cancellation, admission or query limits. Keep these logs local because they include the session path.
 
+The 2026-10-16 physical Firewatch probe using source `6103d8e` passed controller
+registration, then refused while waiting for readiness publication. The retained
+game log reports a visible request on the owner thread, with the component
+undisposed, no claimed attempt, zero source reads and
+`System.IO.IsolatedStorage.IsolatedStorageException`. No strict window or recorder
+started. Owned cleanup and collection exited zero, and all four owned processes
+were observed absent. This probe earns no gameplay credit.
+
+A controlled host using that game's shipped Mono runtime and corlib reproduced
+the pre-claim file sequence. Reading the existing request succeeded with every
+tested sharing mode, including the production mode. `File.GetAttributes` on the
+absent claim target threw `IsolatedStorageException`; the native attribute query
+reported `ERROR_FILE_NOT_FOUND`. A missing parent produced `ERROR_PATH_NOT_FOUND`
+and the same managed exception. A short missing path reproduced it too. The
+shipped corlib maps both missing-file error codes to this exception, which the
+original missing-file catches did not recognize. Moving the request and reading
+the resulting claim succeeded when tested separately. This isolates a compatible
+failure mechanism in the exact file sequence. The original game exception has
+no retained stack, and the controlled host does not establish a physical readiness
+pass.
+
+The readiness path guard now handles this legacy exception with a native Windows
+attribute query. It accepts absence only for `ERROR_FILE_NOT_FOUND` or
+`ERROR_PATH_NOT_FOUND`. A target that exists by the time of that query still has
+its attributes checked for a reparse point. Access errors, unavailable native
+queries and other failures continue to refuse. The ordinary attribute path and
+ancestor walk remain in place. Request sharing, claiming, source-query limits,
+cancellation and the separate strict-window policy are unchanged.
+
 The profile requires the inspected Assembly-CSharp MVID `4e377d15-4996-4da3-9447-797d50034429`, SHA256 `145b56aebe921c0fdc660a4e64008272e09a283332146958ce2f356c7490522a`, and Rewired_Core MVID `159fb15d-62c3-4977-b0f0-ed64736f91be`, SHA256 `15508ee97bbf97731f20be14e40b36d208507ad475b97c896866d39c13aef87b`. It checks already loaded assembly identities and their file hashes, then exact public mutator shapes/tokens. It loads no target assembly. An unready, missing or ambiguous active input manager refuses creation. Other game versions require another evidenced profile.
 
 Admission requires focused active VR, valid connected right-controller state and pose, bounded serial identity, unchanged right role, declared joystick axis0, and exactly one declared Trigger axis among axes1..4. All five axis properties must succeed. Missing, ambiguous or unknown metadata refuses input before a Rewired device is created. Raw axis values alone do not establish their meaning; a Frame transport fallback requires separate observed channel evidence and explicit selection. A fresh stick whose radial magnitude is within the configured deadzone and an exactly zero trigger start the one allowed window. The same radial condition produces zero stick output, including diagonal and nondefault deadzone cases. Duration is bounded to 5..300 seconds; radial stick deadzone is .1...8. Trigger values remain analog in 0..1 for ordinary game threshold logic.

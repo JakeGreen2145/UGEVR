@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.IsolatedStorage;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Valve.VR;
@@ -200,10 +202,41 @@ namespace Ugevr
             Guid parsed;try {parsed=new Guid(id);}catch {throw new FormatException("Readiness request identity missing.");}
             if(requestedRun!=run || parsed==Guid.Empty)throw new FormatException("Readiness request identity mismatch.");id=parsed.ToString("D");
         }
-        static void Safe(string path)
+        internal struct NativeAttributeRead
+        {
+            public readonly uint Attributes;
+            public readonly int Error;
+            public NativeAttributeRead(uint attributes,int error){Attributes=attributes;Error=error;}
+        }
+        [DllImport("kernel32.dll",EntryPoint="GetFileAttributesW",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)]
+        static extern uint GetFileAttributesNative(string path);
+        static NativeAttributeRead ReadNativeAttributes(string path)
+        {
+            uint attributes=GetFileAttributesNative(path);
+            int error=Marshal.GetLastWin32Error();
+            return new NativeAttributeRead(attributes,error);
+        }
+        static void Safe(string path){Safe(path,File.GetAttributes,ReadNativeAttributes);}
+        internal static void Safe(string path,Func<string,FileAttributes> attributes,Func<string,NativeAttributeRead> native)
         {
             for(string p=path;p!=null;p=Path.GetDirectoryName(p))
-            {FileAttributes flags;try {flags=File.GetAttributes(p);}catch(FileNotFoundException){continue;}catch(DirectoryNotFoundException){continue;}if((flags&FileAttributes.ReparsePoint)!=0)throw new IOException("Readiness cannot cross a reparse point.");}
+            {
+                FileAttributes flags;
+                try {flags=attributes(p);}
+                catch(FileNotFoundException){continue;}
+                catch(DirectoryNotFoundException){continue;}
+                catch(IsolatedStorageException)
+                {
+                    // Unity 2017 Mono maps missing-file/path errors to this
+                    // exception. Classify only actual native absence; a racing
+                    // existing target must still pass the reparse-point guard.
+                    NativeAttributeRead observed=native(p);
+                    if(observed.Attributes==UInt32.MaxValue)
+                    {if(observed.Error==2 || observed.Error==3)continue;throw;}
+                    flags=(FileAttributes)observed.Attributes;
+                }
+                if((flags&FileAttributes.ReparsePoint)!=0)throw new IOException("Readiness cannot cross a reparse point.");
+            }
         }
     }
 }

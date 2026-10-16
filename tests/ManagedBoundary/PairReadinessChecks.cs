@@ -45,6 +45,7 @@ static class PairReadinessChecks
     }
     public static void Run(Action<bool,string> check)
     {
+        PairReadinessPathChecks.Run(check);
         using(var f=new Fixture())
         {
             f.Tick(0);f.Tick(100);check(f.Calls==0 && !f.Value.Attempted,"Readiness opt-in alone never polls the SDK or creates evidence");
