@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -31,6 +32,7 @@ static class PairReadinessChecks
             Value=Create();
         }
         public RewiredPairSourceReadiness Create(){return new RewiredPairSourceReadiness(Root,Run,42,1000,delegate {++Calls;return Read();},()=>Clock==null?Now:Clock(),()=>Generation);}
+        public void ScriptClock(params long[] values){var steps=new Queue<long>(values);Clock=()=>steps.Count>0?steps.Dequeue():Now;}
         public void Request(string extra="",string run=null){System.IO.File.WriteAllText(File(RewiredPairSourceReadiness.RequestName),"run_id="+(run??Run)+"\nrequest_id="+Guid.NewGuid().ToString("D")+"\n"+extra);}
         public bool Tick(long now,bool opt=true,bool enabled=true,bool focus=true,bool strict=false){Now=now;return Value.Tick(opt,enabled,focus,Generation,Utc.AddMilliseconds(now),now,strict);}
         public string Output {get {return System.IO.File.ReadAllText(File(RewiredPairSourceReadiness.ResultName));}}
@@ -60,6 +62,23 @@ static class PairReadinessChecks
             f.Read=()=> {var s=Sample();if(f.Calls==1){s.Left.PreSerial=Text("old-left");s.Left.PreModel=Text("Deckard MP");s.PairIdentityConsistent=false;s.Verdict="pair_identity_unavailable_or_changed";}return s;};
             f.Request();foreach(long n in new long[]{0,50,100,150})f.Tick(n);
             check(f.Value.Status=="ready" && f.Output.Contains("old-left") && f.Output.Contains("Deckard MP") && f.Output.Contains("pair_identity_unavailable_or_changed"),"Primer's actual pre/post identity disagreement remains raw and explicitly unqualified");
+        }
+        foreach(string drift in new[]{"serial","model","index","metadata"})
+        using(var f=new Fixture())
+        {
+            var shared=Sample();string primer=shared.ToPrivateYaml();
+            f.Read=()=> {
+                if(f.Calls>1)
+                {
+                    if(drift=="serial")shared.Left.PreSerial=shared.Left.PostSerial=Text("changed-left");
+                    if(drift=="model")shared.Left.PreModel=shared.Left.PostModel=Text("changed-model");
+                    if(drift=="index")foreach(var c in new[]{shared.Left.Initial,shared.Left.Post,shared.Left.Final})c.RoleIndex=c.QueriedIndex=5;
+                    if(drift=="metadata")shared.Left.AxisTypes[0]=shared.Left.AxisRawReturns[0]=1;
+                }
+                return new RewiredPairSourceSnapshot {Left=shared.Left,Right=shared.Right,Verdict="observed",PairContextConsistent=true,PairIdentityConsistent=true};
+            };
+            f.Request();f.Tick(0);f.Tick(50);f.Tick(100);
+            check(f.Calls==2 && f.Value.Reason=="verification_identity_context_metadata_changed" && f.Output.Contains(primer) && f.Output.Contains(shared.ToPrivateYaml().Substring(shared.ToPrivateYaml().IndexOf("left:",StringComparison.Ordinal))),"Immutable primer baseline refuses shared-hand mutation while retaining original and changed raw observations: "+drift);
         }
         foreach(string fault in new[]{"serial","model","context","metadata","pressed","touched","axis","pose","property","pair","reuse"})
         using(var f=new Fixture())
@@ -93,7 +112,23 @@ static class PairReadinessChecks
         using(var f=new Fixture())
         {f.Read=()=> {f.Generation=8;return Sample();};f.Request();f.Tick(0);check(f.Value.Reason=="runtime_generation_changed" && f.Output.Contains("runtime_generation_after: 8"),"A generation change inside the reader is retained and refused");}
         using(var f=new Fixture())
-        {int clocks=0;f.Clock=()=>++clocks==18?1001:f.Now;f.Request();foreach(long n in new long[]{0,50,100,150})f.Tick(n);check(f.Calls==4 && f.Value.Reason=="serialization_deadline_or_clock" && f.Output.Contains("status: refused"),"A fresh clock after complete encoding cannot turn a late serialized artifact into ready");}
+        {f.Read=()=> {if(f.Calls==4)f.ScriptClock(150,150,150,150,1001);return Sample();};f.Request();foreach(long n in new long[]{0,50,100,150})f.Tick(n);check(f.Calls==4 && f.Value.Reason=="serialization_deadline_or_clock" && f.Output.Contains("status: refused"),"A fresh clock after complete encoding cannot turn a late serialized artifact into ready");}
+        foreach(bool afterBody in new[]{false,true})
+        using(var f=new Fixture())
+        {
+            // Queue begins at SDK completion: regress during raw-body serialization or after entry encoding, then recover.
+            f.Read=()=> {if(f.Calls==2)f.ScriptClock(afterBody?new long[]{60,70,65,80}:new long[]{70,60,80});return Sample();};
+            f.Request();f.Tick(0);f.Tick(50);f.Tick(100);
+            check(f.Calls==2 && f.Value.Reason=="query_deadline_or_clock" && f.Output.Contains("reads_attempted: 2") && f.Output.Contains(afterBody?"serialized_ticks: 70":"serialized_ticks: 60"),"Any successive serialization-clock regression refuses despite later recovery, retaining both raw reads: "+afterBody);
+        }
+        foreach(bool finalEncoding in new[]{false,true})
+        using(var f=new Fixture())
+        {
+            // SDK completion, body serialization, entry encoding, Finish serialization, final encoding.
+            f.Read=()=> {if(f.Calls==4)f.ScriptClock(finalEncoding?new long[]{160,170,180,190,185}:new long[]{160,170,180,175,190});return Sample();};
+            f.Request();foreach(long n in new long[]{0,50,100,150,200})f.Tick(n);
+            check(f.Calls==4 && f.Value.Reason=="serialization_deadline_or_clock" && f.Output.Contains("reads_attempted: 4") && f.Output.Contains("status: refused"),"Finish compares each clock to the previous completion, not only incoming Tick, and cannot recover to ready: "+finalEncoding);
+        }
         using(var f=new Fixture())
         {f.Read=()=> {if(f.Calls==2)throw new IOException("controlled reader failure");return Sample();};f.Request();f.Tick(0);f.Tick(50);f.Tick(100);check(f.Calls==2 && f.Output.Contains("reads_attempted: 2") && f.Output.Contains("snapshot: null") && f.Output.Contains("System.IO.IOException"),"A throwing verification records its actual attempt and unavailable raw fields rather than claiming it was unattempted");}
         using(var f=new Fixture(true))

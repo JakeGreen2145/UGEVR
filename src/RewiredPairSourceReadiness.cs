@@ -22,10 +22,21 @@ namespace Ugevr
         readonly UTF8Encoding utf8=new UTF8Encoding(false,true);
         readonly List<string> raw=new List<string>();
         readonly List<RewiredPairSourceSnapshot> snapshots=new List<RewiredPairSourceSnapshot>();
+        sealed class HandBaseline
+        {
+            readonly uint index;
+            readonly string serial,model;
+            readonly int[] metadata=new int[5];
+            public HandBaseline(PairSourceHand hand)
+            {index=hand.Initial.RoleIndex.Value;serial=hand.PostSerial.RawValue;model=hand.PostModel.RawValue;for(int i=0;i<5;++i)metadata[i]=hand.AxisTypes[i].Value;}
+            public bool Matches(PairSourceHand hand)
+            {if(index!=hand.Initial.RoleIndex || serial!=hand.PostSerial.RawValue || model!=hand.PostModel.RawValue)return false;for(int i=0;i<5;++i)if(metadata[i]!=hand.AxisTypes[i])return false;return true;}
+        }
+        HandBaseline leftBaseline,rightBaseline;
         string startupRequest,id;
         long start,deadline,next,last;
         ulong generation;
-        bool used,disposed,block;
+        bool used,disposed,block,clockRegressed;
         public bool Active {get;private set;}
         public bool Attempted {get {return used;}}
         public int Reads {get {return raw.Count;}}
@@ -62,12 +73,8 @@ namespace Ugevr
             if(!Property(h.PostSerial) || !Property(h.PostModel))return false;
             return !verification || Property(h.PreSerial) && Property(h.PreModel) && h.PreSerial.RawValue==h.PostSerial.RawValue && h.PreModel.RawValue==h.PostModel.RawValue;
         }
-        static bool SameHand(PairSourceHand original,PairSourceHand next)
-        {
-            if(original.Initial.RoleIndex!=next.Initial.RoleIndex || original.PostSerial.RawValue!=next.PostSerial.RawValue || original.PostModel.RawValue!=next.PostModel.RawValue)return false;
-            for(int i=0;i<5;++i)if(original.AxisTypes[i]!=next.AxisTypes[i])return false;
-            return true;
-        }
+        bool ObserveClock(long value)
+        {if(value<last){clockRegressed=true;return false;}last=value;return true;}
         static bool Usable(RewiredPairSourceSnapshot s,bool verification)
         {return s!=null && s.PairContextConsistent==true && Hand(s.Left,ETrackedControllerRole.LeftHand,verification) && Hand(s.Right,ETrackedControllerRole.RightHand,verification) && s.Left.Initial.RoleIndex!=s.Right.Initial.RoleIndex && s.Left.PostSerial.RawValue!=s.Right.PostSerial.RawValue && (!verification || s.PairIdentityConsistent==true && s.Verdict=="observed");}
         public bool Tick(bool optIn,bool enabled,bool focused,ulong runtime,DateTime utc,long tick,bool strictActive)
@@ -96,30 +103,31 @@ namespace Ugevr
                     if(File.Exists(strict)){Safe(strict);ReadRequest(strict);File.Move(strict,PathFor("pair-ready.strict-conflict"));}
                     Finish("strict_readiness_overlap",utc,tick);return true;
                 }
-                if(tick<last){Finish("clock_regressed",utc,tick);return block || Active;}last=tick;
+                if(!ObserveClock(tick)){Finish("clock_regressed",utc,tick);return block || Active;}
                 if(tick>=deadline){Finish("readiness_deadline",utc,tick);return block || Active;}
                 if(!enabled || !focused || runtime==0 || runtime!=generation || currentGeneration()!=generation)
                 {Finish(!enabled?"session_disabled":!focused?"focus_lost":"runtime_generation_changed",utc,tick);return block || Active;}
                 if(tick<next)return block || Active;
                 long began=clock();
-                if(began<tick || began>=deadline){Finish("query_clock_invalid",utc,tick);return block || Active;}
+                if(!ObserveClock(began) || began>=deadline){Finish("query_clock_invalid",utc,began);return block || Active;}
                 RewiredPairSourceSnapshot sample=null;string readError=null;
                 try {sample=read();}catch(Exception error){LastError=readError=Error(error);}
-                long sdkEnded=clock();ulong after=currentGeneration();
+                long sdkEnded=clock();ObserveClock(sdkEnded);ulong after=currentGeneration();
                 int number=raw.Count;string body;
                 try {body=sample==null?"snapshot: null\n":sample.ToPrivateYaml();}
                 catch(Exception error){LastError=readError=Error(error);body="snapshot: null\nraw_serialization_unavailable: true\n";}
                 body+="reader_exception: "+ControllerIdentitySnapshot.Scalar(readError)+"\n";
-                long ended=clock();
+                long ended=clock();ObserveClock(ended);
                 string entry="---\nread_number: "+number+"\nread_role: "+(number==0?"unqualified_primer":"verification")+"\nqualifies_strict_window: false\nstarted_ticks: "+began+"\nsdk_completed_ticks: "+sdkEnded+"\nserialized_ticks: "+ended+"\nruntime_generation_before: "+generation+"\nruntime_generation_after: "+after+"\ncapture_utc: '"+utc.ToString("o",CultureInfo.InvariantCulture)+"'\n"+body;
                 if(utf8.GetByteCount(entry)>65536)throw new InvalidOperationException("Readiness raw record bound exceeded.");
                 raw.Add(entry);snapshots.Add(sample);
-                if(readError!=null){Finish("reader_or_serialization_exception",utc,sdkEnded);return block;}
-                ended=clock();
-                if(sdkEnded<began || ended<sdkEnded || ended>=deadline || after!=generation || currentGeneration()!=generation){Finish(after!=generation || currentGeneration()!=generation?"runtime_generation_changed":"query_deadline_or_clock",utc,ended);return block || Active;}
+                if(readError!=null){Finish("reader_or_serialization_exception",utc,ended);return block;}
+                ended=clock();ObserveClock(ended);
+                if(clockRegressed || last>=deadline || after!=generation || currentGeneration()!=generation){Finish(after!=generation || currentGeneration()!=generation?"runtime_generation_changed":"query_deadline_or_clock",utc,ended);return block || Active;}
                 for(int prior=0;prior<number;++prior)if(Object.ReferenceEquals(snapshots[prior],sample)){Finish("snapshot_not_fresh",utc,ended);return block || Active;}
                 if(!Usable(sample,number>0)){Finish(number==0?"primer_unusable":"verification_invalid",utc,ended);return block || Active;}
-                if(number>0 && (!SameHand(snapshots[0].Left,sample.Left) || !SameHand(snapshots[0].Right,sample.Right)))
+                if(number==0){leftBaseline=new HandBaseline(sample.Left);rightBaseline=new HandBaseline(sample.Right);}
+                else if(!leftBaseline.Matches(sample.Left) || !rightBaseline.Matches(sample.Right))
                 {Finish("verification_identity_context_metadata_changed",utc,ended);return block || Active;}
                 if(raw.Count==MaximumReads){Finish("ready",utc,ended);return block || Active;}
                 next=ended+interval;
@@ -146,14 +154,16 @@ namespace Ugevr
                 if(reason=="ready")
                 {
                     tick=clock();
-                    if(tick<last || tick>=deadline || currentGeneration()!=generation){Status="refused";Reason=reason=currentGeneration()!=generation?"runtime_generation_changed":"serialization_deadline_or_clock";}
+                    ObserveClock(tick);
+                    if(clockRegressed || last>=deadline || currentGeneration()!=generation){Status="refused";Reason=reason=currentGeneration()!=generation?"runtime_generation_changed":"serialization_deadline_or_clock";}
                 }
                 Func<string> tail=delegate {return "---\nstatus: "+Status+"\nreason: "+ControllerIdentitySnapshot.Scalar(reason)+"\nreads_attempted: "+raw.Count+"\nverification_attempted: "+Math.Max(0,raw.Count-1)+"\nnot_attempted_remainder: "+(MaximumReads-raw.Count)+"\nstrict_windows_consumed: 0\nruntime_generation: "+generation+"\nend_ticks: "+tick+"\nfinished_utc: '"+utc.ToString("o",CultureInfo.InvariantCulture)+"'\n";};
                 byte[] bytes=utf8.GetBytes(headerAndRecords+tail());
                 if(reason=="ready")
                 {
                     long finalClock=clock();ulong finalGeneration=currentGeneration();
-                    if(finalClock<tick || finalClock>=deadline || finalGeneration!=generation)
+                    ObserveClock(finalClock);
+                    if(clockRegressed || last>=deadline || finalGeneration!=generation)
                     {tick=finalClock;Status="refused";Reason=reason=finalGeneration!=generation?"runtime_generation_changed":"serialization_deadline_or_clock";bytes=utf8.GetBytes(headerAndRecords+tail());}
                 }
                 if(bytes.Length>MaximumBytes)throw new IOException("Readiness artifact bound exceeded.");
