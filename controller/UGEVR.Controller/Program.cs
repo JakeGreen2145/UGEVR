@@ -15,8 +15,10 @@ internal static class Program
             if (args.Length == 0 || args[0] is "help" or "--help")
             {
                 Console.WriteLine("UGEVR launch --exe PATH --session-dir PATH --game-root PATH --distribution-root PAYLOAD --deployment-script PATH [--game-arg VALUE] [--steam-app-id ID] [--timeout-seconds 30]\nDevelopment: replace deployment arguments with --prepared true.\nUGEVR status|disable|stop --session-dir PATH [--timeout-seconds 10]\nUGEVR configure --session-dir PATH --enabled true|false [--recenter true|position|yaw|height|false]\nUGEVR stop --session-dir PATH --force true terminates only this session's verified process.\nRepeated --replace-path RELATIVE_PATH explicitly selects deployment conflicts.\n--cancel-after-seconds N uses the Ctrl+C cancellation path.\nLate attachment and provider launch are unavailable.");
+                Console.WriteLine("UGEVR profile validate|resolve --game-id steam:ID|assigned:GUID [--storage-root PATH] [--session-config PATH] [--build-sha256 HASH]\nUGEVR profile save --game-id ID --scope global|personal --expected-revision N --setting Tracking.UnitsPerMeter|Tracking.RetainGamePitchAndRoll --value VALUE\nUGEVR profile reset --game-id ID --scope global|personal --expected-revision N [--setting KEY]\nProfile commands are offline; they do not apply settings to a game.");
                 return 0;
             }
+            if (args[0] == "profile") return ProfileCli.Run(args.Skip(1).ToArray());
             var o = new Options(args.Skip(1).ToArray());
             if (o.Has("cancel-after-seconds")) Cancellation.CancelAfter(TimeSpan.FromSeconds(o.Integer("cancel-after-seconds", 30, 1, 300)));
             return args[0] switch

@@ -2,6 +2,8 @@
 
 The standalone Windows controller requires the .NET 10 runtime and PowerShell 7 on PATH. It has no Unity or Frame Testbench dependency. The frontend and external test tools can call the same CLI. Frame Testbench remains in its own repository.
 
+The [offline profile commands](profiles.md) validate and edit layered tracking settings without starting a session. They report value provenance and do not apply settings to a game.
+
 Build with `dotnet build controller/UGEVR.Controller -c Release`. Invoke `scripts/UGEVR.ps1` or run the compiled executable directly. An extracted distribution places the controller under `controller/` and deployment scripts under `scripts/`. Only its `payload/` directory belongs in `--distribution-root`.
 
 ```powershell

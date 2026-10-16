@@ -32,10 +32,14 @@ internal static class FlatYaml
     public static Dictionary<string, string> Read(string path)
     {
         if (new FileInfo(path).Length > 65536) throw new FormatException("Protocol file exceeds 64 KiB.");
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var reader = new StreamReader(stream);
-        foreach (var line in reader.ReadToEnd().Split('\n').Select(line => line.TrimEnd('\r')))
+        return Parse(reader.ReadToEnd());
+    }
+    public static Dictionary<string, string> Parse(string text)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in text.Split('\n').Select(line => line.TrimEnd('\r')))
         {
             if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#')) continue;
             var split = line.IndexOf(':');
