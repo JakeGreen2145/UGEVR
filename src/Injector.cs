@@ -198,6 +198,7 @@ public class Injector : BaseUnityPlugin
                 }
                 catch(Exception error){Logger.LogWarning("REWIRED_PAIR_SOURCE_READINESS unavailable: "+error.GetType().FullName);}
             }
+            Logger.LogInfo("REWIRED_PAIR_SOURCE_READINESS initialization optIn="+captureRewiredPairSourceReadiness+" sessionAvailable="+session.Available+" created="+(rewiredPairSourceReadiness!=null));
             if (capturesEnabled && session.Available)
                 inputProbe=new KeyboardEProbe(directory,Environment.GetEnvironmentVariable("UGEVR_SESSION_ID"),Process.GetCurrentProcess().Id,Stopwatch.Frequency,PublicKeyboardEReader.Create);
             if(compareHierarchyInventory && session.Available)
@@ -369,8 +370,8 @@ public class Injector : BaseUnityPlugin
         {
             bool strictActive=rewiredPairSourceObservation!=null && rewiredPairSourceObservation.Active;
             bool hold=rewiredPairSourceReadiness.Tick(captureRewiredPairSourceReadiness,enabled,Application.isFocused,generation,DateTime.UtcNow,Stopwatch.GetTimestamp(),strictActive);
-            if(rewiredPairSourceReadiness.Attempted && InputClock()>=nextPairReadinessReport)
-            {nextPairReadinessReport=InputClock()+1;Logger.LogInfo("REWIRED_PAIR_SOURCE_READINESS status="+rewiredPairSourceReadiness.Status+" reads="+rewiredPairSourceReadiness.Reads+" reason="+rewiredPairSourceReadiness.Reason+" error="+rewiredPairSourceReadiness.LastError+" qualifiesStrictWindow=false authorizesInput=false");}
+            if(InputClock()>=nextPairReadinessReport)
+            {nextPairReadinessReport=InputClock()+1;Logger.LogInfo("REWIRED_PAIR_SOURCE_READINESS status="+rewiredPairSourceReadiness.Status+" attempted="+rewiredPairSourceReadiness.Attempted+" disposed="+rewiredPairSourceReadiness.Disposed+" ownerThread="+rewiredPairSourceReadiness.OnOwnerThread+" requestPresent="+File.Exists(Path.Combine(rewiredPairSourceReadiness.EvidenceDirectory,RewiredPairSourceReadiness.RequestName))+" directory="+rewiredPairSourceReadiness.EvidenceDirectory+" reads="+rewiredPairSourceReadiness.Reads+" reason="+rewiredPairSourceReadiness.Reason+" error="+rewiredPairSourceReadiness.LastError+" qualifiesStrictWindow=false authorizesInput=false");}
             if(hold){if(strictActive)rewiredPairSourceObservation.Cancel("readiness_overlap",DateTime.UtcNow,Stopwatch.GetTimestamp());return;}
         }
         if(rewiredPairSourceObservation==null)return;
@@ -829,7 +830,7 @@ public class Injector : BaseUnityPlugin
     }
     void OnApplicationQuit() { quitting=true; StopOwnedWork(); }
     void OnDestroy() { quitting=true; StopOwnedWork(); }
-    void OnDisable() {CancelGamepadDiagnostic("component_disabled");CancelRewiredDiagnostic("component_disabled");if(rewiredSourceObservation!=null) rewiredSourceObservation.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());if(rewiredPairSourceObservation!=null)rewiredPairSourceObservation.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());if(rewiredPairSourceReadiness!=null)rewiredPairSourceReadiness.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());}
+    void OnDisable() {CancelGamepadDiagnostic("component_disabled");CancelRewiredDiagnostic("component_disabled");if(rewiredSourceObservation!=null) rewiredSourceObservation.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());if(rewiredPairSourceObservation!=null)rewiredPairSourceObservation.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());if(rewiredPairSourceReadiness!=null){rewiredPairSourceReadiness.Cancel("component_disabled",DateTime.UtcNow,Stopwatch.GetTimestamp());Logger.LogInfo("REWIRED_PAIR_SOURCE_READINESS component_disabled attempted="+rewiredPairSourceReadiness.Attempted+" disposed="+rewiredPairSourceReadiness.Disposed);}}
     void StopOwnedWork()
     {
         CancelGamepadDiagnostic("game_lifecycle_end");

@@ -40,6 +40,9 @@ namespace Ugevr
         public bool Active {get;private set;}
         public bool Attempted {get {return used;}}
         public int Reads {get {return raw.Count;}}
+        public bool Disposed {get {return disposed;}}
+        public bool OnOwnerThread {get {return thread==Thread.CurrentThread.ManagedThreadId;}}
+        public string EvidenceDirectory {get {return directory;}}
         public string Status {get;private set;}
         public string Reason {get;private set;}
         public string LastError {get;private set;}
