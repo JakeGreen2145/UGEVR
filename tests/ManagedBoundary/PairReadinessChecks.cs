@@ -152,5 +152,18 @@ static class PairReadinessChecks
         {f.Request(new string('x',257));f.Tick(0);check(f.Calls==0 && f.Value.Status=="request_rejected","Oversized request is bounded before claim or SDK query");}
         using(var f=new Fixture())
         {var max=RewiredPairSourceChecks.MaximumSnapshot();f.Read=()=>max;f.Request();f.Tick(0);check(new FileInfo(f.File(RewiredPairSourceReadiness.ResultName)).Length<RewiredPairSourceReadiness.MaximumBytes,"Conservative maximum escaped raw primer remains within the separate bounded artifact");}
+        using(var f=new Fixture())
+        {
+            string temporary=f.File(".controlled.tmp"),destination=f.File("publication.yaml");
+            byte[] foreign=Encoding.UTF8.GetBytes("foreign temporary bytes"),payload=Encoding.UTF8.GetBytes("exact publication bytes\n");
+            System.IO.File.WriteAllBytes(temporary,foreign);bool refused=false;
+            try {RewiredPairSourceReadiness.PublishBytes(temporary,destination,payload);}catch(IOException){refused=true;}
+            check(refused && Encoding.UTF8.GetString(System.IO.File.ReadAllBytes(temporary))==Encoding.UTF8.GetString(foreign) && !System.IO.File.Exists(destination),"Actual publication helper preserves a preexisting temporary collision it never created");
+            System.IO.File.Delete(temporary);System.IO.File.WriteAllBytes(destination,foreign);refused=false;
+            try {RewiredPairSourceReadiness.PublishBytes(temporary,destination,payload);}catch(IOException){refused=true;}
+            check(refused && Encoding.UTF8.GetString(System.IO.File.ReadAllBytes(destination))==Encoding.UTF8.GetString(foreign) && !System.IO.File.Exists(temporary),"Destination collision preserves foreign bytes and removes only this publication's owned temporary");
+            System.IO.File.Delete(destination);RewiredPairSourceReadiness.PublishBytes(temporary,destination,payload);
+            check(Encoding.UTF8.GetString(System.IO.File.ReadAllBytes(destination))==Encoding.UTF8.GetString(payload) && !System.IO.File.Exists(temporary),"Normal publication moves exact bytes and leaves no owned temporary");
+        }
     }
 }

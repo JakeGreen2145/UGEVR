@@ -145,7 +145,7 @@ namespace Ugevr
         void Finish(string reason,DateTime utc,long tick)
         {
             Active=false;Status=reason=="ready"?"ready":"refused";Reason=reason;
-            string temporary=PathFor(".pr-"+Guid.NewGuid().ToString("N").Substring(0,8)+".tmp");
+            string temporary=PathFor(".pr-"+Guid.NewGuid().ToString("N")+".tmp");
             try
             {
                 var b=new StringBuilder("---\nschema_version: 1\nobserver_kind: paired_source_readiness\nprivate_device_identity: true\nauthorizes_input: false\nqualifies_strict_window: false\ngameplay_credit_seconds: 0\nrun_id: '"+run+"'\nrequest_id: "+ControllerIdentitySnapshot.Scalar(id)+"\nprocess_id: "+pid+"\nruntime_generation: "+generation+"\nmaximum_reads: 4\nmaximum_rate_hz: 20\nmaximum_duration_seconds: 1\nmonotonic_frequency: "+frequency+"\nstart_ticks: "+start+"\ndeadline_ticks: "+deadline+"\n");
@@ -167,12 +167,22 @@ namespace Ugevr
                     {tick=finalClock;Status="refused";Reason=reason=finalGeneration!=generation?"runtime_generation_changed":"serialization_deadline_or_clock";bytes=utf8.GetBytes(headerAndRecords+tail());}
                 }
                 if(bytes.Length>MaximumBytes)throw new IOException("Readiness artifact bound exceeded.");
-                Safe(directory);Directory.CreateDirectory(directory);Safe(temporary);Safe(PathFor(ResultName));
-                using(var output=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None))output.Write(bytes,0,bytes.Length);
-                File.Move(temporary,PathFor(ResultName));
+                Safe(directory);Directory.CreateDirectory(directory);
+                PublishBytes(temporary,PathFor(ResultName),bytes);
             }
             catch(Exception error){Status="output_unconfirmed";LastError=Error(error);}
-            finally {try {if(File.Exists(temporary))File.Delete(temporary);}catch {}}
+        }
+        internal static void PublishBytes(string temporary,string destination,byte[] bytes)
+        {
+            bool ownsTemporary=false;
+            try
+            {
+                Safe(temporary);Safe(destination);
+                using(var output=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None))
+                {ownsTemporary=true;output.Write(bytes,0,bytes.Length);}
+                File.Move(temporary,destination);ownsTemporary=false;
+            }
+            finally {if(ownsTemporary)try {File.Delete(temporary);}catch {}}
         }
         string ReadRequest(string path)
         {
