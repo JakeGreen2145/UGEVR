@@ -40,13 +40,14 @@ static class OverlayPairPreparationChecks
     {
         try
         {
-            RenderChecks(check,false);RenderChecks(check,true);
+            RenderChecks(check,false,false);RenderChecks(check,true,false);
+            RenderChecks(check,false,true);RenderChecks(check,true,true);
             LazyFirstEyeShowsRisk(check);
             FailureChecks(check,false);FailureChecks(check,true);ZeroAndAdmissionChecks(check);ClipChecks(check);
         }
         finally {Canvas.Instances.Clear();Canvas.ForceAction=null;Resources.Extras.Clear();LayerMask.Name=null;}
     }
-    static void RenderChecks(Action<bool,string> check,bool cameraIsRoot)
+    static void RenderChecks(Action<bool,string> check,bool cameraIsRoot,bool guarded)
     {
         Canvas.Instances.Clear();var root=Root();
         Transform transform=cameraIsRoot?(Transform)root:new Child {parent=root,localPosition=new Vector3(4,5,6),localRotation=new Quaternion(0,0,0,1),localScale=new Vector3(1,1,1)};
@@ -54,7 +55,8 @@ static class OverlayPairPreparationChecks
         var camera=new Camera {transform=transform,nearClipPlane=.1f,farClipPlane=100,cullingMask=123};
         var original=camera.transform.position;int flushes=0,renders=0;Canvas.ForceAction=()=>++flushes;
         var overlays=new OverlayCanvasScope(camera,1,2,false);overlays.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));
-        using(var saved=new CameraState(camera))
+        var saved=new CameraState(camera,null,guarded?CameraTransformRestoration.GuardedLocal:CameraTransformRestoration.World);
+        using(saved)
         using(overlays)
         {
             overlays.PrepareForPair();int preparedFlushes=flushes;var placed=root.position;
@@ -75,6 +77,7 @@ static class OverlayPairPreparationChecks
             }
         }
         check(renders==2&&Exact(camera.transform.position,original)&&canvas.renderMode==RenderMode.ScreenSpaceOverlay,"Prepared pair retains nested camera and overlay cleanup");
+        if(guarded)check(saved.CachedLocalRestoration.AlreadyRestoredNoWrite && saved.CachedLocalRestoration.RestoreReturned,"Prepared eye pair and exact already-restored guard compose for overlapping camera/UI roles");
     }
     static void LazyFirstEyeShowsRisk(Action<bool,string> check)
     {

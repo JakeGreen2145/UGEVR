@@ -137,3 +137,18 @@ correctness. World defaults, explicit world restoration, local-with-world-fallba
 and ordinary guarded owned-eye restoration retain their existing behavior. Any
 near miss, unavailable context or arbitrary different foreign pose continues to
 refuse the new outcome. Physical validation of the correction is separate.
+
+## UI preparation before eye assignment
+
+The injector now prepares the common UI panel inside the existing borrowed
+camera and overlay scopes before assigning either eye pose. Previously the first
+`ApplyEye` performed that placement after the first eye assignment. Moving an
+admitted UI ancestor could therefore move the selected camera before its render.
+Per-eye clipping and layout observations still happen after eye assignment, and
+the overlay-then-camera cleanup order is unchanged.
+
+Controlled render callbacks check the applied world pose and copied UI view for
+both eyes, including the combined guarded no-write path. These checks do not
+reproduce native Unity layout or establish physical image correctness. A camera
+that is itself a panel root still moves that panel when its eye pose is assigned;
+independent UI placement for that case remains unresolved.
