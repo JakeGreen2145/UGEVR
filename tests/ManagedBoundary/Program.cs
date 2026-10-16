@@ -33,6 +33,7 @@ class Program
         OverlayIsolationChecks.Run(Assert);
         HierarchyInventoryChecks.Run(Assert);
         NativeUiDiagnosticsChecks.Run(Assert);
+        NativeUiGraphicChecks.Run(Assert);
         UiPanelClipChecks.Run(Assert);
         CameraCurrentChecks.Run(Assert);
         EngineInputExperimentChecks.Run(Assert);

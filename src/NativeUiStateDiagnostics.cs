@@ -22,6 +22,7 @@ namespace Ugevr
         readonly int rendererLimit,admissionOccurrenceLimit;
         readonly MethodInfo inheritedAlpha;
         readonly bool alphaLookupFailed;
+        readonly NativeUiGraphicDiagnostics graphics;
         int encountered,dropped,duplicates,admissionErrors,rendererQueries,contextQueries;
         public static bool ShouldCapture(bool configured,bool imagesEnabled,bool requestPresentBeforePair) {return configured && imagesEnabled && requestPresentBeforePair;}
         public static int ResolveRendererLimit(bool configured,bool imagesEnabled,int requestedLimit)
@@ -30,14 +31,16 @@ namespace Ugevr
             if(requestedLimit<DefaultRendererLimit || requestedLimit>MaximumRendererLimit) throw new ArgumentOutOfRangeException("NativeUiRendererLimit","Use 1024..8192 for the explicit native UI diagnostic.");
             return requestedLimit;
         }
-        public NativeUiStateDiagnostics(Camera camera,int rendererLimit=DefaultRendererLimit)
+        public NativeUiStateDiagnostics(Camera camera,int rendererLimit=DefaultRendererLimit,bool captureGraphicDetails=false)
         {
             this.rendererLimit=ResolveRendererLimit(true,true,rendererLimit);
             admissionOccurrenceLimit=this.rendererLimit*8;
             this.camera=camera;
+            if(captureGraphicDetails) graphics=new NativeUiGraphicDiagnostics();
             try {inheritedAlpha=FindCachedFloatMethod(typeof(CanvasRenderer),"GetInheritedAlpha");}
             catch {alphaLookupFailed=true;}
         }
+        public void RegisterGraphicRoot(int rootId,RectTransform root) {if(graphics!=null)graphics.RegisterRoot(rootId,root);}
         public static MethodInfo FindCachedFloatMethod(Type type,string name)
         {
             MethodInfo method=type.GetMethod(name,BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly,null,Type.EmptyTypes,null);
@@ -55,6 +58,7 @@ namespace Ugevr
                 string name=renderer.name ?? "";
                 entries.Add(new Entry {Renderer=renderer,Id=id,RootId=rootId,Name=name.Length>64?name.Substring(0,64):name});
                 seen.Add(id);
+                if(graphics!=null)graphics.Admit(renderer,id,rootId);
             }
             catch {++admissionErrors;}
         }
@@ -80,6 +84,7 @@ namespace Ugevr
                     try {++rendererQueries;sample.InheritedAlpha=(float)inheritedAlpha.Invoke(entry.Renderer,null);if(!Finite(sample.InheritedAlpha.Value)) ++sample.Nonfinite;} catch {++sample.Errors;}
                 entry.Samples[phase]=sample;
             }
+            if(graphics!=null)graphics.Capture(phase);
         }
         static int? Id(UnityEngine.Object value) {return value==null?(int?)null:value.GetInstanceID();}
         static bool Finite(float value) {return !Single.IsNaN(value) && !Single.IsInfinity(value);}
@@ -137,7 +142,9 @@ namespace Ugevr
                 }
                 text.Append("]}");
             }
-            return text.Append("]}").ToString();
+            text.Append(']');
+            if(graphics!=null)text.Append(",\"graphicDetails\":").Append(graphics.DiagnosticJson());
+            return text.Append('}').ToString();
         }
     }
 }

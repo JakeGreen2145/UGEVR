@@ -169,12 +169,12 @@ namespace Ugevr
             public Quaternion LocalRotation;
         }
 
-        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null,bool captureNativeUiState=false,int nativeUiRendererLimit=NativeUiStateDiagnostics.DefaultRendererLimit,UiPanelClipping panelClipping=UiPanelClipping.None)
-            : this(camera,unitsPerMeter,planeDistanceMeters,includeLayers,panelWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureNativeUiState,nativeUiRendererLimit,panelClipping,null) {}
-        internal OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters,bool captureLayoutInputs,string layoutInputRootRectIds,bool captureNativeUiState,int nativeUiRendererLimit,UiPanelClipping panelClipping,Func<Canvas[],UiPanelClipScope> clipFactory)
+        public OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters=1.8,bool captureLayoutInputs=false,string layoutInputRootRectIds=null,bool captureNativeUiState=false,int nativeUiRendererLimit=NativeUiStateDiagnostics.DefaultRendererLimit,UiPanelClipping panelClipping=UiPanelClipping.None,bool captureUiGraphicDetails=false)
+            : this(camera,unitsPerMeter,planeDistanceMeters,includeLayers,panelWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureNativeUiState,nativeUiRendererLimit,panelClipping,null,captureUiGraphicDetails) {}
+        internal OverlayCanvasScope(Camera camera,double unitsPerMeter,double planeDistanceMeters,bool includeLayers,double panelWidthMeters,bool captureLayoutInputs,string layoutInputRootRectIds,bool captureNativeUiState,int nativeUiRendererLimit,UiPanelClipping panelClipping,Func<Canvas[],UiPanelClipScope> clipFactory,bool captureUiGraphicDetails=false)
         {
             if(captureLayoutInputs) layoutInputs=new UiLayoutDiagnostics(layoutInputRootRectIds);
-            if(captureNativeUiState) nativeUiState=new NativeUiStateDiagnostics(camera,nativeUiRendererLimit);
+            if(captureNativeUiState) nativeUiState=new NativeUiStateDiagnostics(camera,nativeUiRendererLimit,captureUiGraphicDetails);
             this.camera=camera; this.includeLayers=includeLayers;
             this.unitsPerMeter=unitsPerMeter;this.panelWidthMeters=panelWidthMeters;
             OriginalMask=camera.cullingMask; AppliedMask=OriginalMask;
@@ -208,6 +208,7 @@ namespace Ugevr
                     Root=root,Width=root.rect.width,Height=root.rect.height,Pivot=root.pivot,ParentScale=parentScale,OriginalUiContext=UiContext(canvas)});
                 OverlayLayerMask|=1<<canvas.gameObject.layer;
                 isolatedObjects.Add(canvas.gameObject);
+                if(nativeUiState!=null)nativeUiState.RegisterGraphicRoot(canvases[canvases.Count-1].Id,root);
                 foreach (CanvasRenderer renderer in canvas.GetComponentsInChildren<CanvasRenderer>(true))
                     if (renderer!=null)
                     {

@@ -52,6 +52,7 @@
     <Compile Include="../../src/OverlayLayerInventory.cs" Link="OverlayLayerInventory.cs" />
     <Compile Include="../../src/OverlayWallTiming.cs" Link="OverlayWallTiming.cs" />
     <Compile Include="../../src/NativeUiStateDiagnostics.cs" Link="NativeUiStateDiagnostics.cs" />
+    <Compile Include="../../src/NativeUiGraphicDiagnostics.cs" Link="NativeUiGraphicDiagnostics.cs" />
     <Compile Include="../../src/CaptureRequestAdmission.cs" Link="CaptureRequestAdmission.cs" />
     <Compile Include="../../src/HierarchyInventoryComparison.cs" Link="HierarchyInventoryComparison.cs" />
     <Compile Include="../../src/HierarchyInventoryProbe.cs" Link="HierarchyInventoryProbe.cs" />
