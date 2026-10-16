@@ -6,16 +6,31 @@ namespace Ugevr
 {
     public interface IRewiredFailureDiagnostics {RewiredFailureInfo LastFailure {get;}}
     public interface IRewiredCleanupFailureDiagnostics {RewiredFailureInfo LastCleanupFailure {get;}}
+    public sealed class RewiredJoystickInventoryInfo
+    {
+        public readonly string Verdict,Operation;
+        public readonly int ObservedEntries;
+        public readonly int? CompletedCount;
+        internal RewiredJoystickInventoryInfo(string verdict,string operation,int observed,int? completed)
+        {Verdict=verdict;Operation=operation;ObservedEntries=observed;CompletedCount=completed;}
+        internal string ToLog(bool cleanup)
+        {
+            string p=cleanup?"cleanupJoystick":"joystick";
+            return " "+p+"InventoryVerdict="+Verdict+" "+p+"InventoryOperation="+Operation+" "+p+"ObservedEntries="+ObservedEntries.ToString(CultureInfo.InvariantCulture)
+                +" "+p+"CompletedCount="+(CompletedCount.HasValue?CompletedCount.Value.ToString(CultureInfo.InvariantCulture):"not_completed");
+        }
+    }
     // Only controlled operation/category labels, public counts and exception types. No messages or values.
     public sealed class RewiredFailureInfo
     {
         public readonly string Stage,Category,ExceptionType,InnerExceptionType;
         public readonly bool? Ready;
         public readonly int? Definitions,CustomDevices,Joysticks;
-        RewiredFailureInfo(string stage,string category,Exception error,bool? ready,int? definitions,int? devices,int? joysticks)
+        public readonly RewiredJoystickInventoryInfo JoystickInventory;
+        RewiredFailureInfo(string stage,string category,Exception error,bool? ready,int? definitions,int? devices,int? joysticks,RewiredJoystickInventoryInfo inventory)
         {
             Stage=Label(stage,96);Category=Label(category,64);ExceptionType=TypeName(error);
-            InnerExceptionType=TypeName(error==null?null:error.InnerException);Ready=ready;Definitions=definitions;CustomDevices=devices;Joysticks=joysticks;
+            InnerExceptionType=TypeName(error==null?null:error.InnerException);Ready=ready;Definitions=definitions;CustomDevices=devices;Joysticks=joysticks;JoystickInventory=inventory;
         }
         static string Label(string value,int bound)
         {
@@ -27,17 +42,17 @@ namespace Ugevr
             if(error==null) return "none";string name=error.GetType().FullName;
             return name!=null && name.StartsWith("System.",StringComparison.Ordinal)?Label(name,128):"non_system_exception";
         }
-        public static RewiredFailureInfo Capture(Exception error,string stage,string category,bool? ready=null,int? definitions=null,int? devices=null,int? joysticks=null)
+        public static RewiredFailureInfo Capture(Exception error,string stage,string category,bool? ready=null,int? definitions=null,int? devices=null,int? joysticks=null,RewiredJoystickInventoryInfo inventory=null)
         {
             var wrapped=error as RewiredOperationException;
-            if(wrapped!=null) return new RewiredFailureInfo(wrapped.Stage,wrapped.Category,wrapped.InnerException,ready,definitions,devices,joysticks);
-            return new RewiredFailureInfo(stage,category,error,ready,definitions,devices,joysticks);
+            if(wrapped!=null) return new RewiredFailureInfo(wrapped.Stage,wrapped.Category,wrapped.InnerException,ready,definitions,devices,joysticks,inventory);
+            return new RewiredFailureInfo(stage,category,error,ready,definitions,devices,joysticks,inventory);
         }
         static string Count(int? value) {return value.HasValue?value.Value.ToString(CultureInfo.InvariantCulture):"not_read";}
         public string ToLog()
-        {return "failureStage="+Stage+" failureCategory="+Category+" exceptionType="+ExceptionType+" innerExceptionType="+InnerExceptionType+" preflightReady="+(Ready.HasValue?Ready.Value.ToString().ToLowerInvariant():"not_read")+" preflightDefinitions="+Count(Definitions)+" preflightCustomDevices="+Count(CustomDevices)+" preflightJoysticks="+Count(Joysticks);}
+        {return "failureStage="+Stage+" failureCategory="+Category+" exceptionType="+ExceptionType+" innerExceptionType="+InnerExceptionType+" preflightReady="+(Ready.HasValue?Ready.Value.ToString().ToLowerInvariant():"not_read")+" preflightDefinitions="+Count(Definitions)+" preflightCustomDevices="+Count(CustomDevices)+" preflightJoysticks="+Count(Joysticks)+(JoystickInventory==null?"":JoystickInventory.ToLog(false));}
         public string ToCleanupLog()
-        {return "cleanupFailureStage="+Stage+" cleanupFailureCategory="+Category+" cleanupExceptionType="+ExceptionType+" cleanupInnerExceptionType="+InnerExceptionType;}
+        {return "cleanupFailureStage="+Stage+" cleanupFailureCategory="+Category+" cleanupExceptionType="+ExceptionType+" cleanupInnerExceptionType="+InnerExceptionType+(JoystickInventory==null?"":JoystickInventory.ToLog(true));}
     }
     internal sealed class RewiredOperationException : Exception
     {

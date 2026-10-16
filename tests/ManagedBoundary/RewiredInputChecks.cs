@@ -139,7 +139,7 @@ static class RewiredInputChecks
             Rewired.ReInput.Reset();data=Rewired.ReInput.Data;
             if(conflict=="definition")data.Definitions.Add(new Rewired.Data.CustomController_Editor {id=99});
             if(conflict=="device")Rewired.ReInput.controllers.CustomControllers.Add(new Rewired.CustomController(99,99));
-            if(conflict=="joystick")Rewired.ReInput.controllers.Joysticks.Add(new Rewired.Controller(99));if(conflict=="action")data.BadAction=true;
+            if(conflict=="joystick")Rewired.ReInput.controllers.JoystickContent.Add(new Rewired.Controller(99));if(conflict=="action")data.BadAction=true;
             adapter=Adapter(()=>0);bool refused=false;try{adapter.Add();}catch(Exception){refused=true;}
             check(refused && !adapter.NeedsCleanup && Rewired.ReInput.Subscribers==0 && data.Maps.Count==0,"Public preflight refuses an incompatible or conflicting baseline before mutation: "+conflict);
         }
@@ -178,8 +178,8 @@ static class RewiredInputChecks
             Rewired.ReInput.Reset();Rewired.ReInput.controllers.ForeignCreateNull=!throws;Rewired.ReInput.controllers.ForeignCreateThrow=throws;adapter=Adapter(()=>0);try{adapter.Add();}catch(Exception){}adapter.Remove();
             check(adapter.NeedsCleanup && Rewired.ReInput.controllers.CustomControllers.Count==1 && Rewired.ReInput.controllers.CustomControllers[0].tag=="game-owned" && Rewired.ReInput.controllers.Destroys==0 && Rewired.ReInput.Data.Deletes==0 && Rewired.ReInput.Subscribers==0,"Null/throw creation never adopts a foreign same-definition device without the exact owned tag");
         }
-        Rewired.ReInput.Reset();adapter=Adapter(()=>0);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];adapter.SetDesired(.4,0,.8,1);Rewired.ReInput.controllers.Joysticks.Add(new Rewired.Controller(99));Rewired.ReInput.Pulse();check(adapter.FaultReason!="" && device.Values[0]==0 && device.Values[2]==0,"A new physical-controller conflict stops the public callback and releases owned axes");
-        try{adapter.Remove();}catch(Exception){}check(Rewired.ReInput.controllers.Joysticks.Count==1 && Rewired.ReInput.Subscribers==0,"Cleanup never removes a newly arrived physical controller");Rewired.ReInput.Reset();
+        Rewired.ReInput.Reset();adapter=Adapter(()=>0);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];adapter.SetDesired(.4,0,.8,1);Rewired.ReInput.controllers.JoystickContent.Add(new Rewired.Controller(99));Rewired.ReInput.Pulse();check(adapter.FaultReason!="" && device.Values[0]==0 && device.Values[2]==0,"A new physical-controller conflict stops the public callback and releases owned axes");
+        try{adapter.Remove();}catch(Exception){}check(Rewired.ReInput.controllers.JoystickContent.Count==1 && Rewired.ReInput.Subscribers==0,"Cleanup never removes a newly arrived physical controller");Rewired.ReInput.Reset();
         foreach(string change in new[]{"tag","source-id","axis-removed","axis-reordered","identifier-reordered","axis-value","runtime-axis-removed","runtime-axis-reordered","runtime-axis-ID","runtime-identifier-reordered","runtime-polling","runtime-calibration-value","runtime-calibration-reference","runtime-calibration-curve","runtime-calibration-empty"})
         {
             Rewired.ReInput.Reset();now=0;adapter=Adapter(()=>now);adapter.Add();device=Rewired.ReInput.controllers.CustomControllers[0];data=Rewired.ReInput.Data;adapter.SetDesired(.4,.3,.8,1);now=.1;Rewired.ReInput.Pulse();
