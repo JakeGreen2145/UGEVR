@@ -65,7 +65,7 @@ foreach($item in Get-ChildItem -LiteralPath $published -File) {
     if($item.Extension -in '.exe','.dll','.json') { Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $package 'controller') }
 }
 Copy-Item -LiteralPath (Join-Path $repo 'scripts/Deploy-Session.ps1'),(Join-Path $repo 'scripts/UGEVR.ps1') -Destination (Join-Path $package 'scripts')
-foreach($name in @('development-distribution.md','injector-session-protocol.md','native-frame-contract.md','session-deployment.md','session-controller.md','profiles.md','installed-player-inspection.md')) {
+foreach($name in @('development-distribution.md','injector-session-protocol.md','native-frame-contract.md','session-deployment.md','session-controller.md','profiles.md','installed-player-inspection.md','guarded-camera-failure-evidence.md')) {
     $source=Join-Path $repo ('docs/'+$name)
     if(Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination (Join-Path $package 'docs') }
 }
