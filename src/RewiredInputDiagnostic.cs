@@ -37,6 +37,7 @@ namespace Ugevr
         public string Status {get;private set;}
         public string Reason {get;private set;}
         public RewiredFailureInfo Failure {get;private set;}
+        public RewiredFailureInfo CleanupFailure {get;private set;}
         public RewiredActionReadback Readback {get;private set;}
         public int ReadbackSamples {get;private set;}
         public double ReadbackAtSeconds {get;private set;}
@@ -88,7 +89,7 @@ namespace Ugevr
             if(!Valid(input)) {Cancel("right_source_unavailable",now);return;}
             if(input.Index!=identity.Index || input.Identity!=identity.Identity || input.TriggerAxis!=identity.TriggerAxis) {Cancel("right_source_identity_or_axis_changed",now);return;}
             if(unchecked(input.Packet-identity.Packet)>0x7fffffffu) {Cancel("source_packet_regressed",now);return;}identity.Packet=input.Packet;
-            if(!String.IsNullOrEmpty(backend.FaultReason)) {Cancel(backend.FaultReason,now);return;}
+            if(!String.IsNullOrEmpty(backend.FaultReason)) {CaptureFailure(null,"backend_fault_observed","backend_fault_observed");Cancel(backend.FaultReason,now);return;}
             double x=input.X,y=input.Y,magnitude=Math.Sqrt(x*x+y*y);
             if(magnitude<=deadzone) x=y=0;
             else {double scale=Math.Min(1,(magnitude-deadzone)/(1-deadzone))/magnitude;x*=scale;y*=scale;}
@@ -113,10 +114,19 @@ namespace Ugevr
             if(finished) return;Reason=reason;finished=true;
             if(backend!=null)
             {
+                // Disable/source loss can reach Cancel before the FaultReason
+                // branch. Retain an already recorded callback cause here too.
+                try {var details=backend as IRewiredFailureDiagnostics;if(Failure==null && details!=null && details.LastFailure!=null)Failure=details.LastFailure;}catch { }
                 try {backend.SetDesired(0,0,0,now);} catch { }
-                for(int i=0;i<2 && backend.NeedsCleanup;++i) {++RemoveAttempts;try {backend.Remove();} catch { }}
+                for(int i=0;i<2 && backend.NeedsCleanup;++i) {++RemoveAttempts;try {backend.Remove();} catch(Exception error) {CaptureCleanupFailure(error);} finally {CaptureCleanupFailure(null);}}
             }
             Status=backend!=null && backend.NeedsCleanup?"cleanup_unconfirmed":"complete";
+        }
+        void CaptureCleanupFailure(Exception error)
+        {
+            try {if(CleanupFailure!=null)return;var details=backend as IRewiredCleanupFailureDiagnostics;
+                if(details!=null && details.LastCleanupFailure!=null)CleanupFailure=details.LastCleanupFailure;
+                else if(error!=null)CleanupFailure=RewiredFailureInfo.Capture(error,"cleanup_remove","public_cleanup_failed");}catch { }
         }
     }
     public sealed class RewiredOwnershipSnapshot
@@ -128,6 +138,16 @@ namespace Ugevr
             if(expected==null || current==null || expected.Nodes==null || current.Nodes==null || expected.Values!=current.Values || expected.Nodes.Length!=current.Nodes.Length) return false;
             for(int i=0;i<expected.Nodes.Length;++i) if(!Object.ReferenceEquals(expected.Nodes[i],current.Nodes[i])) return false;
             return true;
+        }
+        // Called only after the existing comparison refuses. Cached values only;
+        // no target getters, messages, node names or observed values are exposed.
+        public static string Mismatch(RewiredOwnershipSnapshot expected,RewiredOwnershipSnapshot current)
+        {
+            if(expected==null || current==null || expected.Nodes==null || current.Nodes==null)return "snapshot_unavailable";
+            if(expected.Values!=current.Values)return "snapshot_values_changed";
+            if(expected.Nodes.Length!=current.Nodes.Length)return "snapshot_node_count_changed";
+            for(int i=0;i<expected.Nodes.Length;++i)if(!Object.ReferenceEquals(expected.Nodes[i],current.Nodes[i]))return "snapshot_reference_changed";
+            return "snapshot_comparison_disagreed";
         }
     }
 }

@@ -18,6 +18,7 @@ namespace Ugevr
         public string Status {get;private set;}
         public string Reason {get;private set;}
         public RewiredFailureInfo Failure {get;private set;}
+        public RewiredFailureInfo CleanupFailure {get;private set;}
         public RewiredActionReadback Readback {get;private set;}
         public int ReadbackSamples {get;private set;}
         public double ReadbackAtSeconds {get;private set;}
@@ -73,7 +74,7 @@ namespace Ugevr
             if(!Same(identity,input)) {Cancel("pair_source_identity_or_context_changed",now);return;}
             if(input.CompletedAt<=identity.CompletedAt || input.StartedAt<identity.CompletedAt) {Cancel("pair_query_not_new",now);return;}
             if(!Packets(identity,input)) {Cancel("pair_packet_regressed",now);return;}identity=input;
-            if(!String.IsNullOrEmpty(backend.FaultReason)) {Cancel(backend.FaultReason,now);return;}
+            if(!String.IsNullOrEmpty(backend.FaultReason)) {CaptureFailure(null,"backend_fault_observed","backend_fault_observed");Cancel(backend.FaultReason,now);return;}
             var values=new RewiredFiveValues {Trigger=input.Right.Trigger};Map(input.Left.X,input.Left.Y,out values.MoveX,out values.MoveY);Map(input.Right.X,input.Right.Y,out values.LookX,out values.LookY);
             try {backend.SetDesired(values,Math.Min(startedAt+duration,now+.5));CaptureReadback(now);}catch(Exception error) {CaptureFailure(error,"set_five_channel_input","public_api_exception");Cancel("public_state_failed",now);}
         }
@@ -90,10 +91,17 @@ namespace Ugevr
             if(finished) return;Reason=reason;finished=true;
             if(backend!=null)
             {
+                try {var details=backend as IRewiredFailureDiagnostics;if(Failure==null && details!=null && details.LastFailure!=null)Failure=details.LastFailure;}catch { }
                 try {backend.SetDesired(new RewiredFiveValues(),now);}catch {}
-                for(int i=0;i<2 && backend.NeedsCleanup;++i) {++RemoveAttempts;try {backend.Remove();}catch {}}
+                for(int i=0;i<2 && backend.NeedsCleanup;++i) {++RemoveAttempts;try {backend.Remove();}catch(Exception error) {CaptureCleanupFailure(error);}finally {CaptureCleanupFailure(null);}}
             }
             Status=backend!=null && backend.NeedsCleanup?"cleanup_unconfirmed":"complete";
+        }
+        void CaptureCleanupFailure(Exception error)
+        {
+            try {if(CleanupFailure!=null)return;var details=backend as IRewiredCleanupFailureDiagnostics;
+                if(details!=null && details.LastCleanupFailure!=null)CleanupFailure=details.LastCleanupFailure;
+                else if(error!=null)CleanupFailure=RewiredFailureInfo.Capture(error,"cleanup_remove","public_cleanup_failed");}catch { }
         }
     }
 }
