@@ -13,7 +13,7 @@ static class GuardedCameraRestorationChecks
         public Vector3 Local=new Vector3(1,2,3);
         public Quaternion Rotation=new Quaternion(0,0,0,1);
         public int WorldWrites,LocalWrites,LocalRotationWrites;
-        public bool ThrowRotation,ThrowQuery;
+        public bool ThrowRotation,ThrowQuery,QuantizedWorld;
         public Action AfterLocalWrite;
         public NativeTransform()
         {
@@ -21,7 +21,7 @@ static class GuardedCameraRestorationChecks
             var a=new float[16];a[0]=a[5]=a[10]=a[15]=1;
             localToWorldMatrix=worldToLocalMatrix=new Matrix4x4 {Elements=a};
         }
-        public override Vector3 position {get {if(ThrowQuery)throw new InvalidOperationException("native query");return Local;}set {++WorldWrites;Local=new Vector3(value.x,value.y,value.z+.00005f);}}
+        public override Vector3 position {get {if(ThrowQuery)throw new InvalidOperationException("native query");return QuantizedWorld?new Vector3((float)Math.Round(Local.x,2),(float)Math.Round(Local.y,2),(float)Math.Round(Local.z,2)):Local;}set {++WorldWrites;Local=new Vector3(value.x,value.y,value.z+.00005f);}}
         public override Quaternion rotation {get {return Rotation;}set {Rotation=value;}}
         public override Vector3 localPosition {get {return Local;}set {++LocalWrites;Local=value;if(AfterLocalWrite!=null)AfterLocalWrite();}}
         public override Quaternion localRotation {get {return Rotation;}set {++LocalRotationWrites;if(ThrowRotation)throw new InvalidOperationException("native setter");Rotation=value;}}
@@ -31,8 +31,9 @@ static class GuardedCameraRestorationChecks
         public readonly NativeTransform Child=new NativeTransform(),Parent=new NativeTransform();
         public readonly Camera Camera;
         public readonly CameraState Scope;
-        public Borrow(bool root=false)
+        public Borrow(bool root=false,bool quantizedWorld=false)
         {
+            Child.QuantizedWorld=quantizedWorld;
             Child.parent=root?null:Parent;
             Camera=new Camera {transform=Child,rect=new Rect {x=.1f},cullingMask=17,useOcclusionCulling=true,backgroundColor=new Color {r=.2f,a=1},clearFlags=CameraClearFlags.Skybox};
             Camera.projectionMatrix=new Matrix4x4 {Marker=31};Camera.worldToCameraMatrix=new Matrix4x4 {Marker=41};
@@ -78,6 +79,9 @@ static class GuardedCameraRestorationChecks
         }
         var missing=new Borrow();var unowned=new CameraState(missing.Camera,null,CameraTransformRestoration.GuardedLocal);
         bool missingThrew=false;try {unowned.Dispose();}catch(InvalidOperationException){missingThrew=true;}check(missingThrew,"Missing effective eye ownership cannot authorize local restoration");Dispose(missing);
+        var quantized=new Borrow(quantizedWorld:true);Vector3 worldBefore=quantized.Child.position;quantized.Child.Local.z+=.000001f;
+        check(quantized.Child.position.z==worldBefore.z,"Controlled local foreign change is hidden by unchanged world readback");
+        check(Dispose(quantized).Contains("owned_eye_local_pose_changed")&&quantized.Child.LocalWrites==0&&quantized.Child.WorldWrites==1,"Raw local ownership independently prevents overwriting foreign pose hidden by world quantization");OtherFields(check,quantized);
         var destroyed=new Borrow();UnityEngine.Object.Destroy(destroyed.Camera);check(Dispose(destroyed)!=null&&destroyed.Child.LocalWrites==0,"Destroyed camera refuses pair completion rather than silently succeeding");
         var partial=new Borrow();partial.Child.ThrowRotation=true;check(Dispose(partial)!=null&&partial.Child.Local.z==3,"Partial local setter failure throws without a world fallback");OtherFields(check,partial);
         var targetFailure=new Borrow();targetFailure.Camera.TargetSetter=value=>{if(value==null)throw new InvalidOperationException("target setter");};

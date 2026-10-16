@@ -24,6 +24,9 @@ namespace Ugevr
         Snapshot saved,before,after;
         Vector3 ownedPosition;
         Quaternion ownedRotation;
+        Vector3 ownedLocalPosition;
+        Quaternion ownedLocalRotation;
+        bool ownedLocalRead;
         bool hasOwnedPose,ownedQueryFailed,ownedPositionRead,ownedRotationRead;
         bool? ownedPositionEqual,ownedRotationEqual;
         public string AppliedSpace {get;private set;}
@@ -92,12 +95,13 @@ namespace Ugevr
         public void RecordOwnedEyePose()
         {
             // Retain effective raw engine structs before Render; no domain normalization.
-            hasOwnedPose=false;ownedPositionRead=false;ownedRotationRead=false;
+            hasOwnedPose=false;ownedPositionRead=false;ownedRotationRead=false;ownedLocalRead=false;
             try
             {
                 if(camera==null||saved.Transform==null||!System.Object.ReferenceEquals(camera.transform,saved.Transform)) {ownedQueryFailed=true;return;}
                 ownedPosition=saved.Transform.position;ownedPositionRead=true;ownedRotation=saved.Transform.rotation;ownedRotationRead=true;
-                hasOwnedPose=Finite(V(ownedPosition))&&Finite(Q(ownedRotation));ownedQueryFailed=!hasOwnedPose;
+                if(guarded) {ownedLocalPosition=saved.Transform.localPosition;ownedLocalRotation=saved.Transform.localRotation;ownedLocalRead=true;}
+                hasOwnedPose=Finite(V(ownedPosition))&&Finite(Q(ownedRotation))&&(!guarded||Finite(V(ownedLocalPosition))&&Finite(Q(ownedLocalRotation)));ownedQueryFailed=!hasOwnedPose;
             }
             catch {ownedQueryFailed=true;}
         }
@@ -127,6 +131,7 @@ namespace Ugevr
                 ownedPositionEqual=guarded?Exact(before.WorldPosition,V(ownedPosition)):p==ownedPosition;
                 if(ownedPositionEqual==false)reason="owned_eye_position_changed";
                 else {ownedRotationEqual=guarded?Exact(before.WorldRotation,Q(ownedRotation)):q==ownedRotation;if(ownedRotationEqual==false)reason="owned_eye_rotation_changed";}
+                if(reason==null&&guarded&&(!Exact(before.LocalPosition,V(ownedLocalPosition))||!Exact(before.LocalRotation,Q(ownedLocalRotation))))reason="owned_eye_local_pose_changed";
             }
             Refusal=reason??"none";AppliedSpace=reason==null?"local":guarded?"foreign_pose_preserved":"world_fallback";return reason==null;
         }
@@ -180,6 +185,7 @@ namespace Ugevr
         {
             var b=new StringBuilder((guarded?"guarded_local_restoration:":"local_restoration_experiment:")+"\n  applied_space: "+AppliedSpace+"\n  refusal_or_fallback_reason: "+Refusal+"\n  post_context: "+PostContext+"\n  restoration_returned: "+RestoreReturned.ToString().ToLowerInvariant()+"\n  failure_category: "+Failure+"\n  aba_changes_excluded: false\n  owned_pose_available: "+hasOwnedPose.ToString().ToLowerInvariant()+"\n  owned_position_equal: "+Bool(ownedPositionEqual)+"\n  owned_rotation_equal: "+Bool(ownedRotationEqual)+"\n");
             Array(b,"owned_world_position",ownedPositionRead?V(ownedPosition):null,2);Array(b,"owned_world_rotation_xyzw",ownedRotationRead?Q(ownedRotation):null,2);
+            if(guarded) {Array(b,"owned_local_position",ownedLocalRead?V(ownedLocalPosition):null,2);Array(b,"owned_local_rotation_xyzw",ownedLocalRead?Q(ownedLocalRotation):null,2);}
             return b.ToString();
         }
     }
