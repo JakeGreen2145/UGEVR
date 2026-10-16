@@ -109,19 +109,28 @@ static class GuardedCameraFailureChecks
             var camera=new Camera {transform=rect};string run=Guid.NewGuid().ToString("D");
             var owner=new GuardedCameraFailureDiagnostics(root,run);var evidence=owner.Begin(88,4,17);
             var overlay=new OverlayCanvasScope(camera,1,2,false);overlay.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));evidence.Bind(null,overlay);
-            Refuse(()=>
+            bool threw=false;
+            try
             {
                 using(var restore=new CameraState(camera,null,CameraTransformRestoration.GuardedLocal,evidence))
                 using(overlay)
                 {
                     evidence.Bind(restore.CachedLocalRestoration,overlay);
                     rect.position=new Vector3(7,8,9);restore.RecordOwnedEyePose();overlay.ApplyEye();
-                    if(setterFault)rect.LocalRotationSetter=q=>{throw new Exception("controlled setter");};
+                    if(setterFault) {rect.LocalRotationSetter=q=>{throw new Exception("controlled setter");};camera.TargetSetter=t=>{throw new Exception("controlled target setter");};}
                 }
-            });
-            overlay.RebuildRestoredGeometry();evidence.Publish();string body=File.ReadAllText(PathFor(root,run,1));
+            }
+            catch(InvalidOperationException) {threw=true;}
+            overlay.RebuildRestoredGeometry();evidence.Publish();
+            if(!setterFault)
+            {
+                check(!threw && owner.Attempts==0 && !File.Exists(PathFor(root,run,1)),"Exact already-restored overlay camera completes without manufacturing failure evidence");
+                return;
+            }
+            check(threw,"An independent borrowed-camera setter fault still rejects the already-restored path");
+            string body=File.ReadAllText(PathFor(root,run,1));
             check(body.Contains("camera_rect_id: "+rect.GetInstanceID()) && body.Contains("camera_dispose_pose_write_attempts: 3") && body.Contains("camera_final_rebuild_write_attempts: 2"),"Cached actual object overlap tracks scope-dispose and later final-rebuild write attempts separately");
-            check(body.Contains("world_position: [7, 8, 9]") && body.Contains("world_position: [1, 2, 3]") && body.Contains("failure_reason: owned_eye_position_changed"),"Own overlay restoration reproduces the refusal but does not widen or bypass the guarded comparison");
+            check(body.Contains("world_position: [7, 8, 9]") && body.Contains("world_position: [1, 2, 3]") && body.Contains("failure_reason: restoration_setter_or_query_exception"),"Cached exact overlay restoration cannot hide another borrowed-camera setter failure");
             check((setterFault?overlay.RestorationConflicts>0:overlay.RestorationConflicts==0) && body.Contains("attempts_are_not_successes: true") && body.Contains("local_scale: [1, 1, 1]") && body.Contains("local_to_world_matrix:"),"Handover evidence retains original expected values, cached matrices and bounded ownership limits");
             check(body.Contains("camera_dispose_pose_setters_returned: "+(setterFault?2:3)) && body.Contains("camera_final_rebuild_setters_returned: "+(setterFault?1:2)) && body.Contains("camera_dispose_layout_setters_returned: 4"),"Actual setter returns are distinct from attempts, including a controlled setter exception without retries");
         }

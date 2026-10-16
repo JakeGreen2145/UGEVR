@@ -23,7 +23,7 @@ class Program
         TrackingMatrixOracleChecks.Run(Assert);
         GuardedCameraRestorationChecks.Run(Assert);
         CameraOverlayOwnershipChecks.Run(Assert);
-        GuardedCameraFailureChecks.Run(Assert); CameraEvidenceFailureStageChecks.Run(Assert);
+        GuardedCameraFailureChecks.Run(Assert);GuardedAlreadyRestoredChecks.Run(Assert); CameraEvidenceFailureStageChecks.Run(Assert);
         CameraRestorationPoseChecks.Run(Assert);
         CameraLocalRestorationChecks.Run(Assert);
         CameraComparisonChecks.Run(Assert);

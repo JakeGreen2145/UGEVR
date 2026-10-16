@@ -48,11 +48,12 @@ static class CameraOverlayOwnershipChecks
         var overlays=new OverlayCanvasScope(camera,1,2,false);
         overlays.SetCommonHead(new RigidPose(new Position(0,0,0),Orientation.Identity));
         Vector3 owned=new Vector3(),afterOverlay=new Vector3(),afterApply=new Vector3();
-        string failure=null;
+        string failure=null;CameraLocalRestoration outcome=null;
         try
         {
             using(var restore=new CameraState(camera,null,CameraTransformRestoration.GuardedLocal))
             {
+                outcome=restore.CachedLocalRestoration;
                 using(overlays)
                 {
                     for(int eye=0;eye<2;++eye)
@@ -75,9 +76,14 @@ static class CameraOverlayOwnershipChecks
             check(failure==null,"Disjoint camera and overlay restores successfully without callback mutation");
             check(Exact(owned,afterApply)&&Exact(owned,afterOverlay),"Disjoint overlay does not mutate the last camera eye pose");
         }
+        else if(shape==1 || shape==2)
+        {
+            check(failure==null && outcome.AppliedSpace=="already_restored_no_write" && outcome.RestoreReturned,"Exact saved camera state restored by inner overlay scope admits explicit no-write completion: "+name);
+            check(!Exact(owned,afterOverlay) && Exact(afterOverlay,camera.transform.position),"Admission preserves exact already-restored pose rather than reapplying an eye or a correction: "+name);
+        }
         else
         {
-            check(failure!=null&&failure.Contains("owned_eye_position_changed"),"Actual nested scopes can refuse solely from controlled overlay ownership overlap: "+name);
+            check(failure!=null&&failure.Contains("owned_eye_position_changed"),"Parent-only overlay restoration does not admit a camera that differs from its saved state: "+name);
             check(!Exact(owned,afterOverlay),"Inner overlay cleanup changes the last sampled eye before outer guard: "+name);
             check(Exact(afterOverlay,camera.transform.position),"Guard preserves the camera pose present after inner overlay disposal: "+name);
         }

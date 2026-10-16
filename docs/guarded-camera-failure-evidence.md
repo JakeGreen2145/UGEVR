@@ -54,8 +54,8 @@ not query or enumerate another hierarchy.
 Object identity, instance IDs and sampled context do not establish who wrote a
 pose or exclude ABA changes. An overlap can support a controlled ownership
 handover investigation; an error named `owned_eye_position_changed` alone does
-not identify a foreign game callback. No already-restored/no-write remedy or
-ownership relaxation is included.
+not identify a foreign game callback. The explicit guarded mode also recognizes an exact already-restored final state;
+this does not identify who restored it.
 
 ## First physical publication attempt
 
@@ -110,3 +110,30 @@ can otherwise encode an unpaired surrogate despite requesting a throwing UTF-8
 encoder. Valid BMP text and valid surrogate pairs retain their expected bytes.
 This preserves the strict encoding contract across runtimes and does not
 attribute the physical failure to Unicode.
+
+
+## Exact already-restored completion
+
+In explicit `guarded-local` mode, `already_restored_no_write` is a separate
+successful outcome. It requires a valid finite owned-eye record and complete
+finite saved/current snapshots, unchanged camera/transform/parent references and
+IDs, and exact saved world and local position/rotation. Camera local/lossy scales,
+both camera matrices and every saved parent-context component must also match
+exactly. The current snapshot is the existing pre-disposal capture. No new engine
+query or tolerance is introduced for this decision.
+
+This outcome skips all camera transform setters. Other borrowed camera fields
+still receive their existing independent restoration attempts. The existing
+post-restoration capture must again satisfy the full exact saved-state predicate.
+A setter/query fault or post-setter state change refuses completion without a
+corrective transform write. Diagnostics retain the original owned-eye comparison,
+including `owned_position_equal: false` and short-circuited rotation when applicable;
+`applied_space` identifies why that mismatch no longer requires a transform write.
+
+A native startup record showed exactly equal saved/pre-disposal/post-disposal
+camera and parent snapshots after overlay unwind while the last owned eye differed.
+That is final-state evidence. It does not prove writer identity or rendered-eye
+correctness. World defaults, explicit world restoration, local-with-world-fallback
+and ordinary guarded owned-eye restoration retain their existing behavior. Any
+near miss, unavailable context or arbitrary different foreign pose continues to
+refuse the new outcome. Physical validation of the correction is separate.

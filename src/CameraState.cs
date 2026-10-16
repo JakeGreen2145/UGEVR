@@ -123,7 +123,7 @@ namespace Ugevr
             // Eligibility refusal never writes either local or world pose. Other
             // borrowed fields each get one independent restoration attempt.
             Attempt(delegate {camera.targetTexture=target;},ref first);
-            if(local)Attempt(delegate {localRestoration.RestoreLocal();},ref first);
+            if(local && !localRestoration.AlreadyRestoredNoWrite)Attempt(delegate {localRestoration.RestoreLocal();},ref first);
             Attempt(delegate {camera.rect=rect;},ref first);
             Attempt(delegate {camera.useOcclusionCulling=occlusion;},ref first);
             Attempt(delegate {camera.cullingMask=cullingMask;},ref first);

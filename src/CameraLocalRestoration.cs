@@ -35,6 +35,7 @@ namespace Ugevr
         public string Failure {get;private set;}
         public bool RestoreReturned {get;private set;}
         public bool Guarded {get {return guarded;}}
+        public bool AlreadyRestoredNoWrite {get;private set;}
         internal Transform CachedTransform {get {return saved.Transform;}}
         internal Transform CachedParent {get {return saved.Parent;}}
         internal int? CachedTransformId {get {return saved.TransformId;}}
@@ -121,13 +122,23 @@ namespace Ugevr
             if(a.HasParent)for(int i=0;i<8;++i)if(!Exact(a.ParentContext[i],b.ParentContext[i]))return names[i];
             return null;
         }
+        static bool ExactSavedState(Snapshot saved,Snapshot current)
+        {
+            if(!CompleteFinite(saved)||!CompleteFinite(current)||ContextDifference(saved,current)!=null)return false;
+            return Finite(saved.LossyScale)&&Finite(current.LossyScale)&&Finite(saved.LocalToWorld)&&Finite(current.LocalToWorld)&&Finite(saved.WorldToLocal)&&Finite(current.WorldToLocal)&&
+                Exact(saved.WorldPosition,current.WorldPosition)&&Exact(saved.WorldRotation,current.WorldRotation)&&
+                Exact(saved.LocalPosition,current.LocalPosition)&&Exact(saved.LocalRotation,current.LocalRotation)&&
+                Exact(saved.LocalScale,current.LocalScale)&&Exact(saved.LossyScale,current.LossyScale)&&
+                Exact(saved.LocalToWorld,current.LocalToWorld)&&Exact(saved.WorldToLocal,current.WorldToLocal);
+        }
         public bool ChooseLocal()
         {
-            before=Capture();
+            AlreadyRestoredNoWrite=false;before=Capture();
             string reason=saved.Error;
             if(reason==null&&!CompleteFinite(saved))reason="saved_context_nonfinite_or_incomplete";
             if(reason==null)reason=ContextDifference(saved,before);
             if(reason==null&&!hasOwnedPose)reason=ownedQueryFailed?"owned_eye_query_failed":"owned_eye_missing";
+            bool exactSaved=reason==null && guarded && ExactSavedState(saved,before);
             if(reason==null)
             {
                 var p=new Vector3(before.WorldPosition[0],before.WorldPosition[1],before.WorldPosition[2]);
@@ -137,6 +148,9 @@ namespace Ugevr
                 else {ownedRotationEqual=guarded?Exact(before.WorldRotation,Q(ownedRotation)):q==ownedRotation;if(ownedRotationEqual==false)reason="owned_eye_rotation_changed";}
                 if(reason==null&&guarded&&(!Exact(before.LocalPosition,V(ownedLocalPosition))||!Exact(before.LocalRotation,Q(ownedLocalRotation))))reason="owned_eye_local_pose_changed";
             }
+            // Exact final-state ownership needs no writer attribution or transform write.
+            // Preserve the original owned-eye comparison operands and short circuit above.
+            if(exactSaved) {AlreadyRestoredNoWrite=true;Refusal="none";AppliedSpace="already_restored_no_write";return true;}
             Refusal=reason??"none";AppliedSpace=reason==null?"local":guarded?"foreign_pose_preserved":"world_fallback";return reason==null;
         }
         public string AdmissionRefusal {get {return saved.Error??(!CompleteFinite(saved)?"saved_context_nonfinite_or_incomplete":null);}}
@@ -156,6 +170,7 @@ namespace Ugevr
         public string GuardedResultRefusal()
         {
             if(PostContext!="unchanged")return "post_context_"+PostContext;
+            if(AlreadyRestoredNoWrite)return ExactSavedState(saved,after)?null:"already_restored_state_changed";
             if(!Exact(saved.LocalPosition,after.LocalPosition)||!Exact(saved.LocalRotation,after.LocalRotation))return "saved_local_pose_not_retained";
             var p=new Vector3(after.WorldPosition[0],after.WorldPosition[1],after.WorldPosition[2]);
             var original=new Vector3(saved.WorldPosition[0],saved.WorldPosition[1],saved.WorldPosition[2]);
