@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace Ugevr
 {
-    public enum CameraTransformRestoration { World, LocalWithWorldFallback }
+    public enum CameraTransformRestoration { World, LocalWithWorldFallback, GuardedLocal }
 
     // Explicit candidate experiment. Sampled context cannot detect ABA changes.
     public sealed class CameraLocalRestoration
@@ -13,12 +13,14 @@ namespace Ugevr
         sealed class Snapshot
         {
             public Transform Transform,Parent;
+            public bool HasParent;
             public int? CameraId,TransformId,ParentId;
             public float[] WorldPosition,WorldRotation,LocalPosition,LocalRotation,LocalScale,LossyScale,LocalToWorld,WorldToLocal;
             public float[][] ParentContext=new float[8][];
             public string Error;
         }
         readonly Camera camera;
+        readonly bool guarded;
         Snapshot saved,before,after;
         Vector3 ownedPosition;
         Quaternion ownedRotation;
@@ -29,15 +31,19 @@ namespace Ugevr
         public string PostContext {get;private set;}
         public string Failure {get;private set;}
         public bool RestoreReturned {get;private set;}
+        public bool Guarded {get {return guarded;}}
         public static CameraTransformRestoration Parse(string value)
         {
             if(value=="world")return CameraTransformRestoration.World;
             if(value=="local-with-world-fallback")return CameraTransformRestoration.LocalWithWorldFallback;
-            throw new ArgumentException("Rendering.CameraTransformRestoration must be world or local-with-world-fallback.");
+            if(value=="guarded-local")return CameraTransformRestoration.GuardedLocal;
+            throw new ArgumentException("Rendering.CameraTransformRestoration must be world, local-with-world-fallback or guarded-local.");
         }
         public CameraLocalRestoration(Camera camera,Vector3 position,Quaternion rotation)
+            : this(camera,position,rotation,false) {}
+        public CameraLocalRestoration(Camera camera,Vector3 position,Quaternion rotation,bool guarded)
         {
-            this.camera=camera;AppliedSpace="not_attempted";Refusal="not_evaluated";PostContext="not_evaluated";Failure="none";
+            this.camera=camera;this.guarded=guarded;AppliedSpace="not_attempted";Refusal="not_evaluated";PostContext="not_evaluated";Failure="none";
             saved=Capture();saved.WorldPosition=V(position);saved.WorldRotation=Q(rotation);
         }
         static float[] V(Vector3 v) {return new[]{v.x,v.y,v.z};}
@@ -50,7 +56,7 @@ namespace Ugevr
         static bool CompleteFinite(Snapshot s)
         {
             if(s==null||s.Error!=null||!Finite(s.WorldPosition)||!Finite(s.WorldRotation)||!Finite(s.LocalPosition)||!Finite(s.LocalRotation)||!Finite(s.LocalScale))return false;
-            foreach(var a in s.ParentContext)if(!Finite(a))return false;return true;
+            if(s.HasParent)foreach(var a in s.ParentContext)if(!Finite(a))return false;return true;
         }
         Snapshot Capture()
         {
@@ -64,13 +70,21 @@ namespace Ugevr
                 s.WorldPosition=V(s.Transform.position);s.WorldRotation=Q(s.Transform.rotation);
                 s.LocalPosition=V(s.Transform.localPosition);s.LocalRotation=Q(s.Transform.localRotation);s.LocalScale=V(s.Transform.localScale);
                 s.LossyScale=V(s.Transform.lossyScale);s.LocalToWorld=M(s.Transform.localToWorldMatrix);s.WorldToLocal=M(s.Transform.worldToLocalMatrix);
-                if(s.Parent==null){s.Error="parent_unavailable";return s;}
+                s.HasParent=s.Parent!=null;
+                if(!s.HasParent)
+                {
+                    if(!guarded || !System.Object.ReferenceEquals(s.Parent,null)){s.Error="parent_unavailable";return s;}
+                }
+                else
+                {
                 s.ParentId=s.Parent.GetInstanceID();
                 s.ParentContext[0]=V(s.Parent.position);s.ParentContext[1]=Q(s.Parent.rotation);
                 s.ParentContext[2]=V(s.Parent.localPosition);s.ParentContext[3]=Q(s.Parent.localRotation);
                 s.ParentContext[4]=V(s.Parent.localScale);s.ParentContext[5]=V(s.Parent.lossyScale);
                 s.ParentContext[6]=M(s.Parent.localToWorldMatrix);s.ParentContext[7]=M(s.Parent.worldToLocalMatrix);
-                if(camera==null||s.Transform==null||s.Parent==null||!System.Object.ReferenceEquals(camera.transform,s.Transform)||!System.Object.ReferenceEquals(s.Transform.parent,s.Parent))s.Error="context_changed_during_query";
+                }
+                if(camera==null||s.Transform==null||(s.HasParent&&s.Parent==null)||!System.Object.ReferenceEquals(camera.transform,s.Transform)||!System.Object.ReferenceEquals(s.Transform.parent,s.Parent))s.Error="context_changed_during_query";
+                if(guarded&&(!Finite(s.LossyScale)||!Finite(s.LocalToWorld)||!Finite(s.WorldToLocal)))s.Error="context_nonfinite_or_incomplete";
             }
             catch {s.Error="native_query_failed";}
             return s;
@@ -92,10 +106,11 @@ namespace Ugevr
             if(b.Error!=null)return b.Error;
             if(!System.Object.ReferenceEquals(a.Transform,b.Transform))return "transform_changed";
             if(!System.Object.ReferenceEquals(a.Parent,b.Parent))return "parent_changed";
+            if(a.HasParent!=b.HasParent||a.CameraId!=b.CameraId||a.TransformId!=b.TransformId||a.ParentId!=b.ParentId)return "context_identity_changed";
             if(!CompleteFinite(b))return "context_nonfinite_or_incomplete";
             if(!Exact(a.LocalScale,b.LocalScale))return "camera_local_scale_changed";
             string[] names={"parent_world_position_changed","parent_world_rotation_changed","parent_local_position_changed","parent_local_rotation_changed","parent_local_scale_changed","parent_lossy_scale_changed","parent_local_to_world_changed","parent_world_to_local_changed"};
-            for(int i=0;i<8;++i)if(!Exact(a.ParentContext[i],b.ParentContext[i]))return names[i];
+            if(a.HasParent)for(int i=0;i<8;++i)if(!Exact(a.ParentContext[i],b.ParentContext[i]))return names[i];
             return null;
         }
         public bool ChooseLocal()
@@ -109,12 +124,13 @@ namespace Ugevr
             {
                 var p=new Vector3(before.WorldPosition[0],before.WorldPosition[1],before.WorldPosition[2]);
                 var q=new Quaternion(before.WorldRotation[0],before.WorldRotation[1],before.WorldRotation[2],before.WorldRotation[3]);
-                ownedPositionEqual=p==ownedPosition;
+                ownedPositionEqual=guarded?Exact(before.WorldPosition,V(ownedPosition)):p==ownedPosition;
                 if(ownedPositionEqual==false)reason="owned_eye_position_changed";
-                else {ownedRotationEqual=q==ownedRotation;if(ownedRotationEqual==false)reason="owned_eye_rotation_changed";}
+                else {ownedRotationEqual=guarded?Exact(before.WorldRotation,Q(ownedRotation)):q==ownedRotation;if(ownedRotationEqual==false)reason="owned_eye_rotation_changed";}
             }
-            Refusal=reason??"none";AppliedSpace=reason==null?"local":"world_fallback";return reason==null;
+            Refusal=reason??"none";AppliedSpace=reason==null?"local":guarded?"foreign_pose_preserved":"world_fallback";return reason==null;
         }
+        public string AdmissionRefusal {get {return saved.Error??(!CompleteFinite(saved)?"saved_context_nonfinite_or_incomplete":null);}}
         public void RestoreLocal()
         {
             // A query or setter exception retains the existing partial-cleanup behavior.
@@ -128,7 +144,19 @@ namespace Ugevr
             // Never make a second corrective write, including on mid-restore context change.
         }
         public void Completed() {RestoreReturned=true;}
+        public string GuardedResultRefusal()
+        {
+            if(PostContext!="unchanged")return "post_context_"+PostContext;
+            if(!Exact(saved.LocalPosition,after.LocalPosition)||!Exact(saved.LocalRotation,after.LocalRotation))return "saved_local_pose_not_retained";
+            var p=new Vector3(after.WorldPosition[0],after.WorldPosition[1],after.WorldPosition[2]);
+            var original=new Vector3(saved.WorldPosition[0],saved.WorldPosition[1],saved.WorldPosition[2]);
+            if(!(p==original))return "saved_world_position_not_restored";
+            var q=new Quaternion(after.WorldRotation[0],after.WorldRotation[1],after.WorldRotation[2],after.WorldRotation[3]);
+            var rotation=new Quaternion(saved.WorldRotation[0],saved.WorldRotation[1],saved.WorldRotation[2],saved.WorldRotation[3]);
+            return q==rotation?null:"saved_world_rotation_not_restored";
+        }
         public void Failed() {Failure="restoration_setter_or_query_exception";RestoreReturned=false;}
+        public void GuardedFailed(string reason) {Failure=reason??"restoration_setter_or_query_exception";RestoreReturned=false;}
         static string Bool(bool? b) {return b.HasValue?b.Value.ToString().ToLowerInvariant():"null";}
         static void Array(StringBuilder b,string key,float[] values,int indent)
         {
@@ -142,7 +170,7 @@ namespace Ugevr
             Snapshot s=name=="camera_state_saved"?saved:name=="before_camera_state_dispose"?before:after;
             var result=new CameraRestorationPoseRecord.PoseStage {Name=name};
             if(s==null){result.Error="not_queried";return result;}
-            result.Error=s.Error;result.CameraId=s.CameraId;result.TransformId=s.TransformId;result.ParentId=s.ParentId;result.HasParent=s.Parent!=null;
+            result.Error=s.Error;result.CameraId=s.CameraId;result.TransformId=s.TransformId;result.ParentId=s.ParentId;result.HasParent=s.HasParent;
             result.WorldPosition=Doubles(s.WorldPosition);result.WorldRotation=Doubles(s.WorldRotation);result.LocalPosition=Doubles(s.LocalPosition);result.LocalRotation=Doubles(s.LocalRotation);result.LocalScale=Doubles(s.LocalScale);
             result.LossyScale=Doubles(s.LossyScale);result.LocalToWorld=Doubles(s.LocalToWorld);result.WorldToLocal=Doubles(s.WorldToLocal);
             result.ParentWorldPosition=Doubles(s.ParentContext[0]);result.ParentWorldRotation=Doubles(s.ParentContext[1]);result.ParentLocalPosition=Doubles(s.ParentContext[2]);result.ParentLocalRotation=Doubles(s.ParentContext[3]);
@@ -150,7 +178,7 @@ namespace Ugevr
         }
         public string ToPrivateYaml()
         {
-            var b=new StringBuilder("local_restoration_experiment:\n  applied_space: "+AppliedSpace+"\n  refusal_or_fallback_reason: "+Refusal+"\n  post_context: "+PostContext+"\n  restoration_returned: "+RestoreReturned.ToString().ToLowerInvariant()+"\n  failure_category: "+Failure+"\n  aba_changes_excluded: false\n  owned_pose_available: "+hasOwnedPose.ToString().ToLowerInvariant()+"\n  owned_position_equal: "+Bool(ownedPositionEqual)+"\n  owned_rotation_equal: "+Bool(ownedRotationEqual)+"\n");
+            var b=new StringBuilder((guarded?"guarded_local_restoration:":"local_restoration_experiment:")+"\n  applied_space: "+AppliedSpace+"\n  refusal_or_fallback_reason: "+Refusal+"\n  post_context: "+PostContext+"\n  restoration_returned: "+RestoreReturned.ToString().ToLowerInvariant()+"\n  failure_category: "+Failure+"\n  aba_changes_excluded: false\n  owned_pose_available: "+hasOwnedPose.ToString().ToLowerInvariant()+"\n  owned_position_equal: "+Bool(ownedPositionEqual)+"\n  owned_rotation_equal: "+Bool(ownedRotationEqual)+"\n");
             Array(b,"owned_world_position",ownedPositionRead?V(ownedPosition):null,2);Array(b,"owned_world_rotation_xyzw",ownedRotationRead?Q(ownedRotation):null,2);
             return b.ToString();
         }

@@ -218,13 +218,17 @@ namespace UnityEngine
         public static Camera current {get {++CurrentQueries;if(CurrentGetterAction!=null) CurrentGetterAction();return savedCurrent;} set {savedCurrent=value;}}
         public static void SetupCurrent(Camera value) {++SetupCurrentCalls;if(SetupCurrentAction!=null) SetupCurrentAction(value);else savedCurrent=value;}
         public Transform transform=new Transform();
-        public RenderTexture targetTexture;
+        RenderTexture savedTarget;
+        public System.Action<RenderTexture> TargetSetter;
+        public RenderTexture targetTexture {get {return savedTarget;}set {if(TargetSetter!=null)TargetSetter(value);savedTarget=value;}}
         Matrix4x4 projection,view;
         public bool AutomaticProjection=true,AutomaticView=true;
-        public Matrix4x4 projectionMatrix { get { return AutomaticProjection?new Matrix4x4 {Marker=11}:projection; } set { projection=value;AutomaticProjection=false; } }
+        public System.Action<Matrix4x4> ProjectionSetter;
+        public System.Action ResetViewAction;
+        public Matrix4x4 projectionMatrix { get { return AutomaticProjection?new Matrix4x4 {Marker=11}:projection; } set {if(ProjectionSetter!=null)ProjectionSetter(value);projection=value;AutomaticProjection=false; } }
         public Matrix4x4 worldToCameraMatrix { get { return AutomaticView?new Matrix4x4 {Marker=12+transform.position.x}:view; } set { view=value;AutomaticView=false; } }
         public void ResetProjectionMatrix() { AutomaticProjection=true; }
-        public void ResetWorldToCameraMatrix() { AutomaticView=true; }
+        public void ResetWorldToCameraMatrix() {if(ResetViewAction!=null)ResetViewAction();AutomaticView=true; }
         public Rect rect;
         public bool useOcclusionCulling;
         public Color backgroundColor;
