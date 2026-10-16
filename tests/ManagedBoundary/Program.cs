@@ -22,6 +22,7 @@ class Program
         UiLayoutDiagnosticChecks.Run(Assert);
         TrackingMatrixOracleChecks.Run(Assert);
         GuardedCameraRestorationChecks.Run(Assert);
+        CameraOverlayOwnershipChecks.Run(Assert);
         CameraRestorationPoseChecks.Run(Assert);
         CameraLocalRestorationChecks.Run(Assert);
         CameraComparisonChecks.Run(Assert);
