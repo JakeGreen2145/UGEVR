@@ -5,6 +5,7 @@ using System.Reflection;
 namespace Ugevr
 {
     public interface IRewiredFailureDiagnostics {RewiredFailureInfo LastFailure {get;}}
+    public interface IRewiredCleanupFailureDiagnostics {RewiredFailureInfo LastCleanupFailure {get;}}
     // Only controlled operation/category labels, public counts and exception types. No messages or values.
     public sealed class RewiredFailureInfo
     {
@@ -35,6 +36,8 @@ namespace Ugevr
         static string Count(int? value) {return value.HasValue?value.Value.ToString(CultureInfo.InvariantCulture):"not_read";}
         public string ToLog()
         {return "failureStage="+Stage+" failureCategory="+Category+" exceptionType="+ExceptionType+" innerExceptionType="+InnerExceptionType+" preflightReady="+(Ready.HasValue?Ready.Value.ToString().ToLowerInvariant():"not_read")+" preflightDefinitions="+Count(Definitions)+" preflightCustomDevices="+Count(CustomDevices)+" preflightJoysticks="+Count(Joysticks);}
+        public string ToCleanupLog()
+        {return "cleanupFailureStage="+Stage+" cleanupFailureCategory="+Category+" cleanupExceptionType="+ExceptionType+" cleanupInnerExceptionType="+InnerExceptionType;}
     }
     internal sealed class RewiredOperationException : Exception
     {

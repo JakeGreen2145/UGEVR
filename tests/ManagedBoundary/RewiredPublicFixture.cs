@@ -35,10 +35,11 @@ namespace Rewired
     {public bool EmptyXml;public List<AxisCalibration> Axes {get;set;}=new List<AxisCalibration>{new AxisCalibration(),new AxisCalibration(),new AxisCalibration()};public int axisCount {get {return Axes.Count;}}public string ToXmlString() {return EmptyXml?"":"controlled-calibration";}}
     public sealed class CustomController : ControllerWithAxes
     {
+        public static Action<int,float> BeforeSetAxis;
         public int sourceControllerId;
         public float[] Values=new float[3];
         public CustomController(int id,int source,int count=3):base(id) {Values=new float[count];calibrationMap.Axes=new List<AxisCalibration>();for(int i=0;i<count;++i)calibrationMap.Axes.Add(new AxisCalibration());sourceControllerId=source;type=ControllerType.Custom;for(int i=0;i<count;++i){var identifier=new ControllerElementIdentifier {id=i,name="Axis"+i,positiveName="Axis"+i+"+",negativeName="Axis"+i+"-"};AxisElementIdentifiers.Add(identifier);Axes.Add(new Axis {id=i,name=identifier.name,elementIdentifier=identifier});}}
-        public void SetAxisValue(int index,float value) {Values[index]=value;}
+        public void SetAxisValue(int index,float value) {if(BeforeSetAxis!=null)BeforeSetAxis(index,value);Values[index]=value;}
     }
     public class ActionElementMap
     {
@@ -118,7 +119,7 @@ namespace Rewired
         public static ControllerHelper controllers {get;private set;}
         public static PlayerHelper players {get;private set;}
         public static event Action InputSourceUpdateEvent;
-        public static void Reset() {Data=new Data.UserData();controllers=new ControllerHelper();players=new PlayerHelper();isReady=true;InputSourceUpdateEvent=null;ControllerMap.EnableAction=null;ControllerMap.XmlTransform=null;ControllerMap.IgnoreEnable=ControllerMap.ThrowEnableBefore=ControllerMap.ThrowEnableAfter=false;ControllerMap.EnableCalls=0;Player.ThrowActionRead=Player.NonfiniteActionRead=false;Player.ActionReads=0;Player.ControllerHelper.MapHelper.AfterLoad=null;}
+        public static void Reset() {Data=new Data.UserData();controllers=new ControllerHelper();players=new PlayerHelper();isReady=true;InputSourceUpdateEvent=null;ControllerMap.EnableAction=null;ControllerMap.XmlTransform=null;ControllerMap.IgnoreEnable=ControllerMap.ThrowEnableBefore=ControllerMap.ThrowEnableAfter=false;ControllerMap.EnableCalls=0;Player.ThrowActionRead=Player.NonfiniteActionRead=false;Player.ActionReads=0;Player.ControllerHelper.MapHelper.AfterLoad=null;CustomController.BeforeSetAxis=null;}
         public static void Pulse() {if(InputSourceUpdateEvent!=null) InputSourceUpdateEvent();}
         public static void ClearInputSourceCallbacks() {InputSourceUpdateEvent=null;}
         public static int Subscribers {get {return InputSourceUpdateEvent==null?0:InputSourceUpdateEvent.GetInvocationList().Length;}}

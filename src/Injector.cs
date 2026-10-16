@@ -332,7 +332,7 @@ public class Injector : BaseUnityPlugin
         if(now>=nextRewiredReport)
         {
             nextRewiredReport=now+1;
-            Logger.LogInfo("REWIRED_DIAGNOSTIC status="+rewiredDiagnostic.Status+" reason="+rewiredDiagnostic.Reason+" addAttempts="+rewiredDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredDiagnostic.AppliedUpdates+" removeAttempts="+rewiredDiagnostic.RemoveAttempts+" cleanup="+rewiredDiagnostic.CleanupStatus+" "+(rewiredDiagnostic.Failure==null?"failureStage=none":rewiredDiagnostic.Failure.ToLog())+" gameConsumption=unknown");
+            Logger.LogInfo("REWIRED_DIAGNOSTIC status="+rewiredDiagnostic.Status+" reason="+rewiredDiagnostic.Reason+" addAttempts="+rewiredDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredDiagnostic.AppliedUpdates+" removeAttempts="+rewiredDiagnostic.RemoveAttempts+" cleanup="+rewiredDiagnostic.CleanupStatus+" "+(rewiredDiagnostic.Failure==null?"failureStage=none":rewiredDiagnostic.Failure.ToLog())+(rewiredDiagnostic.CleanupFailure==null?"":" "+rewiredDiagnostic.CleanupFailure.ToCleanupLog())+" gameConsumption=unknown");
             if(rewiredDiagnostic.Readback!=null) Logger.LogInfo("REWIRED_READBACK samples="+rewiredDiagnostic.ReadbackSamples+" sampleAgeSeconds="+(now-rewiredDiagnostic.ReadbackAtSeconds).ToString("R",System.Globalization.CultureInfo.InvariantCulture)+" "+rewiredDiagnostic.Readback.ToLog()+" gameConsumption=unknown");
         }
     }
@@ -347,7 +347,7 @@ public class Injector : BaseUnityPlugin
         }
         double now=InputClock();rewiredFiveDiagnostic.Tick(enabled,Application.isFocused,generation,source,now);
         if(now<nextRewiredReport) return;nextRewiredReport=now+1;
-        Logger.LogInfo("REWIRED_DIAGNOSTIC profile="+rewiredDiagnosticProfile+" channelCount=5 status="+rewiredFiveDiagnostic.Status+" reason="+rewiredFiveDiagnostic.Reason+" neutralReads="+rewiredFiveDiagnostic.NeutralReads+" requiredNeutralReads=3 addAttempts="+rewiredFiveDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredFiveDiagnostic.AppliedUpdates+" removeAttempts="+rewiredFiveDiagnostic.RemoveAttempts+" cleanup="+rewiredFiveDiagnostic.CleanupStatus+" "+(rewiredFiveDiagnostic.Failure==null?"failureStage=none":rewiredFiveDiagnostic.Failure.ToLog())+" gameConsumption=unknown");
+        Logger.LogInfo("REWIRED_DIAGNOSTIC profile="+rewiredDiagnosticProfile+" channelCount=5 status="+rewiredFiveDiagnostic.Status+" reason="+rewiredFiveDiagnostic.Reason+" neutralReads="+rewiredFiveDiagnostic.NeutralReads+" requiredNeutralReads=3 addAttempts="+rewiredFiveDiagnostic.AddAttempts+" publicUpdateFeedsReturned="+rewiredFiveDiagnostic.AppliedUpdates+" removeAttempts="+rewiredFiveDiagnostic.RemoveAttempts+" cleanup="+rewiredFiveDiagnostic.CleanupStatus+" "+(rewiredFiveDiagnostic.Failure==null?"failureStage=none":rewiredFiveDiagnostic.Failure.ToLog())+(rewiredFiveDiagnostic.CleanupFailure==null?"":" "+rewiredFiveDiagnostic.CleanupFailure.ToCleanupLog())+" gameConsumption=unknown");
         if(rewiredFiveDiagnostic.Readback!=null) Logger.LogInfo("REWIRED_READBACK samples="+rewiredFiveDiagnostic.ReadbackSamples+" sampleAgeSeconds="+(now-rewiredFiveDiagnostic.ReadbackAtSeconds).ToString("R",System.Globalization.CultureInfo.InvariantCulture)+" "+rewiredFiveDiagnostic.Readback.ToLog()+" gameConsumption=unknown");
     }
     void CancelRewiredDiagnostic(string reason)

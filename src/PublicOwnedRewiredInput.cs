@@ -13,7 +13,7 @@ using UnityEngine;
 namespace Ugevr
 {
     // Experimental profile for one observed build. All target members invoked here are public.
-    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics,IRewiredRuntimeMonitor,IRewiredActionReadback,IOwnedFiveRewiredInput
+    public sealed class PublicOwnedRewiredInput : IOwnedRewiredInput,IRewiredFailureDiagnostics,IRewiredCleanupFailureDiagnostics,IRewiredRuntimeMonitor,IRewiredActionReadback,IOwnedFiveRewiredInput
     {
         public const string Profile="firewatch-2017-rewired-right-stick-trigger-v1";
         public const string ObservedTriggerProfile="firewatch-2017-rewired-right-stick-observed-trigger-axis1-v1";
@@ -47,6 +47,8 @@ namespace Ugevr
         public string CleanupStatus {get;private set;}
         public int AppliedUpdates {get;private set;}
         public RewiredFailureInfo LastFailure {get;private set;}
+        public RewiredFailureInfo LastCleanupFailure {get;private set;}
+        string snapshotDomain="not_started";
         string addStage;
         bool? preflightReady;
         int? preflightDefinitions,preflightCustomDevices,preflightJoysticks;
@@ -426,10 +428,15 @@ namespace Ugevr
         }
         RewiredOwnershipSnapshot Snapshot(bool excludeMapEnabled=false)
         {
+            snapshotDomain="physical_joysticks";
             if(Bounded(PublicValue(global,"Joysticks"),64).Length!=0) throw new InvalidOperationException("Physical joystick conflict appeared.");
+            snapshotDomain="definition";
             RewiredOwnershipSnapshot original=DefinitionSnapshot();var nodes=new List<object>(original.Nodes);var text=new StringBuilder(original.Values);
+            snapshotDomain="runtime_channels";
             if(!RewiredOwnershipSnapshot.Same(runtimeChannelExpected,RuntimeChannelSnapshot())) throw new InvalidOperationException("Admitted runtime channel/calibration changed.");
+            snapshotDomain="custom_devices";
             object[] devices=CustomDevices();if(devices.Length!=1 || !System.Object.ReferenceEquals(devices[0],owned) || !DeviceTagged(owned)) throw new InvalidOperationException("Custom-device conflict/reference/tag changed.");nodes.Add(owned);
+            snapshotDomain="assignment_maps";
             foreach(object candidate in AllPlayers())
             {
                 int assigned=References(Bounded(PublicValue(PublicValue(candidate,"controllers"),"Controllers"),64),owned);object[] maps=OwnedMaps(candidate);
@@ -439,7 +446,7 @@ namespace Ugevr
                 if(serialize==null || !serialize.IsPublic || serialize.ReturnType!=typeof(string) || (pinned && serialize.MetadataToken!=0x06001ec0)) throw new InvalidOperationException("Public map serialization unavailable.");string xml=(string)serialize.Invoke(maps[0],null);if(String.IsNullOrEmpty(xml)) throw new InvalidOperationException("Runtime map serialization failed or unavailable.");Value(text,excludeMapEnabled?MapXmlWithoutEnabled(xml,MapEnabled()):xml);
                 object runtimeEntriesCollection=PublicValue(maps[0],"AllMaps");object[] runtimeEntries=Bounded(runtimeEntriesCollection,16);if(runtimeEntries.Length!=channels.Count) throw new InvalidOperationException("Runtime map entries changed.");nodes.Add(runtimeEntriesCollection);nodes.AddRange(runtimeEntries);
             }
-            return new RewiredOwnershipSnapshot {Nodes=nodes.ToArray(),Values=text.ToString()};
+            snapshotDomain="complete";return new RewiredOwnershipSnapshot {Nodes=nodes.ToArray(),Values=text.ToString()};
         }
         public void SetDesired(double x,double y,double trigger,double expires)
         {
@@ -545,46 +552,68 @@ namespace Ugevr
         }
         void OnInputUpdate()
         {
+            string stage="callback_thread";
             try
             {
-                CheckThread();CheckCurrentContext();double now=clock();
+                CheckThread();stage="callback_context";CheckCurrentContext();stage="callback_clock";double now=clock();
                 if(Double.IsNaN(now) || Double.IsInfinity(now) || callbackObserved && now<lastCallbackAt || now<heartbeatStart)
                 {
                     var error=new RewiredOperationException("runtime_callback","backend_clock_invalid");if(LastFailure==null) LastFailure=RewiredFailureInfo.Capture(error,"runtime_callback","backend_clock_invalid");
                     if(String.IsNullOrEmpty(FaultReason)) FaultReason="source_expired_or_clock_invalid";throw error;
                 }
                 callbackObserved=true;lastCallbackAt=now;
-                bool focus=focused();
-                if(!FeedAllowed(focus,!String.IsNullOrEmpty(FaultReason),now,lastFeedAt,expires)) {Apply(new double[channels.Count]);if(String.IsNullOrEmpty(FaultReason)) FaultReason=!focus?"focus_lost":"source_expired_or_clock_invalid";return;}lastFeedAt=now;
-                if(!RewiredOwnershipSnapshot.Same(expected,Snapshot())) throw new InvalidOperationException("Owned content changed.");
-                Apply(desired);++AppliedUpdates;
+                stage="callback_focus";bool focus=focused();
+                if(!FeedAllowed(focus,!String.IsNullOrEmpty(FaultReason),now,lastFeedAt,expires)) {stage="callback_neutral_apply";Apply(new double[channels.Count]);if(String.IsNullOrEmpty(FaultReason)) FaultReason=!focus?"focus_lost":"source_expired_or_clock_invalid";return;}lastFeedAt=now;
+                stage="callback_snapshot";var current=Snapshot();
+                if(!RewiredOwnershipSnapshot.Same(expected,current)) throw new RewiredOperationException("callback_snapshot",RewiredOwnershipSnapshot.Mismatch(expected,current));
+                stage="callback_desired_apply";Apply(desired);++AppliedUpdates;
             }
-            catch {if(String.IsNullOrEmpty(FaultReason)) FaultReason="owned_content_or_public_feed_changed";if(ownerThread==System.Threading.Thread.CurrentThread.ManagedThreadId) try {Apply(new double[channels.Count]);} catch { }}
+            catch(Exception error)
+            {
+                RememberFailure(error,stage=="callback_snapshot"?stage+"_"+snapshotDomain:stage);
+                if(String.IsNullOrEmpty(FaultReason)) FaultReason="owned_content_or_public_feed_changed";
+                if(ownerThread==System.Threading.Thread.CurrentThread.ManagedThreadId) try {Apply(new double[channels.Count]);}catch(Exception neutralError) {RememberCleanupFailure(neutralError,"callback_fault_neutral_apply");}
+            }
         }
+        void RememberFailure(Exception error,string stage)
+        {try {if(LastFailure==null)LastFailure=RewiredFailureInfo.Capture(error,stage,"public_callback_failed");}catch { }}
+        void RememberCleanupFailure(Exception error,string stage)
+        {try {if(LastCleanupFailure==null)LastCleanupFailure=RewiredFailureInfo.Capture(error,stage,"public_cleanup_failed");}catch { }}
         public void Remove()
         {
+            string stage="cleanup_thread";
+            try
+            {
             CheckThread();
             CleanupStatus="cleanup_unconfirmed";
+            stage="cleanup_unsubscribe";
             if(subscribed) {inputUpdate.RemoveEventHandler(null,handler);subscribed=false;}
-            try {Apply(new double[channels.Count]);} catch {CleanupStatus="neutral_release_unconfirmed";return;}
+            stage="cleanup_neutral_apply";
+            try {Apply(new double[channels.Count]);}catch(Exception error) {RememberCleanupFailure(error,stage);CleanupStatus="neutral_release_unconfirmed";return;}
             if(ambiguous) {CleanupStatus="creation_outcome_unknown_preserved";return;}
             if(!deviceRemoved)
             {
+                stage=expected==null?"cleanup_unassigned_creation":"cleanup_snapshot";
                 bool intact=expected==null?UnassignedCreationIntact():RewiredOwnershipSnapshot.Same(expected,Snapshot());
                 if(!intact) {CleanupStatus="changed_or_added_content_preserved";return;}
+                stage="cleanup_destroy_device";
                 try {Call(global,"DestroyCustomController",0x06002841,typeof(bool),new[]{controllerType},owned);}
                 finally {deviceRemoved=!Contains(CustomDevices(),owned);}
                 if(!deviceRemoved) {CleanupStatus="device_destroy_unconfirmed";return;}
             }
             if(!definitionRemoved && definition!=null)
             {
+                stage="cleanup_definition_snapshot";
                 if(definitionExpected==null || !RewiredOwnershipSnapshot.Same(definitionExpected,DefinitionSnapshot())) {CleanupStatus="changed_definition_content_preserved";return;}
+                stage="cleanup_definition_index";
                 int index=(int)Call(data,"GetCustomControllerIndex",0x0600154f,typeof(int),new[]{typeof(int)},definitionId);
                 if(index<0 || !System.Object.ReferenceEquals(DefinitionById(definitionId),definition)) {CleanupStatus="definition_identity_changed_preserved";return;}
-                try {Call(data,"DeleteCustomController",0x0600154b,typeof(void),new[]{typeof(int)},index);}
+                stage="cleanup_delete_definition";try {Call(data,"DeleteCustomController",0x0600154b,typeof(void),new[]{typeof(int)},index);}
                 finally {definitionRemoved=!ContainsId(DefinitionIds(),definitionId) && MapCount()==0;}
             }
             CleanupStatus=NeedsCleanup?"cleanup_unconfirmed":"owned_resources_removed";
+            }
+            catch(Exception error) {RememberCleanupFailure(error,stage=="cleanup_snapshot"?stage+"_"+snapshotDomain:stage);throw;}
         }
         bool UnassignedCreationIntact()
         {
