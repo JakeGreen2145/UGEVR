@@ -27,7 +27,8 @@ namespace UnityEngine
         public GameObject() {}
         public GameObject(string name) {this.name=name;}
         Transform cachedTransform;
-        public Transform transform {get {if(cachedTransform==null) cachedTransform=new Transform {gameObject=this};return cachedTransform;}}
+        public Transform ObservedTransform;
+        public Transform transform {get {if(ObservedTransform!=null)return ObservedTransform;if(cachedTransform==null) cachedTransform=new Transform {gameObject=this};return cachedTransform;}}
         public Component[] AdditionalComponents=new Component[0];
         public T[] GetComponents<T>() {var found=new System.Collections.Generic.List<T>();if(transform is T) found.Add((T)(object)transform);foreach(Component component in AdditionalComponents) if(component is T) found.Add((T)(object)component);return found.ToArray();}
         int savedLayer;
@@ -114,7 +115,9 @@ namespace UnityEngine
     public struct Matrix4x4 { public float Marker;public float[] Elements; public float this[int i] { get { return Elements==null?(i==0?Marker:0):Elements[i]; } } }
     public struct Rect { public float x,y,width,height;public Rect(float x,float y,float width,float height){this.x=x;this.y=y;this.width=width;this.height=height;} }
     public class Shader : Object {}
-    public class Material : Object {public Shader shader=new Shader();}
+    public class Texture : Object {}
+    public class Sprite : Object {public Texture texture;}
+    public class Material : Object {public Shader shader=new Shader();public Texture mainTexture;}
     public struct Color { public float r,g,b,a;public static Color clear {get {return new Color();}} }
     public class RenderTexture : Object
     {
@@ -172,10 +175,11 @@ namespace UnityEngine
         public float GetInheritedAlpha() {++NativeQueries;if(ThrowInherited) throw new System.InvalidOperationException();return InheritedAlphaValue;}
         public Color ColorValue=new Color {r=1,g=1,b=1,a=1};
         public Material[] Materials=new Material[0],PopMaterials=new Material[0];
+        public int? ThrowMaterialSlot;
         public bool hasPopInstruction;
         public int materialCount {get {++NativeQueries;return Materials.Length;}}
         public int popMaterialCount {get {++NativeQueries;return PopMaterials.Length;}}
-        public Material GetMaterial(int index){++NativeQueries;return Materials[index];}
+        public Material GetMaterial(int index){++NativeQueries;if(ThrowMaterialSlot==index)throw new System.InvalidOperationException();return Materials[index];}
         public Material GetPopMaterial(int index){++NativeQueries;return PopMaterials[index];}
         public Color GetColor(){++NativeQueries;return ColorValue;}
         public Vector2 clippingSoftness {get;set;}

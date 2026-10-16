@@ -79,6 +79,7 @@ public class Injector : BaseUnityPlugin
     int overlaySceneScanLimit=OverlayLayerInventory.DefaultScanLimit;
     bool captureLayoutInputs;
     bool captureNativeUiState;
+    bool captureUiGraphicDetails;
     int nativeUiRendererLimit=NativeUiStateDiagnostics.DefaultRendererLimit;
     bool compareHierarchyInventory;
     bool flushDesktopLayoutBeforeBorrow;
@@ -109,6 +110,7 @@ public class Injector : BaseUnityPlugin
             captureNativeUiState=Config.Bind("Diagnostics","CaptureNativeUiState",false,"Opt-in cached CanvasRenderer cull/clipping/alpha and render-context observations only for capture requests admitted before the eye pair. No native UI state is restored; requires CaptureImages.").Value && capturesEnabled;
             nativeUiRendererLimit=Config.Bind("Diagnostics","NativeUiRendererLimit",NativeUiStateDiagnostics.DefaultRendererLimit,"Explicit native UI diagnostic renderer bound 1024..8192; default 1024. Identity-query occurrences are bounded to eight times this limit. Validated only when CaptureNativeUiState and CaptureImages are enabled.").Value;
             nativeUiRendererLimit=NativeUiStateDiagnostics.ResolveRendererLimit(captureNativeUiState,capturesEnabled,nativeUiRendererLimit);
+            captureUiGraphicDetails=Config.Bind("Diagnostics","CaptureUiGraphicDetails",false,"Additional bounded geometry/asset identity observations on already admitted borrowed UI renderers. Requires CaptureImages, CaptureNativeUiState and a pre-pair request; no draw attribution or rendering writes.").Value && captureNativeUiState;
             compareHierarchyInventory=Config.Bind("Diagnostics","CompareHierarchyInventory",false,"Diagnostic only: permit at most two explicitly requested sequential Resources-versus-scene hierarchy comparisons before an eye pair. Requires CaptureImages and controller session identity; does not replace layer guards.").Value && capturesEnabled;
             allowEngineInputExperiment=Config.Bind("Diagnostics","AllowEngineInputExperiment",false,"Explicitly allow at most two fixed E 500ms synthetic engine keyboard experiments per session. Requires CaptureImages; this is not physical forwarding or gameplay gate evidence.").Value && capturesEnabled;
             bool allowGamepad=Config.Bind("Input","AllowOpenVrGamepadDiagnostic",false,"Explicit code activation for one bounded owned InputSystem gamepad experiment per launch. Never changes physical keyboard state; game consumption requires observation.").Value;
@@ -543,7 +545,7 @@ public class Injector : BaseUnityPlugin
             cameraPoseAdmissionError=poseRequests.LastError;
             if(!String.IsNullOrEmpty(cameraPoseAdmissionError)) Logger.LogWarning("CAMERA_POSE_CAPTURE_ADMISSION "+cameraPoseAdmissionError+"; request retained, image capture deferred.");
         }
-        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureAdmission.CaptureNativeUiState,nativeUiRendererLimit,panelClipping):null;
+        OverlayCanvasScope overlays=captureOverlayCanvases?new OverlayCanvasScope(camera,unitsPerMeter,overlayPlaneMeters,includeOverlayLayers,overlayWidthMeters,captureLayoutInputs,layoutInputRootRectIds,captureAdmission.CaptureNativeUiState,nativeUiRendererLimit,panelClipping,captureUiGraphicDetails):null;
         if(guardedFailure!=null)guardedFailure.Bind(null,overlays);
         if(overlays!=null && capturesEnabled) overlays.EnableWallTiming();
         if(overlays!=null) overlays.SetDesktopLayoutFlush(desktopFlush);
