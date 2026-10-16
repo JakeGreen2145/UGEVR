@@ -65,8 +65,26 @@ async Task<(string Directory, int Code, string Output)> Launch(string mode, para
 }
 try
 {
+    // Invoke the actual supplied controller's production predicate. This keeps the
+    // waiting/ready timing window deterministic without sleeps or a test-only gate.
+    var launchReadyMethod = System.Reflection.Assembly.LoadFrom(controller).GetType("UGEVR.Controller.Program")!.GetMethod("LaunchReady", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+    bool LaunchReady(Dictionary<string,string> view) => (bool)launchReadyMethod.Invoke(null,new object[]{view})!;
+    var observedRace = new Dictionary<string,string> { ["state"]="waiting_for_injector", ["engine_ready"]="true", ["runtime_ready"]="true", ["rendering_active"]="true", ["injector_status"]="fresh", ["process_alive"]="true", ["submitted_pairs"]="51", ["initialization_error"]="", ["injector_error"]="", ["last_error"]="", ["stream_ready"]="false" };
+    Require(!LaunchReady(observedRace) && observedRace["state"]=="waiting_for_injector", "fresh native-ready v6 snapshot cannot complete launch before durable active acknowledgment");
+    foreach(string state in new[]{"preparing","failed","stopping","stopped","unknown"})
+    {
+        var snapshot=new Dictionary<string,string>(observedRace) { ["state"]=state };
+        Require(!LaunchReady(snapshot) && snapshot["state"]==state, "ready flags neither complete launch nor promote durable "+state+" state");
+    }
+    var active=new Dictionary<string,string>(observedRace) { ["state"]="active" };
+    Require(LaunchReady(active) && active["stream_ready"]=="false", "durable active plus engine/runtime readiness admits launch without inventing stream readiness");
+    foreach(var flags in new[]{new[]{"false","true"},new[]{"true","false"},new[]{"false","false"}})
+    {
+        var snapshot=new Dictionary<string,string>(active) { ["engine_ready"]=flags[0], ["runtime_ready"]=flags[1] };
+        Require(!LaunchReady(snapshot), "durable active cannot substitute for missing engine/runtime readiness "+flags[0]+"/"+flags[1]);
+    }
     var good = await Launch("good", "--steam-app-id", "753640");
-    Require(good.Code == 0 && Field(good.Output, "engine_ready", "true") && Field(good.Output, "runtime_ready", "true"), "launch requires correct live handshake");
+    Require(good.Code == 0 && Field(good.Output, "state", "active") && Field(good.Output, "engine_ready", "true") && Field(good.Output, "runtime_ready", "true"), "launch requires correct live handshake and durable active state in its returned receipt");
     Require(Field(good.Output, "stream_ready", "false"), "runtime readiness does not imply stream readiness");
     Require(File.ReadAllText(Path.Combine(good.Directory, "child-environment.txt")) == "753640\n753640", "Steam application identity is scoped to the child environment");
     Require(Environment.GetEnvironmentVariable("SteamAppId") == "65535" && Environment.GetEnvironmentVariable("SteamGameId") == "65536", "child Steam override preserves inherited caller environment");

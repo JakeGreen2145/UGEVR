@@ -81,11 +81,11 @@ internal static class Program
             while (DateTime.UtcNow < deadline)
             {
                 Cancellation.Token.ThrowIfCancellationRequested();
-                var session = ReadSession(directory); var view = View(directory);
+                var view = View(directory);
                 if (view.GetValueOrDefault("failure_kind") == "initialization")
                 { view["operation_result"] = "initialization_failed"; FlatYaml.Print(view); return 3; }
-                if (session["state"] is "failed" or "stopped") { FlatYaml.Print(view); return 3; }
-                if (view["runtime_ready"] == "true" && view["engine_ready"] == "true") { FlatYaml.Print(view); return 0; }
+                if (view["state"] is "failed" or "stopped") { FlatYaml.Print(view); return 3; }
+                if (LaunchReady(view)) { FlatYaml.Print(view); return 0; }
                 await Task.Delay(100, Cancellation.Token);
             }
             var pending = View(directory); pending["operation_result"] = "readiness_timeout";
@@ -97,6 +97,11 @@ internal static class Program
             throw;
         }
     }
+    // Live injector flags can become ready before the supervisor persists active.
+    // Decide and print from one view; status never promotes durable session state.
+    private static bool LaunchReady(Dictionary<string,string> view) =>
+        view.GetValueOrDefault("state") == "active" && view.GetValueOrDefault("engine_ready") == "true" && view.GetValueOrDefault("runtime_ready") == "true";
+
     private static ProcessStartInfo SelfStart()
     {
         var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Cannot locate controller runtime.");
